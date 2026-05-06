@@ -234,6 +234,10 @@ export function useEventsFeed({
   const [filters, setFilters] = useState<EventsFeedFilters>(initialFilters);
   const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange);
   const [isStreaming, setIsStreaming] = useState(false);
+  // Tracks whether the user has explicitly paused streaming so the
+  // auto-start / post-filter-restart effects don't immediately reopen the
+  // stream the user just closed.
+  const [userPaused, setUserPaused] = useState(false);
   const [newEventsCount, setNewEventsCount] = useState(0);
 
   // Track the latest resource version for watch resume
@@ -343,6 +347,9 @@ export function useEventsFeed({
       return;
     }
 
+    // Explicit start clears the user-paused flag.
+    setUserPaused(false);
+
     const params = buildWatchParams();
     const { stop } = client.watchEvents(params, {
       resourceVersion: resourceVersionRef.current,
@@ -364,8 +371,10 @@ export function useEventsFeed({
     setNewEventsCount(0);
   }, [client, buildWatchParams, handleWatchEvent]);
 
-  // Stop watching
+  // Stop watching. Marks the user as paused so the auto-start effects
+  // below don't immediately re-open the stream this call just closed.
   const stopStreaming = useCallback(() => {
+    setUserPaused(true);
     setIsStreaming(false);
     if (watchStopRef.current) {
       watchStopRef.current();
@@ -547,18 +556,29 @@ export function useEventsFeed({
     };
   }, [filters, timeRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-start streaming after initial load when enabled
+  // Auto-start streaming after initial load when enabled. Skipped when the
+  // user has explicitly paused — otherwise clicking Pause would be
+  // immediately undone.
   useEffect(() => {
-    if (enableStreaming && autoStartStreaming && events.length > 0 && !isStreaming && !isLoading) {
+    if (
+      enableStreaming &&
+      autoStartStreaming &&
+      !userPaused &&
+      events.length > 0 &&
+      !isStreaming &&
+      !isLoading
+    ) {
       startStreaming();
     }
-  }, [enableStreaming, autoStartStreaming, events.length, isStreaming, isLoading, startStreaming]);
+  }, [enableStreaming, autoStartStreaming, userPaused, events.length, isStreaming, isLoading, startStreaming]);
 
-  // Restart streaming after filter change refresh completes
+  // Restart streaming after filter change refresh completes. Also skipped
+  // when paused.
   useEffect(() => {
     if (
       enableStreaming &&
       shouldRestartStreamingRef.current &&
+      !userPaused &&
       events.length > 0 &&
       !isStreaming &&
       !isLoading
@@ -566,7 +586,7 @@ export function useEventsFeed({
       shouldRestartStreamingRef.current = false;
       startStreaming();
     }
-  }, [enableStreaming, events.length, isStreaming, isLoading, startStreaming]);
+  }, [enableStreaming, userPaused, events.length, isStreaming, isLoading, startStreaming]);
 
   // Cleanup on unmount
   useEffect(() => {

@@ -6,9 +6,9 @@ import { ActivityFeedItem } from './ActivityFeedItem';
 import { AuditLogFeedItem } from './AuditLogFeedItem';
 import { EventFeedItem } from './EventFeedItem';
 import { cn } from '../lib/utils';
-import { Card, CardContent } from './ui/card';
+import { Card, CardContent } from '@datum-cloud/datum-ui/card';
 import { Badge } from './ui/badge';
-import { Alert, AlertDescription } from './ui/alert';
+import { Alert, AlertDescription } from '@datum-cloud/datum-ui/alert';
 import { AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 
 export interface PolicyPreviewResultProps {

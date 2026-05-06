@@ -331,7 +331,7 @@ export function SampleInputTemplates({
           <button
             key={template.name}
             type="button"
-            className="px-2.5 py-1 bg-background border border-input rounded text-xs text-foreground transition-all duration-200 hover:bg-[#E6F59F] hover:border-[#E6F59F] cursor-pointer"
+            className="px-2.5 py-1 bg-background border border-input rounded text-xs text-foreground transition-all duration-200 hover:bg-primary/10 hover:border-primary cursor-pointer"
             onClick={() => onSelect(template.input)}
             title={template.description}
           >

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { formatISO, subDays } from 'date-fns';
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 
 import type { EventsFeedFilters as FilterState } from '../hooks/useEventsFeed';
 import type { TimeRange } from '../hooks/useEventsFeed';
@@ -10,7 +10,7 @@ import { EventTypeToggle, EventTypeOption } from './EventTypeToggle';
 import { TimeRangeDropdown } from './ui/time-range-dropdown';
 import { FilterChip } from './ui/filter-chip';
 import { AddFilterDropdown, type FilterOption } from './ui/add-filter-dropdown';
-import { Input } from './ui/input';
+import { Input } from '@datum-cloud/datum-ui/input';
 
 export interface EventsFeedFiltersProps {
   /** API client instance for fetching facets */
@@ -336,7 +336,7 @@ export function EventsFeedFilters({
   );
 
   return (
-    <div className={`mb-3 pb-3 border-b border-border pr-2 ${className}`}>
+    <div className={`border-b border-border py-4 ${className}`}>
       <div className="flex flex-wrap gap-2 items-center">
         {/* Event Type Toggle */}
         {!hiddenFilters.includes('eventType') && (
@@ -347,7 +347,7 @@ export function EventsFeedFilters({
           />
         )}
 
-        {/* Search Input */}
+        {/* Search Input — matches ActivityFeed search styling. */}
         <div className="relative min-w-[200px] flex-1 max-w-xs">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -356,8 +356,18 @@ export function EventsFeedFilters({
             value={filters.search || ''}
             onChange={handleSearchChange}
             disabled={disabled}
-            className="pl-8 h-7 text-xs"
+            className="pl-8 h-7 text-xs pr-6"
           />
+          {filters.search ? (
+            <button
+              type="button"
+              onClick={() => onFiltersChange({ ...filters, search: undefined })}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
         </div>
 
         {/* Active Filter Chips */}

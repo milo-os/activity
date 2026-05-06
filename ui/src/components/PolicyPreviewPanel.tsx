@@ -5,9 +5,9 @@ import type {
 import type { ResourceRef } from '../types/activity';
 import { PolicyPreviewResult } from './PolicyPreviewResult';
 import { cn } from '../lib/utils';
-import { Card, CardContent } from './ui/card';
-import { Button } from './ui/button';
-import { Alert, AlertDescription } from './ui/alert';
+import { Card, CardContent } from '@datum-cloud/datum-ui/card';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { Alert, AlertDescription } from '@datum-cloud/datum-ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
 export interface PolicyPreviewPanelProps {
@@ -50,8 +50,8 @@ export function PolicyPreviewPanel({
             Preview the activity timeline for recent resource changes.
           </p>
           <Button
-            variant="outline"
-            size="sm"
+            type="tertiary" theme="outline"
+            size="small"
             onClick={onRunPreview}
             disabled={isLoading}
             className="h-7 text-xs"

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import type { ActivityPolicyRule } from '../types/policy';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader } from './ui/card';
-import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { Card, CardContent, CardHeader } from '@datum-cloud/datum-ui/card';
+import { Label } from '@datum-cloud/datum-ui/label';
+import { Textarea } from '@datum-cloud/datum-ui/textarea';
 
 export interface PolicyRuleEditorProps {
   /** The rule being edited */
@@ -133,8 +133,8 @@ export function PolicyRuleEditor({
           {ruleType === 'audit' ? 'Audit' : 'Event'} Rule #{index + 1}
         </span>
         <Button
-          type="button"
-          variant="ghost"
+          htmlType="button"
+          type="quaternary" theme="borderless"
           size="icon"
           className="w-6 h-6 text-xl leading-none text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 dark:hover:text-red-400"
           onClick={onDelete}
@@ -152,9 +152,9 @@ export function PolicyRuleEditor({
               Match Expression (CEL)
             </Label>
             <Button
-              type="button"
-              variant="outline"
-              size="sm"
+              htmlType="button"
+              type="tertiary" theme="outline"
+              size="small"
               className="px-2 py-0.5 h-auto text-xs"
               onClick={() => setShowMatchHelp(!showMatchHelp)}
             >
@@ -189,9 +189,9 @@ export function PolicyRuleEditor({
                     <li key={i} className="flex items-center gap-2 mb-1 px-2 py-1 bg-muted rounded">
                       <code className="flex-1 text-xs break-all">{ex}</code>
                       <Button
-                        type="button"
-                        size="sm"
-                        className="px-2 py-0.5 h-auto bg-[#E6F59F] border-none text-xs font-medium text-[#0C1D31] uppercase hover:bg-[#d9e88c]"
+                        htmlType="button"
+                        size="small"
+                        className="px-2 py-0.5 h-auto bg-primary text-primary-foreground border-none text-xs font-medium uppercase hover:bg-primary/90"
                         onClick={() => insertMatchExample(ex)}
                       >
                         Use
@@ -211,9 +211,9 @@ export function PolicyRuleEditor({
               Summary Template (CEL)
             </Label>
             <Button
-              type="button"
-              variant="outline"
-              size="sm"
+              htmlType="button"
+              type="tertiary" theme="outline"
+              size="small"
               className="px-2 py-0.5 h-auto text-xs"
               onClick={() => setShowSummaryHelp(!showSummaryHelp)}
             >
@@ -248,9 +248,9 @@ export function PolicyRuleEditor({
                     <li key={i} className="flex items-center gap-2 mb-1 px-2 py-1 bg-muted rounded">
                       <code className="flex-1 text-xs break-all">{ex}</code>
                       <Button
-                        type="button"
-                        size="sm"
-                        className="px-2 py-0.5 h-auto bg-[#E6F59F] border-none text-xs font-medium text-[#0C1D31] uppercase hover:bg-[#d9e88c]"
+                        htmlType="button"
+                        size="small"
+                        className="px-2 py-0.5 h-auto bg-primary text-primary-foreground border-none text-xs font-medium uppercase hover:bg-primary/90"
                         onClick={() => insertSummaryExample(ex)}
                       >
                         Use

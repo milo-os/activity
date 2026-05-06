@@ -202,6 +202,11 @@ export function useActivityFeed({
   const [filters, setFilters] = useState<ActivityFeedFilters>(initialFilters);
   const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange);
   const [isStreaming, setIsStreaming] = useState(false);
+  // Tracks whether the user has explicitly paused streaming. The
+  // auto-start and post-filter-restart effects below respect this flag so
+  // they don't immediately re-open the watch the user just closed. Cleared
+  // when the user clicks Resume.
+  const [userPaused, setUserPaused] = useState(false);
   const [newActivitiesCount, setNewActivitiesCount] = useState(0);
   const [effectiveTimeRange, setEffectiveTimeRange] = useState<EffectiveTimeRange | undefined>();
 
@@ -387,6 +392,10 @@ export function useActivityFeed({
       return;
     }
 
+    // Explicit start clears the user-paused flag so the auto-restart
+    // effects can keep the stream alive after subsequent filter changes.
+    setUserPaused(false);
+
     // Clear any previous watch error when starting a new stream
     setWatchError(null);
 
@@ -413,8 +422,10 @@ export function useActivityFeed({
     setNewActivitiesCount(0);
   }, [client, buildWatchParams, handleWatchEvent]);
 
-  // Stop watching
+  // Stop watching. Marks the user as paused so the auto-start effects
+  // below don't immediately re-open the stream this call just closed.
   const stopStreaming = useCallback(() => {
+    setUserPaused(true);
     setIsStreaming(false);
     if (watchStopRef.current) {
       watchStopRef.current();
@@ -601,18 +612,30 @@ export function useActivityFeed({
     };
   }, [filters, timeRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-start streaming after initial load when enabled
+  // Auto-start streaming after initial load when enabled. Skipped when
+  // the user has explicitly paused — otherwise clicking Pause would be
+  // immediately undone by this effect on the next render.
   useEffect(() => {
-    if (enableStreaming && autoStartStreaming && activities.length > 0 && !isStreaming && !isLoading) {
+    if (
+      enableStreaming &&
+      autoStartStreaming &&
+      !userPaused &&
+      activities.length > 0 &&
+      !isStreaming &&
+      !isLoading
+    ) {
       startStreaming();
     }
-  }, [enableStreaming, autoStartStreaming, activities.length, isStreaming, isLoading, startStreaming]);
+  }, [enableStreaming, autoStartStreaming, userPaused, activities.length, isStreaming, isLoading, startStreaming]);
 
-  // Restart streaming after filter change refresh completes
+  // Restart streaming after filter change refresh completes. Also skipped
+  // when the user has paused — a filter change shouldn't silently resume
+  // a stream the user intentionally stopped.
   useEffect(() => {
     if (
       enableStreaming &&
       shouldRestartStreamingRef.current &&
+      !userPaused &&
       activities.length > 0 &&
       !isStreaming &&
       !isLoading
@@ -620,7 +643,7 @@ export function useActivityFeed({
       shouldRestartStreamingRef.current = false;
       startStreaming();
     }
-  }, [enableStreaming, activities.length, isStreaming, isLoading, startStreaming]);
+  }, [enableStreaming, userPaused, activities.length, isStreaming, isLoading, startStreaming]);
 
   // Cleanup on unmount
   useEffect(() => {

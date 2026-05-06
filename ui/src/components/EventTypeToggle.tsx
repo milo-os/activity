@@ -1,4 +1,4 @@
-import { Button } from './ui/button';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { cn } from '../lib/utils';
 import type { K8sEventType } from '../types/k8s-event';
 
@@ -51,26 +51,29 @@ export function EventTypeToggle({
       role="group"
       aria-label="Filter by event type"
     >
-      {OPTIONS.map((option, index) => (
-        <Button
-          key={option.value}
-          type="button"
-          variant="ghost"
-          className={cn(
-            'rounded-none px-2 h-7 text-xs font-medium transition-all duration-200',
-            index < OPTIONS.length - 1 && 'border-r border-input',
-            value === option.value
-              ? 'bg-[#BF9595] text-[#0C1D31] hover:bg-[#BF9595]/90'
-              : 'bg-muted text-foreground hover:bg-muted/80'
-          )}
-          onClick={() => onChange(option.value)}
-          disabled={disabled}
-          aria-pressed={value === option.value}
-          title={option.description}
-        >
-          {option.label}
-        </Button>
-      ))}
+      {OPTIONS.map((option, index) => {
+        const active = value === option.value;
+        return (
+          <Button
+            key={option.value}
+            htmlType="button"
+            type={active ? 'primary' : 'quaternary'}
+            theme={active ? 'solid' : 'borderless'}
+            className={cn(
+              'px-2 h-7 text-xs font-medium transition-all duration-200',
+              index < OPTIONS.length - 1 && 'border-r border-input',
+              !active && 'bg-muted text-foreground hover:bg-muted/80'
+            )}
+            style={active ? { borderRadius: 0, border: 0 } : { borderRadius: 0 }}
+            onClick={() => onChange(option.value)}
+            disabled={disabled}
+            aria-pressed={active}
+            title={option.description}
+          >
+            {option.label}
+          </Button>
+        );
+      })}
     </div>
   );
 }

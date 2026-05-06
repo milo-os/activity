@@ -14,8 +14,6 @@ COPY package.json ./
 # Copy library config files
 COPY tsconfig.json ./
 COPY rollup.config.mjs ./
-COPY tailwind.config.js ./
-COPY postcss.config.js ./
 
 # Copy source files for the library
 COPY src/ ./src/

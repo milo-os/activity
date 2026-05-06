@@ -1,48 +1,40 @@
-import { Card } from './ui/card';
-import { Skeleton } from './ui/skeleton';
+import { Skeleton } from '@datum-cloud/datum-ui/skeleton';
 import { cn } from '../lib/utils';
 
 export interface ActivityFeedItemSkeletonProps {
   /** Whether to show as compact (for resource detail tabs) */
   compact?: boolean;
+  /** Whether this is the last item in the list (hides bottom border) */
+  isLast?: boolean;
   /** Additional CSS class */
   className?: string;
 }
 
 /**
- * ActivityFeedItemSkeleton renders a loading placeholder that matches ActivityFeedItem layout
+ * Loading placeholder that mirrors the rendered shape of an
+ * ActivityFeedItem in `variant="timeline"` mode: an action-icon square +
+ * summary + tenant badge + timestamp + expand toggle, separated by the
+ * same bottom border the live row uses.
  */
 export function ActivityFeedItemSkeleton({
   compact = false,
+  isLast = false,
   className = '',
 }: ActivityFeedItemSkeletonProps) {
   return (
-    <Card
-      className={cn(
-        compact ? 'p-2 mb-1.5' : 'p-2.5 mb-2',
-        className
-      )}
-    >
-      {/* Single row layout */}
-      <div className="flex items-center gap-2">
-        {/* Actor Avatar skeleton */}
-        <Skeleton className={cn(
-          'rounded-full shrink-0',
-          compact ? 'w-3.5 h-3.5' : 'w-4 h-4'
-        )} />
-
-        {/* Summary skeleton - takes remaining space */}
-        <Skeleton className="h-3 flex-1 min-w-0" />
-
-        {/* Tenant badge skeleton */}
-        <Skeleton className="h-4 w-16 shrink-0" />
-
-        {/* Timestamp skeleton */}
-        <Skeleton className="h-3 w-16 shrink-0" />
-
-        {/* Expand button skeleton */}
+    <div className={cn(!isLast && 'border-b border-border', className)}>
+      <div className={cn('flex items-center gap-3', compact ? 'py-2' : 'py-3')}>
+        {/* Action icon square */}
+        <Skeleton className="w-8 h-8 rounded-md shrink-0" />
+        {/* Summary text */}
+        <Skeleton className="h-4 flex-1 min-w-0" />
+        {/* Tenant badge */}
+        <Skeleton className="h-5 w-28 shrink-0 rounded-full" />
+        {/* Timestamp */}
+        <Skeleton className="h-4 w-24 shrink-0" />
+        {/* Expand toggle */}
         <Skeleton className="h-5 w-5 shrink-0" />
       </div>
-    </Card>
+    </div>
   );
 }

@@ -1,16 +1,16 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { formatISO, subDays } from 'date-fns';
-import { Search, X } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { formatISO, subDays } from "date-fns";
+import { Search, X } from "lucide-react";
 
-import type { ActivityFeedFilters as FilterState } from '../hooks/useActivityFeed';
-import type { TimeRange } from '../hooks/useActivityFeed';
-import type { ActivityApiClient } from '../api/client';
-import { useFacets } from '../hooks/useFacets';
-import { ChangeSourceToggle, ChangeSourceOption } from './ChangeSourceToggle';
-import { TimeRangeDropdown } from './ui/time-range-dropdown';
-import { FilterChip } from './ui/filter-chip';
-import { AddFilterDropdown, type FilterOption } from './ui/add-filter-dropdown';
-import { Input } from './ui/input';
+import type { ActivityFeedFilters as FilterState } from "../hooks/useActivityFeed";
+import type { TimeRange } from "../hooks/useActivityFeed";
+import type { ActivityApiClient } from "../api/client";
+import { useFacets } from "../hooks/useFacets";
+import { ChangeSourceToggle, ChangeSourceOption } from "./ChangeSourceToggle";
+import { TimeRangeDropdown } from "./ui/time-range-dropdown";
+import { FilterChip } from "./ui/filter-chip";
+import { AddFilterDropdown, type FilterOption } from "./ui/add-filter-dropdown";
+import { Input } from "@datum-cloud/datum-ui/input";
 
 export interface ActivityFeedFiltersProps {
   /** API client instance for fetching facets */
@@ -26,7 +26,15 @@ export interface ActivityFeedFiltersProps {
   /** Whether the filters are disabled (e.g., during loading) */
   disabled?: boolean;
   /** Filters that should be locked and hidden from the UI (programmatically set by parent) */
-  hiddenFilters?: Array<'resourceKinds' | 'actorNames' | 'apiGroups' | 'resourceNamespaces' | 'resourceName' | 'actions' | 'changeSource'>;
+  hiddenFilters?: Array<
+    | "resourceKinds"
+    | "actorNames"
+    | "apiGroups"
+    | "resourceNamespaces"
+    | "resourceName"
+    | "actions"
+    | "changeSource"
+  >;
   /** Additional CSS class */
   className?: string;
 }
@@ -35,61 +43,67 @@ export interface ActivityFeedFiltersProps {
  * Preset time ranges
  */
 const TIME_PRESETS = [
-  { key: 'now-1h', label: 'Last hour' },
-  { key: 'now-24h', label: 'Last 24 hours' },
-  { key: 'now-7d', label: 'Last 7 days' },
-  { key: 'now-30d', label: 'Last 30 days' },
+  { key: "now-1h", label: "Last hour" },
+  { key: "now-24h", label: "Last 24 hours" },
+  { key: "now-7d", label: "Last 7 days" },
+  { key: "now-30d", label: "Last 30 days" },
 ];
 
 /**
  * Filter configuration registry
  */
-type FilterId = 'resourceKinds' | 'actorNames' | 'apiGroups' | 'resourceNamespaces' | 'resourceName' | 'actions';
+type FilterId =
+  | "resourceKinds"
+  | "actorNames"
+  | "apiGroups"
+  | "resourceNamespaces"
+  | "resourceName"
+  | "actions";
 
 interface FilterConfig {
   id: FilterId;
   label: string;
-  inputMode: 'typeahead' | 'text';
+  inputMode: "typeahead" | "text";
   placeholder?: string;
   searchPlaceholder?: string;
 }
 
 const FILTER_CONFIGS: Record<FilterId, FilterConfig> = {
   resourceKinds: {
-    id: 'resourceKinds',
-    label: 'Kind',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search kinds...',
+    id: "resourceKinds",
+    label: "Kind",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search kinds...",
   },
   actorNames: {
-    id: 'actorNames',
-    label: 'Actor',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search actors...',
+    id: "actorNames",
+    label: "Actor",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search actors...",
   },
   apiGroups: {
-    id: 'apiGroups',
-    label: 'API Group',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search API groups...',
+    id: "apiGroups",
+    label: "API Group",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search API groups...",
   },
   resourceNamespaces: {
-    id: 'resourceNamespaces',
-    label: 'Namespace',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search namespaces...',
+    id: "resourceNamespaces",
+    label: "Namespace",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search namespaces...",
   },
   resourceName: {
-    id: 'resourceName',
-    label: 'Resource Name',
-    inputMode: 'text',
-    placeholder: 'Enter resource name...',
+    id: "resourceName",
+    label: "Resource Name",
+    inputMode: "text",
+    placeholder: "Enter resource name...",
   },
   actions: {
-    id: 'actions',
-    label: 'Action',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search actions...',
+    id: "actions",
+    label: "Action",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search actions...",
   },
 };
 
@@ -99,10 +113,10 @@ const FILTER_CONFIGS: Record<FilterId, FilterConfig> = {
 const formatDatetimeLocal = (isoString: string): string => {
   const date = new Date(isoString);
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
@@ -111,7 +125,7 @@ const formatDatetimeLocal = (isoString: string): string => {
  */
 const getSelectedPreset = (timeRange: TimeRange): string => {
   const preset = TIME_PRESETS.find((p) => timeRange.start === p.key);
-  return preset ? preset.key : 'custom';
+  return preset ? preset.key : "custom";
 };
 
 /**
@@ -125,13 +139,19 @@ export function ActivityFeedFilters({
   onTimeRangeChange,
   disabled = false,
   hiddenFilters = [],
-  className = '',
+  className = "",
 }: ActivityFeedFiltersProps) {
-  const { resourceKinds, actorNames, apiGroups, resourceNamespaces, error: facetsError } = useFacets(client, timeRange, filters);
+  const {
+    resourceKinds,
+    actorNames,
+    apiGroups,
+    resourceNamespaces,
+    error: facetsError,
+  } = useFacets(client, timeRange, filters);
 
   // Log facets error for debugging
   if (facetsError) {
-    console.error('Failed to load facets:', facetsError);
+    console.error("Failed to load facets:", facetsError);
   }
 
   // Track which filter was just added to auto-open it
@@ -140,13 +160,13 @@ export function ActivityFeedFilters({
   // Custom time range state
   const selectedPreset = getSelectedPreset(timeRange);
   const [customStart, setCustomStart] = useState(() => {
-    if (selectedPreset === 'custom') {
+    if (selectedPreset === "custom") {
       return formatDatetimeLocal(timeRange.start);
     }
     return formatDatetimeLocal(formatISO(subDays(new Date(), 1)));
   });
   const [customEnd, setCustomEnd] = useState(() => {
-    if (selectedPreset === 'custom' && timeRange.end) {
+    if (selectedPreset === "custom" && timeRange.end) {
       return formatDatetimeLocal(timeRange.end);
     }
     return formatDatetimeLocal(formatISO(new Date()));
@@ -160,7 +180,7 @@ export function ActivityFeedFilters({
         changeSource: value,
       });
     },
-    [filters, onFiltersChange]
+    [filters, onFiltersChange],
   );
 
   // Handle time range preset selection
@@ -171,7 +191,7 @@ export function ActivityFeedFilters({
         end: undefined,
       });
     },
-    [onTimeRangeChange]
+    [onTimeRangeChange],
   );
 
   // Handle custom time range apply
@@ -184,37 +204,59 @@ export function ActivityFeedFilters({
         end: new Date(end).toISOString(),
       });
     },
-    [onTimeRangeChange]
+    [onTimeRangeChange],
   );
 
   // Get display label for time range
   const getTimeRangeLabel = () => {
     const preset = TIME_PRESETS.find((p) => p.key === selectedPreset);
     if (preset) return preset.label;
-    if (selectedPreset === 'custom' && timeRange.start && timeRange.end) {
+    if (selectedPreset === "custom" && timeRange.start && timeRange.end) {
       const start = new Date(timeRange.start);
       const end = new Date(timeRange.end);
       return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
     }
-    return 'Select time range';
+    return "Select time range";
   };
 
   // Determine which filters are currently active (have values) and not hidden
   const filtersWithValues = useMemo<FilterId[]>(() => {
     const result: FilterId[] = [];
-    if (filters.resourceKinds && filters.resourceKinds.length > 0 && !hiddenFilters.includes('resourceKinds')) result.push('resourceKinds');
-    if (filters.actorNames && filters.actorNames.length > 0 && !hiddenFilters.includes('actorNames')) result.push('actorNames');
-    if (filters.apiGroups && filters.apiGroups.length > 0 && !hiddenFilters.includes('apiGroups')) result.push('apiGroups');
-    if (filters.resourceNamespaces && filters.resourceNamespaces.length > 0 && !hiddenFilters.includes('resourceNamespaces')) result.push('resourceNamespaces');
-    if (filters.resourceName && !hiddenFilters.includes('resourceName')) result.push('resourceName');
-    if (filters.actions && filters.actions.length > 0) result.push('actions');
+    if (
+      filters.resourceKinds &&
+      filters.resourceKinds.length > 0 &&
+      !hiddenFilters.includes("resourceKinds")
+    )
+      result.push("resourceKinds");
+    if (
+      filters.actorNames &&
+      filters.actorNames.length > 0 &&
+      !hiddenFilters.includes("actorNames")
+    )
+      result.push("actorNames");
+    if (
+      filters.apiGroups &&
+      filters.apiGroups.length > 0 &&
+      !hiddenFilters.includes("apiGroups")
+    )
+      result.push("apiGroups");
+    if (
+      filters.resourceNamespaces &&
+      filters.resourceNamespaces.length > 0 &&
+      !hiddenFilters.includes("resourceNamespaces")
+    )
+      result.push("resourceNamespaces");
+    if (filters.resourceName && !hiddenFilters.includes("resourceName"))
+      result.push("resourceName");
+    if (filters.actions && filters.actions.length > 0) result.push("actions");
     return result;
   }, [filters, hiddenFilters]);
 
   // Include pendingFilter (newly added filter awaiting value selection) in the displayed filters
-  const activeFilterIds: FilterId[] = pendingFilter && !filtersWithValues.includes(pendingFilter)
-    ? [...filtersWithValues, pendingFilter]
-    : filtersWithValues;
+  const activeFilterIds: FilterId[] =
+    pendingFilter && !filtersWithValues.includes(pendingFilter)
+      ? [...filtersWithValues, pendingFilter]
+      : filtersWithValues;
 
   // Clear pending filter when filter values change (user selected something)
   useEffect(() => {
@@ -226,11 +268,11 @@ export function ActivityFeedFilters({
 
   // Build available filters list (exclude hidden filters)
   const availableFilters: FilterOption[] = [
-    { id: 'resourceKinds', label: 'Kind' },
-    { id: 'actorNames', label: 'Actor' },
-    { id: 'apiGroups', label: 'API Group' },
-    { id: 'resourceNamespaces', label: 'Namespace' },
-    { id: 'resourceName', label: 'Resource Name' },
+    { id: "resourceKinds", label: "Kind" },
+    { id: "actorNames", label: "Actor" },
+    { id: "apiGroups", label: "API Group" },
+    { id: "resourceNamespaces", label: "Namespace" },
+    { id: "resourceName", label: "Resource Name" },
     // 'actions' hidden until backend facet support is available
   ].filter((filter) => !hiddenFilters.includes(filter.id as FilterId));
 
@@ -245,7 +287,7 @@ export function ActivityFeedFilters({
       if (pendingFilter === filterId) {
         const hasValues = (() => {
           const value = filters[filterId];
-          if (filterId === 'resourceName') return !!value;
+          if (filterId === "resourceName") return !!value;
           return Array.isArray(value) && value.length > 0;
         })();
         if (!hasValues) {
@@ -253,7 +295,7 @@ export function ActivityFeedFilters({
         }
       }
     },
-    [pendingFilter, filters]
+    [pendingFilter, filters],
   );
 
   // Handle filter value changes
@@ -264,7 +306,7 @@ export function ActivityFeedFilters({
         [filterId]: values.length > 0 ? values : undefined,
       });
     },
-    [filters, onFiltersChange]
+    [filters, onFiltersChange],
   );
 
   // Handle filter clear
@@ -275,13 +317,13 @@ export function ActivityFeedFilters({
         [filterId]: undefined,
       });
     },
-    [filters, onFiltersChange]
+    [filters, onFiltersChange],
   );
 
   // Get options for a specific filter
   const getFilterOptions = (filterId: FilterId) => {
     switch (filterId) {
-      case 'resourceKinds':
+      case "resourceKinds":
         return resourceKinds
           .filter((facet) => facet.value)
           .map((facet) => ({
@@ -289,7 +331,7 @@ export function ActivityFeedFilters({
             label: facet.value,
             count: facet.count,
           }));
-      case 'actorNames':
+      case "actorNames":
         return actorNames
           .filter((facet) => facet.value)
           .map((facet) => ({
@@ -297,7 +339,7 @@ export function ActivityFeedFilters({
             label: facet.value,
             count: facet.count,
           }));
-      case 'apiGroups':
+      case "apiGroups":
         return apiGroups
           .filter((facet) => facet.value)
           .map((facet) => ({
@@ -305,7 +347,7 @@ export function ActivityFeedFilters({
             label: facet.value,
             count: facet.count,
           }));
-      case 'resourceNamespaces':
+      case "resourceNamespaces":
         return resourceNamespaces
           .filter((facet) => facet.value)
           .map((facet) => ({
@@ -313,7 +355,7 @@ export function ActivityFeedFilters({
             label: facet.value,
             count: facet.count,
           }));
-      case 'actions':
+      case "actions":
         // TODO: Return action facets when backend supports it
         return [];
       default:
@@ -324,17 +366,19 @@ export function ActivityFeedFilters({
   // Get values for a specific filter
   const getFilterValues = (filterId: FilterId): string[] => {
     const value = filters[filterId];
-    if (filterId === 'resourceName') {
+    if (filterId === "resourceName") {
       return value ? [value as string] : [];
     }
-    if (filterId === 'actions') {
+    if (filterId === "actions") {
       return (value as string[] | undefined) || [];
     }
     return (value as string[] | undefined) || [];
   };
 
   // Local search value for debouncing — keeps input responsive while query runs
-  const [searchInputValue, setSearchInputValue] = useState(filters.search || '');
+  const [searchInputValue, setSearchInputValue] = useState(
+    filters.search || "",
+  );
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Use refs so the debounced callback never closes over stale values
   const filtersRef = useRef(filters);
@@ -349,28 +393,34 @@ export function ActivityFeedFilters({
     };
   }, []);
 
-  const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value;
-    setSearchInputValue(value);
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => {
-      onFiltersChangeRef.current({ ...filtersRef.current, search: value || undefined });
-    }, 400);
-  }, []);
+  const handleSearchChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value;
+      setSearchInputValue(value);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => {
+        onFiltersChangeRef.current({
+          ...filtersRef.current,
+          search: value || undefined,
+        });
+      }, 400);
+    },
+    [],
+  );
 
   const handleSearchClear = useCallback(() => {
-    setSearchInputValue('');
+    setSearchInputValue("");
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     onFiltersChangeRef.current({ ...filtersRef.current, search: undefined });
   }, []);
 
   return (
-    <div className={`mb-3 pb-3 border-b border-border p-4 ${className}`}>
+    <div className={`border-b border-border py-4 ${className}`}>
       <div className="flex flex-wrap gap-2 items-center">
         {/* Change Source Toggle */}
-        {!hiddenFilters.includes('changeSource') && (
+        {!hiddenFilters.includes("changeSource") && (
           <ChangeSourceToggle
-            value={filters.changeSource || 'all'}
+            value={filters.changeSource || "all"}
             onChange={handleChangeSourceChange}
             disabled={disabled}
           />
@@ -405,7 +455,11 @@ export function ActivityFeedFilters({
               key={filterId}
               label={config.label}
               values={getFilterValues(filterId)}
-              options={config.inputMode === 'typeahead' ? getFilterOptions(filterId) : undefined}
+              options={
+                config.inputMode === "typeahead"
+                  ? getFilterOptions(filterId)
+                  : undefined
+              }
               onValuesChange={(values) => handleFilterChange(filterId, values)}
               onClear={() => handleFilterClear(filterId)}
               onPopoverClose={() => handlePopoverClose(filterId)}

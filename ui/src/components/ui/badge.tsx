@@ -1,40 +1,49 @@
+// Adapter: maps the legacy shadcn-style `variant` prop used by activity-ui
+// call sites onto datum-ui's `type` + `theme` API.
 import * as React from 'react';
-import { cva, type VariantProps } from 'class-variance-authority';
+import { Badge as DUIBadge, badgeVariants as duiBadgeVariants } from '@datum-cloud/datum-ui/badge';
+import type { BadgeProps as DUIBadgeProps } from '@datum-cloud/datum-ui/badge';
 
-import { cn } from '../../lib/utils';
+type LegacyVariant =
+  | 'default'
+  | 'secondary'
+  | 'destructive'
+  | 'outline'
+  | 'success'
+  | 'warning';
 
-const badgeVariants = cva(
-  'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-  {
-    variants: {
-      variant: {
-        default:
-          'border-transparent bg-primary text-primary-foreground hover:bg-primary/80',
-        secondary:
-          'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        destructive:
-          'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80',
-        outline: 'text-foreground',
-        success:
-          'border-transparent bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300',
-        warning:
-          'border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
-    },
-  }
-);
-
-export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
-
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
-  );
+export interface BadgeProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'children'> {
+  variant?: LegacyVariant;
+  children?: React.ReactNode;
 }
+
+function mapVariant(variant: LegacyVariant | undefined): {
+  type: DUIBadgeProps['type'];
+  theme: DUIBadgeProps['theme'];
+} {
+  switch (variant) {
+    case 'destructive':
+      return { type: 'danger', theme: 'solid' };
+    case 'secondary':
+      return { type: 'secondary', theme: 'solid' };
+    case 'outline':
+      return { type: 'muted', theme: 'outline' };
+    case 'success':
+      return { type: 'success', theme: 'light' };
+    case 'warning':
+      return { type: 'warning', theme: 'light' };
+    case 'default':
+    case undefined:
+    default:
+      return { type: 'primary', theme: 'solid' };
+  }
+}
+
+function Badge({ variant, ...props }: BadgeProps) {
+  const { type, theme } = mapVariant(variant);
+  return <DUIBadge type={type} theme={theme} {...props} />;
+}
+
+const badgeVariants: typeof duiBadgeVariants = duiBadgeVariants;
 
 export { Badge, badgeVariants };

@@ -1,11 +1,17 @@
 import { useState } from 'react';
-import { format, formatDistanceToNow } from 'date-fns';
+import { Activity as ActivityIcon, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { Event } from '../types';
 import { AuditLogExpandedDetails } from './AuditLogExpandedDetails';
 import { cn } from '../lib/utils';
-import { Button } from './ui/button';
-import { Card } from './ui/card';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { Badge } from './ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { TableCell, TableRow } from '@datum-cloud/datum-ui/table';
+import { Timestamp } from './Timestamp';
+
+// Number of columns rendered for the audit log table. Used by the colSpan
+// on the expanded-detail row so it spans the full width.
+export const AUDIT_LOG_COLUMN_COUNT = 5;
 
 export interface AuditLogFeedItemProps {
   /** The audit event to render */
@@ -22,31 +28,10 @@ export interface AuditLogFeedItemProps {
   isNew?: boolean;
   /** Whether the item starts expanded */
   defaultExpanded?: boolean;
-}
-
-/**
- * Format timestamp for display
- */
-function formatTimestamp(timestamp?: string): string {
-  if (!timestamp) return 'Unknown time';
-  try {
-    const date = new Date(timestamp);
-    return formatDistanceToNow(date, { addSuffix: true });
-  } catch {
-    return timestamp;
-  }
-}
-
-/**
- * Format timestamp for tooltip (with timezone)
- */
-function formatTimestampFull(timestamp?: string): string {
-  if (!timestamp) return 'Unknown time';
-  try {
-    return format(new Date(timestamp), 'yyyy-MM-dd HH:mm:ss \'UTC\'');
-  } catch {
-    return timestamp;
-  }
+  /** Layout variant: 'feed' (table row, default) or 'timeline' (flat list row) */
+  variant?: 'feed' | 'timeline';
+  /** Whether this is the last item (only used in timeline variant) */
+  isLast?: boolean;
 }
 
 /**
@@ -116,6 +101,8 @@ export function AuditLogFeedItem({
   compact = false,
   isNew = false,
   defaultExpanded = false,
+  variant = 'feed',
+  isLast = false,
 }: AuditLogFeedItemProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
@@ -132,65 +119,172 @@ export function AuditLogFeedItem({
   const summary = buildAuditSummary(event);
   const statusIndicator = getResponseStatusIndicator(event.responseStatus?.code);
 
-  return (
-    <Card
-      className={cn(
-        'cursor-pointer transition-all duration-200',
-        'hover:border-gray-300 hover:shadow-sm hover:-translate-y-px dark:hover:border-gray-600',
-        compact ? 'p-2 mb-1.5' : 'p-2.5 mb-2',
-        isSelected && 'border-rose-300 bg-rose-50 shadow-md dark:border-rose-600 dark:bg-rose-950/50',
-        isNew && 'border-l-4 border-l-green-500 bg-green-50/50 dark:border-l-green-400 dark:bg-green-950/30',
-        className
-      )}
-      onClick={handleClick}
-    >
-      <div className="flex gap-2">
-        {/* Main Content */}
-        <div className="flex-1 min-w-0">
-          {/* Single row layout: Summary + Metadata + Timestamp + Expand */}
-          <div className="flex items-center gap-2">
-            {/* Summary - takes remaining space */}
-            <div className="text-xs text-foreground leading-snug flex-1 min-w-0 truncate" title={summary}>
-              {summary}
-            </div>
+  if (variant === 'timeline') {
+    const verb = event.verb?.toLowerCase() || '';
+    const Icon =
+      verb === 'create' ? Plus :
+      verb === 'delete' ? Trash2 :
+      verb === 'update' || verb === 'patch' ? Pencil :
+      ActivityIcon;
+    const iconBg =
+      verb === 'create' ? 'bg-green-50 dark:bg-green-950' :
+      verb === 'delete' ? 'bg-red-50 dark:bg-red-950' :
+      verb === 'update' || verb === 'patch' ? 'bg-amber-50 dark:bg-amber-950' :
+      'bg-slate-100 dark:bg-slate-800';
+    const iconColor =
+      verb === 'create' ? 'text-green-600 dark:text-green-400' :
+      verb === 'delete' ? 'text-red-500 dark:text-red-400' :
+      verb === 'update' || verb === 'patch' ? 'text-amber-600 dark:text-amber-400' :
+      'text-slate-500 dark:text-slate-400';
 
-            {/* Verb badge */}
-            <Badge className={getVerbBadgeClasses(event.verb)}>
-              {event.verb?.toUpperCase() || 'UNKNOWN'}
-            </Badge>
-
-            {/* Response status */}
-            <span className={cn('inline-flex items-center gap-1 text-[0.65rem] font-semibold shrink-0', statusIndicator.className)}>
-              <span>{statusIndicator.icon}</span>
-              {event.responseStatus?.code && (
-                <span>{event.responseStatus.code}</span>
-              )}
-            </span>
-
-            {/* Timestamp */}
-            <span
-              className="text-xs text-muted-foreground whitespace-nowrap shrink-0"
-              title={formatTimestampFull(timestamp)}
-            >
-              {formatTimestamp(timestamp)}
-            </span>
-
-            {/* Expand button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 py-0 px-1 text-base text-muted-foreground hover:text-foreground shrink-0"
-              onClick={toggleExpand}
-              aria-expanded={isExpanded}
-            >
-              {isExpanded ? '−' : '+'}
-            </Button>
+    return (
+      <div className={cn(!isLast && !isExpanded && 'border-b border-border', className)}>
+        <div
+          className={cn(
+            'flex items-center gap-3 cursor-pointer group',
+            compact ? 'py-2' : 'py-3',
+            isSelected && 'bg-muted/40'
+          )}
+          onClick={toggleExpand}
+        >
+          <div
+            className={cn(
+              'w-8 h-8 rounded-md shrink-0 flex items-center justify-center',
+              iconBg,
+              iconColor
+            )}
+            title={event.verb}
+          >
+            <Icon size={16} strokeWidth={2} />
           </div>
+          <div className="flex-1 min-w-0 text-sm leading-snug" style={{ minWidth: 0 }}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className="text-foreground"
+                  style={{
+                    display: 'block',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    cursor: 'help',
+                  }}
+                >
+                  {summary}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[480px] whitespace-normal break-words">
+                {summary}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 text-xs font-semibold shrink-0',
+              statusIndicator.className
+            )}
+          >
+            <span>{statusIndicator.icon}</span>
+            {event.responseStatus?.code ? <span>{event.responseStatus.code}</span> : null}
+          </span>
+          <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+            <Timestamp value={timestamp} />
+          </span>
+          <Button
+            type="quaternary"
+            theme="borderless"
+            size="small"
+            htmlType="button"
+            className="h-5 py-0 px-1 text-base text-muted-foreground hover:text-foreground shrink-0"
+            onClick={toggleExpand}
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
+          >
+            {isExpanded ? '−' : '+'}
+          </Button>
         </div>
+        {isExpanded ? <AuditLogExpandedDetails event={event} /> : null}
       </div>
+    );
+  }
 
-      {/* Expanded Details */}
-      {isExpanded && <AuditLogExpandedDetails event={event} />}
-    </Card>
+  return (
+    <>
+      <TableRow
+        data-state={isSelected ? 'selected' : undefined}
+        className={cn(
+          'cursor-pointer',
+          isNew && 'bg-green-50/40 dark:bg-green-950/20',
+          className
+        )}
+        onClick={(e) => {
+          toggleExpand(e);
+          handleClick();
+        }}
+        aria-expanded={isExpanded}
+      >
+        <TableCell className="py-2 align-middle whitespace-nowrap">
+          <Badge className={getVerbBadgeClasses(event.verb)}>
+            {event.verb?.toUpperCase() || 'UNKNOWN'}
+          </Badge>
+        </TableCell>
+        <TableCell
+          className="py-2 align-middle"
+          style={{ width: '100%', maxWidth: 0, overflow: 'hidden' }}
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className="text-sm leading-snug"
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {summary}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-[480px] whitespace-normal break-words">
+              {summary}
+            </TooltipContent>
+          </Tooltip>
+        </TableCell>
+        <TableCell className="py-2 align-middle whitespace-nowrap">
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 text-xs font-semibold',
+              statusIndicator.className
+            )}
+          >
+            <span>{statusIndicator.icon}</span>
+            {event.responseStatus?.code ? <span>{event.responseStatus.code}</span> : null}
+          </span>
+        </TableCell>
+        <TableCell className="py-2 align-middle whitespace-nowrap text-sm text-muted-foreground">
+          <Timestamp value={timestamp} />
+        </TableCell>
+        <TableCell className="py-2 align-middle w-10">
+          <Button
+            type="quaternary" theme="borderless"
+            size="small"
+            htmlType="button"
+            className="h-6 w-6 p-0 text-base text-muted-foreground hover:text-foreground"
+            onClick={toggleExpand}
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
+          >
+            {isExpanded ? '−' : '+'}
+          </Button>
+        </TableCell>
+      </TableRow>
+      {isExpanded ? (
+        <TableRow className="bg-muted/30 hover:bg-muted/30">
+          <TableCell colSpan={AUDIT_LOG_COLUMN_COUNT} className="p-0">
+            <AuditLogExpandedDetails event={event} />
+          </TableCell>
+        </TableRow>
+      ) : null}
+    </>
   );
 }

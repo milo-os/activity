@@ -2,11 +2,11 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import type { ReindexJob } from '../types/reindex';
 import type { ErrorFormatter, WatchEvent } from '../types/activity';
 import { ActivityApiClient } from '../api/client';
-import { Button } from './ui/button';
-import { Card, CardHeader, CardContent } from './ui/card';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { Card, CardHeader, CardContent } from '@datum-cloud/datum-ui/card';
 import { Badge } from './ui/badge';
 import { ApiErrorAlert } from './ApiErrorAlert';
-import { Skeleton } from './ui/skeleton';
+import { Skeleton } from '@datum-cloud/datum-ui/skeleton';
 import {
   getReindexJobDuration,
   getReindexJobStatusMessage,
@@ -172,8 +172,8 @@ export function ReindexJobDetailView({
 
         {isTerminal && onDelete && (
           <Button
-            variant="ghost"
-            size="sm"
+            type="quaternary" theme="borderless"
+            size="small"
             onClick={handleDelete}
             disabled={isDeleting}
             className="h-8 w-8 p-0"

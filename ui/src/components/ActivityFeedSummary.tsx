@@ -1,4 +1,36 @@
 import type { ActivityLink, ResourceRef, ResourceLinkResolver, ResourceLinkContext } from '../types/activity';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+
+/**
+ * Returns the visible text for a link: prefer the server-provided
+ * displayName (e.g. "Smith Nelson") and fall back to the original marker
+ * (e.g. an email or UID baked into the summary by the policy template).
+ */
+function linkVisibleText(link: ActivityLink): string {
+  return link.displayName && link.displayName.length > 0 ? link.displayName : link.marker;
+}
+
+/**
+ * Returns true when the link carries hover-worthy detail beyond the
+ * visible text (e.g. an email or UID that we want to surface but not
+ * show inline).
+ */
+function linkHasHoverDetail(link: ActivityLink): boolean {
+  if (link.email && link.email !== linkVisibleText(link)) return true;
+  const uid = link.resource?.uid;
+  if (uid && uid !== linkVisibleText(link)) return true;
+  return false;
+}
+
+/** Renders the tooltip body shown when a link is hovered. */
+function LinkHoverBody({ link }: { link: ActivityLink }) {
+  return (
+    <div className="flex flex-col gap-0.5 text-xs">
+      {link.email ? <span className="font-mono">{link.email}</span> : null}
+      {link.resource?.uid ? <span className="font-mono opacity-70">{link.resource.uid}</span> : null}
+    </div>
+  );
+}
 
 export interface ResourceLinkClickHandler {
   (resource: ResourceRef): void;
@@ -33,8 +65,12 @@ function parseSummaryWithLinks(
     return [summary];
   }
 
-  // Sort links by marker length (longest first) to avoid partial matches
-  const sortedLinks = [...links].sort((a, b) => b.marker.length - a.marker.length);
+  // Sort links by marker length (longest first) to avoid partial matches.
+  // Skip empty markers — indexOf('') clamps to summary.length and would
+  // produce an infinite loop below.
+  const sortedLinks = [...links]
+    .filter((l) => l.marker && l.marker.length > 0)
+    .sort((a, b) => b.marker.length - a.marker.length);
 
   // Track positions that have been replaced
   interface ReplacedRange {
@@ -82,24 +118,55 @@ function parseSummaryWithLinks(
       result.push(summary.substring(lastEnd, range.start));
     }
 
+    const visibleText = linkVisibleText(range.link);
+    const showHover = linkHasHoverDetail(range.link);
+
     // If resourceLinkResolver is provided, render as <a> tag
     if (resourceLinkResolver) {
       const url = resourceLinkResolver(range.link.resource, resourceLinkContext);
       if (url) {
-        result.push(
+        const anchor = (
           <a
             key={`link-${i}`}
             href={url}
             className="underline underline-offset-2 text-primary hover:text-primary/80"
-            title={`${range.link.resource.kind}: ${range.link.resource.name}`}
+            title={showHover ? undefined : `${range.link.resource.kind}: ${range.link.resource.name}`}
             onClick={(e) => e.stopPropagation()}
           >
-            {range.link.marker}
+            {visibleText}
           </a>
         );
+
+        if (showHover) {
+          result.push(
+            <Tooltip key={`link-${i}`}>
+              <TooltipTrigger asChild>{anchor}</TooltipTrigger>
+              <TooltipContent>
+                <LinkHoverBody link={range.link} />
+              </TooltipContent>
+            </Tooltip>
+          );
+        } else {
+          result.push(anchor);
+        }
+      } else if (showHover) {
+        // Resolver opted out of linking but we still want to surface the
+        // hover detail (email/UID) for user-typed references.
+        result.push(
+          <Tooltip key={`link-${i}`}>
+            <TooltipTrigger asChild>
+              <span className="underline decoration-dotted decoration-muted-foreground/60 underline-offset-2 cursor-help">
+                {visibleText}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <LinkHoverBody link={range.link} />
+            </TooltipContent>
+          </Tooltip>
+        );
       } else {
-        // Resolver returned undefined, render as plain text
-        result.push(range.link.marker);
+        // Resolver returned undefined and there's no hover detail, render plain text
+        result.push(visibleText);
       }
     } else {
       // Fallback to button with onResourceClick handler for backward compatibility
@@ -111,17 +178,30 @@ function parseSummaryWithLinks(
           }
         : undefined;
 
-      result.push(
+      const button = (
         <button
           key={`link-${i}`}
           type="button"
           className="bg-transparent border-none p-0 cursor-pointer underline underline-offset-2 text-primary hover:text-primary/80"
           onClick={handleClick}
-          title={`${range.link.resource.kind}: ${range.link.resource.name}`}
+          title={showHover ? undefined : `${range.link.resource.kind}: ${range.link.resource.name}`}
         >
-          {range.link.marker}
+          {visibleText}
         </button>
       );
+
+      if (showHover) {
+        result.push(
+          <Tooltip key={`link-${i}`}>
+            <TooltipTrigger asChild>{button}</TooltipTrigger>
+            <TooltipContent>
+              <LinkHoverBody link={range.link} />
+            </TooltipContent>
+          </Tooltip>
+        );
+      } else {
+        result.push(button);
+      }
     }
 
     lastEnd = range.end;

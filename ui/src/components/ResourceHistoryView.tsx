@@ -5,8 +5,8 @@ import { useActivityFeed } from '../hooks/useActivityFeed';
 import { ActivityFeedItem } from './ActivityFeedItem';
 import { ResourceLinkClickHandler } from './ActivityFeedSummary';
 import { ActivityApiClient } from '../api/client';
-import { Button } from './ui/button';
-import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { Card, CardHeader, CardTitle, CardContent } from '@datum-cloud/datum-ui/card';
 import { cn } from '../lib/utils';
 import { ApiErrorAlert } from './ApiErrorAlert';
 
@@ -289,8 +289,8 @@ export function ResourceHistoryView({
                   )}
                 />
                 <Button
-                  variant="ghost"
-                  size="sm"
+                  type="quaternary" theme="borderless"
+                  size="small"
                   onClick={handleLoadMore}
                   className="text-muted-foreground hover:text-foreground mt-2"
                 >

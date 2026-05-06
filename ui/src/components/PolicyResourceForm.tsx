@@ -7,10 +7,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from './ui/select';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Button } from './ui/button';
+} from '@datum-cloud/datum-ui/select';
+import { Input } from '@datum-cloud/datum-ui/input';
+import { Label } from '@datum-cloud/datum-ui/label';
+import { Button } from '@datum-cloud/datum-ui/button';
 
 export interface PolicyResourceFormProps {
   /** Current resource configuration */
@@ -256,9 +256,9 @@ export function PolicyResourceForm({
             />
             {client && (
               <Button
-                type="button"
-                variant="outline"
-                size="sm"
+                htmlType="button"
+                type="tertiary" theme="outline"
+                size="small"
                 onClick={() => handleBackToSelect('apiGroup')}
                 title="Back to select"
               >
@@ -322,9 +322,9 @@ export function PolicyResourceForm({
             />
             {client && (
               <Button
-                type="button"
-                variant="outline"
-                size="sm"
+                htmlType="button"
+                type="tertiary" theme="outline"
+                size="small"
                 onClick={() => handleBackToSelect('kind')}
                 title="Back to select"
               >

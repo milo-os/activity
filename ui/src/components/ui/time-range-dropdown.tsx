@@ -2,9 +2,9 @@ import * as React from 'react';
 import { Calendar, ChevronDown } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
 import { cn } from '../../lib/utils';
-import { Button } from './button';
-import { Input } from './input';
-import { Label } from './label';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { Input } from '@datum-cloud/datum-ui/input';
+import { Label } from '@datum-cloud/datum-ui/label';
 
 export interface TimeRangePreset {
   key: string;
@@ -180,16 +180,17 @@ export function TimeRangeDropdown({
               </div>
               <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-border">
                 <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
+                  htmlType="button"
+                  type="quaternary"
+                  theme="borderless"
+                  size="small"
                   onClick={handleCustomCancel}
                 >
                   Back
                 </Button>
                 <Button
-                  type="button"
-                  size="sm"
+                  htmlType="button"
+                  size="small"
                   onClick={handleCustomApply}
                   disabled={!customStart || !customEnd}
                 >

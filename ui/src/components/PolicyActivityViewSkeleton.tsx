@@ -1,5 +1,5 @@
-import { Skeleton } from './ui/skeleton';
-import { Card } from './ui/card';
+import { Skeleton } from '@datum-cloud/datum-ui/skeleton';
+import { Card } from '@datum-cloud/datum-ui/card';
 
 export interface PolicyActivityViewSkeletonProps {
   /** Additional CSS class */

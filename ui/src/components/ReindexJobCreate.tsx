@@ -2,8 +2,8 @@ import { useState } from 'react';
 import type { ReindexJobSpec } from '../types/reindex';
 import type { ErrorFormatter } from '../types/activity';
 import { ActivityApiClient } from '../api/client';
-import { Button } from './ui/button';
-import { Card, CardHeader, CardContent } from './ui/card';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { Card, CardHeader, CardContent } from '@datum-cloud/datum-ui/card';
 import { ApiErrorAlert } from './ApiErrorAlert';
 import { Loader2, RefreshCw } from 'lucide-react';
 
@@ -146,8 +146,8 @@ export function ReindexJobCreate({
           <div className="flex justify-end gap-2 pt-2">
             {onCancel && (
               <Button
-                type="button"
-                variant="outline"
+                htmlType="button"
+                type="tertiary" theme="outline"
                 onClick={onCancel}
                 disabled={isSubmitting}
               >
@@ -155,7 +155,7 @@ export function ReindexJobCreate({
               </Button>
             )}
             <Button
-              type="submit"
+              htmlType="submit"
               disabled={isSubmitting}
             >
               {isSubmitting ? (

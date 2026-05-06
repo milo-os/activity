@@ -43,8 +43,6 @@ export { EventsFeed } from './components/EventsFeed';
 export type { EventsFeedProps } from './components/EventsFeed';
 export { EventFeedItem } from './components/EventFeedItem';
 export type { EventFeedItemProps } from './components/EventFeedItem';
-export { EventFeedItemSkeleton } from './components/EventFeedItemSkeleton';
-export type { EventFeedItemSkeletonProps } from './components/EventFeedItemSkeleton';
 export type { EventsFeedFiltersProps } from './components/EventsFeedFilters';
 export { EventTypeToggle } from './components/EventTypeToggle';
 export type { EventTypeToggleProps, EventTypeOption } from './components/EventTypeToggle';
@@ -109,10 +107,10 @@ export {
   SelectLabel,
   SelectItem,
   SelectSeparator,
-} from './components/ui/select';
+} from '@datum-cloud/datum-ui/select';
 
-export { Button, buttonVariants } from './components/ui/button';
-export type { ButtonProps } from './components/ui/button';
+export { Button, buttonVariants } from '@datum-cloud/datum-ui/button';
+export type { ButtonProps } from '@datum-cloud/datum-ui/button';
 
 export {
   Card,
@@ -121,26 +119,33 @@ export {
   CardTitle,
   CardDescription,
   CardContent,
-} from './components/ui/card';
+} from '@datum-cloud/datum-ui/card';
 
 export { Badge, badgeVariants } from './components/ui/badge';
 export type { BadgeProps } from './components/ui/badge';
 
-export { Alert, AlertTitle, AlertDescription } from './components/ui/alert';
+export { Alert, AlertTitle, AlertDescription } from '@datum-cloud/datum-ui/alert';
 
 export { ApiErrorAlert } from './components/ApiErrorAlert';
 export type { ApiErrorAlertProps } from './components/ApiErrorAlert';
 
-export { Checkbox } from './components/ui/checkbox';
+export { Checkbox } from '@datum-cloud/datum-ui/checkbox';
 
-export { Textarea } from './components/ui/textarea';
-export type { TextareaProps } from './components/ui/textarea';
+// datum-ui's primitives don't expose explicit *Props type aliases, so we
+// derive them from each component's prop signature for source-compat.
+import type { ComponentProps } from 'react';
+import { Input as DUIInput } from '@datum-cloud/datum-ui/input';
+import { Label as DUILabel } from '@datum-cloud/datum-ui/label';
+import { Textarea as DUITextarea } from '@datum-cloud/datum-ui/textarea';
 
-export { Input } from './components/ui/input';
-export type { InputProps } from './components/ui/input';
+export { Textarea } from '@datum-cloud/datum-ui/textarea';
+export type TextareaProps = ComponentProps<typeof DUITextarea>;
 
-export { Label } from './components/ui/label';
-export type { LabelProps } from './components/ui/label';
+export { Input } from '@datum-cloud/datum-ui/input';
+export type InputProps = ComponentProps<typeof DUIInput>;
+
+export { Label } from '@datum-cloud/datum-ui/label';
+export type LabelProps = ComponentProps<typeof DUILabel>;
 
 export {
   Dialog,
@@ -155,9 +160,9 @@ export {
   DialogDescription,
 } from './components/ui/dialog';
 
-export { Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/tabs';
+export { Tabs, TabsList, TabsTrigger, TabsContent } from '@datum-cloud/datum-ui/tabs';
 
-export { Separator } from './components/ui/separator';
+export { Separator } from '@datum-cloud/datum-ui/separator';
 
 export {
   Tooltip,
@@ -166,7 +171,7 @@ export {
   TooltipProvider,
 } from './components/ui/tooltip';
 
-export { Skeleton } from './components/ui/skeleton';
+export { Skeleton } from '@datum-cloud/datum-ui/skeleton';
 
 export { Combobox } from './components/ui/combobox';
 export type { ComboboxProps, ComboboxOption } from './components/ui/combobox';

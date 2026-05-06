@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { ActivityPolicyRule, PolicyPreviewStatus } from '../types/policy';
 import type { ActivityApiClient } from '../api/client';
-import { Button } from './ui/button';
+import { Button } from '@datum-cloud/datum-ui/button';
 import {
   Sheet,
   SheetContent,
@@ -9,10 +9,10 @@ import {
   SheetFooter,
   SheetHeader,
   SheetTitle,
-} from './ui/sheet';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
+} from '@datum-cloud/datum-ui/sheet';
+import { Input } from '@datum-cloud/datum-ui/input';
+import { Label } from '@datum-cloud/datum-ui/label';
+import { Textarea } from '@datum-cloud/datum-ui/textarea';
 import { PolicyPreviewPanel } from './PolicyPreviewPanel';
 import { CelEditor } from './CelEditor';
 import { extractFieldPathsFromMany } from '../lib/extractFieldPaths';
@@ -369,7 +369,7 @@ export function PolicyRuleEditorDialog({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
-        <SheetHeader>
+        <SheetHeader className="px-6">
           <SheetTitle className="text-base">
             {isCreating ? 'Create' : 'Edit'} {ruleType === 'audit' ? 'Audit' : 'Event'} Rule
           </SheetTitle>
@@ -378,7 +378,7 @@ export function PolicyRuleEditorDialog({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="py-3 text-sm flex-1 overflow-y-auto">
+        <div className="px-6 py-3 text-sm flex-1 overflow-y-auto">
           {/* Form fields - full width */}
           <div className="space-y-3">
             {/* Name */}
@@ -490,11 +490,11 @@ export function PolicyRuleEditorDialog({
           </div>
         </div>
 
-        <SheetFooter className="mt-4 pt-4 border-t">
-          <Button variant="outline" size="sm" onClick={handleCancel}>
+        <SheetFooter className="mt-4 pt-4 border-t px-6">
+          <Button type="tertiary" theme="outline" size="small" onClick={handleCancel}>
             Cancel
           </Button>
-          <Button size="sm" onClick={handleSave}>
+          <Button size="small" onClick={handleSave}>
             {isCreating ? 'Create Rule' : 'Save Changes'}
           </Button>
         </SheetFooter>

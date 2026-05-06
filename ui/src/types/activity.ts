@@ -57,6 +57,13 @@ export interface Actor {
   name: string;
   uid: string;
   email?: string;
+  /**
+   * Human-readable name (e.g. "Smith Nelson"). Populated server-side for
+   * user actors when an iam User record is available. UIs SHOULD prefer
+   * this over `name`/`email` for visible text and surface the email/UID on
+   * hover.
+   */
+  displayName?: string;
 }
 
 /**
@@ -67,6 +74,16 @@ export interface ActivityLink {
   marker: string;
   /** The resource to link to when the marker is clicked */
   resource: ResourceRef;
+  /**
+   * Human-readable name for the linked entity. Populated server-side for
+   * User-typed links so the UI can render names instead of opaque UIDs.
+   */
+  displayName?: string;
+  /**
+   * Email address of the linked entity, when applicable (User links). The
+   * UI surfaces this in a hover tooltip alongside the UID.
+   */
+  email?: string;
 }
 
 /**

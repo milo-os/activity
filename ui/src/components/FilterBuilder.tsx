@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import type { AuditLogQuerySpec } from '../types';
 import { FILTER_FIELDS } from '../types';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader } from './ui/card';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Separator } from './ui/separator';
-import { Textarea } from './ui/textarea';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { Card, CardContent, CardHeader } from '@datum-cloud/datum-ui/card';
+import { Input } from '@datum-cloud/datum-ui/input';
+import { Label } from '@datum-cloud/datum-ui/label';
+import { Separator } from '@datum-cloud/datum-ui/separator';
+import { Textarea } from '@datum-cloud/datum-ui/textarea';
 
 export interface FilterBuilderProps {
   onFilterChange: (spec: AuditLogQuerySpec) => void;
@@ -51,8 +51,8 @@ export function FilterBuilder({
           <h3 className="m-0 text-2xl font-semibold text-foreground">Build Your Query</h3>
           <Button
             onClick={() => setShowHelp(!showHelp)}
-            variant="outline"
-            type="button"
+            type="tertiary" theme="outline"
+            htmlType="button"
           >
             {showHelp ? 'Hide' : 'Show'} Help
           </Button>
@@ -83,10 +83,10 @@ export function FilterBuilder({
                           </code>
                           <Button
                             onClick={() => insertExample(example)}
-                            variant="default"
-                            size="sm"
+                            type="primary" theme="solid"
+                            size="small"
                             className="bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
-                            type="button"
+                            htmlType="button"
                           >
                             Insert
                           </Button>
@@ -150,29 +150,29 @@ export function FilterBuilder({
           <div className="flex flex-wrap gap-2">
             <Button
               onClick={() => insertExample('verb == "delete"')}
-              type="button"
-              variant="outline"
+              htmlType="button"
+              type="tertiary" theme="outline"
             >
               Delete Operations
             </Button>
             <Button
               onClick={() => insertExample('resource == "secrets"')}
-              type="button"
-              variant="outline"
+              htmlType="button"
+              type="tertiary" theme="outline"
             >
               Secret Access
             </Button>
             <Button
               onClick={() => insertExample('user.startsWith("system:")')}
-              type="button"
-              variant="outline"
+              htmlType="button"
+              type="tertiary" theme="outline"
             >
               System Users
             </Button>
             <Button
               onClick={() => insertExample('stage == "ResponseComplete"')}
-              type="button"
-              variant="outline"
+              htmlType="button"
+              type="tertiary" theme="outline"
             >
               Completed Requests
             </Button>

@@ -2,8 +2,10 @@ import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import peerDepsExternal from 'rollup-plugin-peer-deps-external';
-import postcss from 'rollup-plugin-postcss';
-import autoprefixer from 'autoprefixer';
+
+// We don't ship CSS — the host app's Tailwind compiles utility classes
+// directly from this package's dist via @source. No PostCSS pipeline
+// needed.
 
 export default {
   input: 'src/index.ts',
@@ -36,15 +38,6 @@ export default {
       declarationDir: 'dist',
       noEmitOnError: false,
     }),
-    postcss({
-      // Don't extract CSS - host app provides Tailwind
-      // This avoids CSS layer conflicts with host applications
-      inject: false,
-      minimize: true,
-      plugins: [
-        autoprefixer(),
-      ],
-    }),
   ],
   external: [
     'react',
@@ -53,5 +46,9 @@ export default {
     /^react\//,
     /^react-dom\//,
     /^@radix-ui\//,
+    // Externalize @datum-cloud/datum-ui (and its subpath imports) so the
+    // consumer brings its own pinned copy. Avoids duplicating primitives
+    // and prevents CSS conflicts with the host's datum-ui styles.
+    /^@datum-cloud\/datum-ui($|\/)/,
   ],
 };

@@ -3,8 +3,8 @@ import type { ActivityPolicyRule } from '../types/policy';
 import type { ActivityApiClient } from '../api/client';
 import { PolicyRuleListItem } from './PolicyRuleListItem';
 import { PolicyRuleEditorDialog } from './PolicyRuleEditorDialog';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
-import { Button } from './ui/button';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@datum-cloud/datum-ui/tabs';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { Badge } from './ui/badge';
 
 export interface PolicyRuleListProps {
@@ -141,7 +141,7 @@ export function PolicyRuleList({
               Audit Rules
               <Badge
                 variant="secondary"
-                className="text-[10px] px-1.5 py-0 data-[state=active]:bg-[#BF9595] data-[state=active]:text-white"
+                className="text-[10px] px-1.5 py-0 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
               >
                 {auditRules.length}
               </Badge>
@@ -153,7 +153,7 @@ export function PolicyRuleList({
               Event Rules
               <Badge
                 variant="secondary"
-                className="text-[10px] px-1.5 py-0 data-[state=active]:bg-[#BF9595] data-[state=active]:text-white"
+                className="text-[10px] px-1.5 py-0 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
               >
                 {eventRules.length}
               </Badge>
@@ -186,10 +186,10 @@ export function PolicyRuleList({
               </div>
             )}
             <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full mt-2 border-2 border-dashed border-input bg-muted hover:bg-[#EFEFED] hover:border-[#BF9595] hover:text-foreground text-xs"
+              htmlType="button"
+              type="tertiary" theme="outline"
+              size="small"
+              className="w-full mt-2 border-2 border-dashed border-input bg-muted hover:bg-accent hover:border-primary hover:text-foreground text-xs"
               onClick={() => handleAddRule('audit')}
             >
               + Add Audit Rule
@@ -222,10 +222,10 @@ export function PolicyRuleList({
               </div>
             )}
             <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full mt-2 border-2 border-dashed border-input bg-muted hover:bg-[#EFEFED] hover:border-[#BF9595] hover:text-foreground text-xs"
+              htmlType="button"
+              type="tertiary" theme="outline"
+              size="small"
+              className="w-full mt-2 border-2 border-dashed border-input bg-muted hover:bg-accent hover:border-primary hover:text-foreground text-xs"
               onClick={() => handleAddRule('event')}
             >
               + Add Event Rule

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@datum-cloud/datum-ui/tabs';
 import { cn } from '../lib/utils';
 
 export interface ActivityTab {

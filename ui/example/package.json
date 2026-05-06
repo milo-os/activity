@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@datum-cloud/activity-ui": "workspace:*",
+    "@datum-cloud/datum-ui": "^0.8.0",
     "@monaco-editor/react": "^4.7.0",
     "@remix-run/node": "^2.15.2",
     "@remix-run/react": "^2.15.2",

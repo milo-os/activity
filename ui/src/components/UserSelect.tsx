@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { User, X } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
-import { Button } from './ui/button';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { cn } from '../lib/utils';
 
 export interface UserOption {
@@ -74,9 +74,9 @@ export function UserSelect({
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <Button
-          type="button"
-          variant="outline"
-          size="sm"
+          htmlType="button"
+          type="tertiary" theme="outline"
+          size="small"
           disabled={disabled}
           className={cn(
             'h-7 text-xs font-medium gap-1.5 px-2',

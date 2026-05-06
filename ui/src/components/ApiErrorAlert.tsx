@@ -1,6 +1,6 @@
 import { AlertCircle, AlertTriangle, RotateCw } from 'lucide-react';
-import { Alert, AlertDescription } from './ui/alert';
-import { Button } from './ui/button';
+import { Alert, AlertDescription } from '@datum-cloud/datum-ui/alert';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { defaultErrorFormatter } from '../lib/errors';
 import type { ErrorFormatter } from '../types/activity';
 
@@ -46,8 +46,8 @@ export function ApiErrorAlert({ error, onRetry, className, errorFormatter }: Api
         <span className="text-sm flex-1 min-w-0 leading-tight">{message}</span>
         {onRetry && (
           <Button
-            variant="ghost"
-            size="sm"
+            type="quaternary" theme="borderless"
+            size="small"
             onClick={onRetry}
             className="shrink-0 h-6 w-6 p-0 -my-1"
             title="Retry"

@@ -5,13 +5,13 @@ import { ActivityApiClient } from '../api/client';
 import { usePolicyEditor, type UsePolicyEditorResult } from '../hooks/usePolicyEditor';
 import { PolicyResourceForm } from './PolicyResourceForm';
 import { PolicyRuleList } from './PolicyRuleList';
-import { Input } from './ui/input';
-import { Button } from './ui/button';
-import { Card, CardHeader, CardContent } from './ui/card';
+import { Input } from '@datum-cloud/datum-ui/input';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { Card, CardHeader, CardContent } from '@datum-cloud/datum-ui/card';
 import { Badge } from './ui/badge';
-import { Label } from './ui/label';
+import { Label } from '@datum-cloud/datum-ui/label';
 import { ApiErrorAlert } from './ApiErrorAlert';
-import { Alert, AlertDescription } from './ui/alert';
+import { Alert, AlertDescription } from '@datum-cloud/datum-ui/alert';
 import { AlertTriangle, AlertCircle, Trash2, Copy, Check } from 'lucide-react';
 import {
   Dialog,
@@ -217,19 +217,14 @@ export function PolicyEditView({
                 </div>
               </div>
             )}
-            {editor.isDirty && (
-              <Badge variant="warning">
-                Unsaved changes
-              </Badge>
-            )}
           </div>
 
         <div className="flex gap-2">
           {onCancel && (
             <Button
-              type="button"
-              variant="outline"
-              size="sm"
+              htmlType="button"
+              type="tertiary" theme="outline"
+              size="small"
               onClick={onCancel}
               disabled={editor.isSaving}
               className="h-7 text-xs"
@@ -238,9 +233,9 @@ export function PolicyEditView({
             </Button>
           )}
           <Button
-            type="button"
-            variant="outline"
-            size="sm"
+            htmlType="button"
+            type="tertiary" theme="outline"
+            size="small"
             onClick={() => handleSave(true)}
             disabled={!canSave || editor.isSaving}
             title="Validate without saving"
@@ -249,11 +244,11 @@ export function PolicyEditView({
             Validate
           </Button>
           <Button
-            type="button"
-            size="sm"
+            htmlType="button"
+            size="small"
             onClick={() => handleSave(false)}
             disabled={!canSave || editor.isSaving || !editor.isDirty}
-            className="bg-[#BF9595] text-[#0C1D31] border-[#BF9595] hover:bg-[#A88080] hover:border-[#A88080] h-7 text-xs"
+            className="bg-primary text-primary-foreground border-primary hover:bg-primary/90 hover:border-primary/90 h-7 text-xs"
           >
             {editor.isSaving ? (
               <>
@@ -336,8 +331,8 @@ export function PolicyEditView({
                         resources. Existing activities will be preserved, but no new activities will be generated.
                       </p>
                       <Button
-                        variant="destructive"
-                        size="sm"
+                        type="danger" theme="solid"
+                        size="small"
                         onClick={() => setShowDeleteDialog(true)}
                         className="h-8 text-xs"
                       >
@@ -374,8 +369,8 @@ export function PolicyEditView({
           </Alert>
           <DialogFooter>
             <Button
-              variant="outline"
-              size="sm"
+              type="tertiary" theme="outline"
+              size="small"
               onClick={() => setShowDeleteDialog(false)}
               disabled={isDeleting}
               className="h-8 text-xs"
@@ -383,8 +378,8 @@ export function PolicyEditView({
               Cancel
             </Button>
             <Button
-              variant="destructive"
-              size="sm"
+              type="danger" theme="solid"
+              size="small"
               onClick={handleDelete}
               disabled={isDeleting}
               className="h-8 text-xs"

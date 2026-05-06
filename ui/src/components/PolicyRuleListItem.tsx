@@ -1,5 +1,5 @@
 import type { ActivityPolicyRule } from '../types/policy';
-import { Button } from './ui/button';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { Edit, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 
 export interface PolicyRuleListItemProps {
@@ -78,8 +78,8 @@ export function PolicyRuleListItem({
         {/* Move up/down buttons */}
         <div className="flex flex-col gap-0.5">
           <Button
-            type="button"
-            variant="ghost"
+            htmlType="button"
+            type="quaternary" theme="borderless"
             size="icon"
             className="h-5 w-5 p-0"
             onClick={onMoveUp}
@@ -90,8 +90,8 @@ export function PolicyRuleListItem({
             <ChevronUp className="h-3.5 w-3.5" />
           </Button>
           <Button
-            type="button"
-            variant="ghost"
+            htmlType="button"
+            type="quaternary" theme="borderless"
             size="icon"
             className="h-5 w-5 p-0"
             onClick={onMoveDown}
@@ -105,8 +105,8 @@ export function PolicyRuleListItem({
 
         {/* Edit button */}
         <Button
-          type="button"
-          variant="ghost"
+          htmlType="button"
+          type="quaternary" theme="borderless"
           size="icon"
           className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted"
           onClick={onEdit}
@@ -118,8 +118,8 @@ export function PolicyRuleListItem({
 
         {/* Delete button */}
         <Button
-          type="button"
-          variant="ghost"
+          htmlType="button"
+          type="quaternary" theme="borderless"
           size="icon"
           className="h-6 w-6 text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/50"
           onClick={onDelete}

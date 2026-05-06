@@ -1,13 +1,16 @@
-import { useState, useCallback, useEffect } from 'react';
-import { formatISO, subDays } from 'date-fns';
+import { useState, useCallback, useEffect } from "react";
+import { formatISO, subDays } from "date-fns";
 
-import type { ActivityApiClient } from '../api/client';
-import { useAuditLogFacets, type AuditLogTimeRange } from '../hooks/useAuditLogFacets';
-import { TimeRangeDropdown } from './ui/time-range-dropdown';
-import { FilterChip } from './ui/filter-chip';
-import { AddFilterDropdown, type FilterOption } from './ui/add-filter-dropdown';
-import { ActionMultiSelect } from './ActionMultiSelect';
-import { UserSelect } from './UserSelect';
+import type { ActivityApiClient } from "../api/client";
+import {
+  useAuditLogFacets,
+  type AuditLogTimeRange,
+} from "../hooks/useAuditLogFacets";
+import { TimeRangeDropdown } from "./ui/time-range-dropdown";
+import { FilterChip } from "./ui/filter-chip";
+import { AddFilterDropdown, type FilterOption } from "./ui/add-filter-dropdown";
+import { ActionMultiSelect } from "./ActionMultiSelect";
+import { UserSelect } from "./UserSelect";
 
 /**
  * Filter state for audit logs
@@ -56,12 +59,12 @@ export interface AuditLogFiltersProps {
  * Preset time ranges
  */
 const TIME_PRESETS = [
-  { key: 'last15min', label: 'Last 15 min' },
-  { key: 'last1hour', label: 'Last hour' },
-  { key: 'last6hours', label: 'Last 6 hours' },
-  { key: 'last24hours', label: 'Last 24 hours' },
-  { key: 'last7days', label: 'Last 7 days' },
-  { key: 'last30days', label: 'Last 30 days' },
+  { key: "last15min", label: "Last 15 min" },
+  { key: "last1hour", label: "Last hour" },
+  { key: "last6hours", label: "Last 6 hours" },
+  { key: "last24hours", label: "Last 24 hours" },
+  { key: "last7days", label: "Last 7 days" },
+  { key: "last30days", label: "Last 30 days" },
 ];
 
 /**
@@ -72,22 +75,22 @@ function presetToTimeRange(presetKey: string): AuditLogTimeRange {
   let start: Date;
 
   switch (presetKey) {
-    case 'last15min':
+    case "last15min":
       start = new Date(now.getTime() - 15 * 60 * 1000);
       break;
-    case 'last1hour':
+    case "last1hour":
       start = new Date(now.getTime() - 60 * 60 * 1000);
       break;
-    case 'last6hours':
+    case "last6hours":
       start = new Date(now.getTime() - 6 * 60 * 60 * 1000);
       break;
-    case 'last24hours':
+    case "last24hours":
       start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       break;
-    case 'last7days':
+    case "last7days":
       start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       break;
-    case 'last30days':
+    case "last30days":
       start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       break;
     default:
@@ -103,46 +106,51 @@ function presetToTimeRange(presetKey: string): AuditLogTimeRange {
 /**
  * Filter configuration registry
  */
-type FilterId = 'verbs' | 'resourceTypes' | 'namespaces' | 'usernames' | 'resourceName';
+type FilterId =
+  | "verbs"
+  | "resourceTypes"
+  | "namespaces"
+  | "usernames"
+  | "resourceName";
 
 interface FilterConfig {
   id: FilterId;
   label: string;
-  inputMode: 'typeahead' | 'text';
+  inputMode: "typeahead" | "text";
   placeholder?: string;
   searchPlaceholder?: string;
 }
 
 const FILTER_CONFIGS: Record<FilterId, FilterConfig> = {
   verbs: {
-    id: 'verbs',
-    label: 'Action',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search actions...',
+    id: "verbs",
+    label: "Action",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search actions...",
   },
   resourceTypes: {
-    id: 'resourceTypes',
-    label: 'Resource',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search resources...',
+    id: "resourceTypes",
+    label: "Resource",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search resources...",
   },
   namespaces: {
-    id: 'namespaces',
-    label: 'Namespace',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search namespaces...',
+    id: "namespaces",
+    label: "Namespace",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search namespaces...",
   },
   usernames: {
-    id: 'usernames',
-    label: 'User',
-    inputMode: 'typeahead',
-    searchPlaceholder: 'Search users...',
+    id: "usernames",
+    label: "User",
+    inputMode: "typeahead",
+    searchPlaceholder: "Search users...",
   },
   resourceName: {
-    id: 'resourceName',
-    label: 'Name',
-    inputMode: 'text',
-    placeholder: 'Enter resource name...',
+    id: "resourceName",
+    label: "Name",
+    inputMode: "text",
+    placeholder: "Enter resource name...",
   },
 };
 
@@ -152,13 +160,12 @@ const FILTER_CONFIGS: Record<FilterId, FilterConfig> = {
 const formatDatetimeLocal = (isoString: string): string => {
   const date = new Date(isoString);
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
-
 
 /**
  * Build CEL filter expression from filter state
@@ -172,7 +179,7 @@ export function buildAuditLogCEL(filters: AuditLogFilterState): string {
       conditions.push(`verb == "${filters.verbs[0]}"`);
     } else {
       const verbConditions = filters.verbs.map((v) => `verb == "${v}"`);
-      conditions.push(`(${verbConditions.join(' || ')})`);
+      conditions.push(`(${verbConditions.join(" || ")})`);
     }
   }
 
@@ -181,8 +188,10 @@ export function buildAuditLogCEL(filters: AuditLogFilterState): string {
     if (filters.resourceTypes.length === 1) {
       conditions.push(`objectRef.resource == "${filters.resourceTypes[0]}"`);
     } else {
-      const resConditions = filters.resourceTypes.map((r) => `objectRef.resource == "${r}"`);
-      conditions.push(`(${resConditions.join(' || ')})`);
+      const resConditions = filters.resourceTypes.map(
+        (r) => `objectRef.resource == "${r}"`,
+      );
+      conditions.push(`(${resConditions.join(" || ")})`);
     }
   }
 
@@ -191,8 +200,10 @@ export function buildAuditLogCEL(filters: AuditLogFilterState): string {
     if (filters.namespaces.length === 1) {
       conditions.push(`objectRef.namespace == "${filters.namespaces[0]}"`);
     } else {
-      const nsConditions = filters.namespaces.map((ns) => `objectRef.namespace == "${ns}"`);
-      conditions.push(`(${nsConditions.join(' || ')})`);
+      const nsConditions = filters.namespaces.map(
+        (ns) => `objectRef.namespace == "${ns}"`,
+      );
+      conditions.push(`(${nsConditions.join(" || ")})`);
     }
   }
 
@@ -201,8 +212,10 @@ export function buildAuditLogCEL(filters: AuditLogFilterState): string {
     if (filters.usernames.length === 1) {
       conditions.push(`user.username == "${filters.usernames[0]}"`);
     } else {
-      const userConditions = filters.usernames.map((u) => `user.username == "${u}"`);
-      conditions.push(`(${userConditions.join(' || ')})`);
+      const userConditions = filters.usernames.map(
+        (u) => `user.username == "${u}"`,
+      );
+      conditions.push(`(${userConditions.join(" || ")})`);
     }
   }
 
@@ -216,7 +229,7 @@ export function buildAuditLogCEL(filters: AuditLogFilterState): string {
     conditions.push(filters.customFilter);
   }
 
-  return conditions.join(' && ');
+  return conditions.join(" && ");
 }
 
 /**
@@ -229,34 +242,38 @@ export function AuditLogFilters({
   onFiltersChange,
   onTimeRangeChange,
   disabled = false,
-  className = '',
+  className = "",
 }: AuditLogFiltersProps) {
   // Convert timeRange to format expected by useAuditLogFacets
-  const [facetTimeRange, setFacetTimeRange] = useState<AuditLogTimeRange | null>(() =>
-    presetToTimeRange('last24hours')
-  );
+  const [facetTimeRange, setFacetTimeRange] =
+    useState<AuditLogTimeRange | null>(() => presetToTimeRange("last24hours"));
 
-  const { verbs, resources, namespaces, usernames, error: facetsError } = useAuditLogFacets(
-    client,
-    facetTimeRange
-  );
+  const {
+    verbs,
+    resources,
+    namespaces,
+    usernames,
+    error: facetsError,
+  } = useAuditLogFacets(client, facetTimeRange);
 
   // Log facets error for debugging
   if (facetsError) {
-    console.error('Failed to load audit log facets:', facetsError);
+    console.error("Failed to load audit log facets:", facetsError);
   }
 
   // Track which filter was just added to auto-open it
   const [pendingFilter, setPendingFilter] = useState<FilterId | null>(null);
 
   // Track selected preset
-  const [selectedPreset, setSelectedPreset] = useState<string>('last24hours');
+  const [selectedPreset, setSelectedPreset] = useState<string>("last24hours");
 
   // Custom time range state
   const [customStart, setCustomStart] = useState(() =>
-    formatDatetimeLocal(formatISO(subDays(new Date(), 1)))
+    formatDatetimeLocal(formatISO(subDays(new Date(), 1))),
   );
-  const [customEnd, setCustomEnd] = useState(() => formatDatetimeLocal(formatISO(new Date())));
+  const [customEnd, setCustomEnd] = useState(() =>
+    formatDatetimeLocal(formatISO(new Date())),
+  );
 
   // Handle time range preset selection
   const handleTimePresetSelect = useCallback(
@@ -269,13 +286,13 @@ export function AuditLogFilters({
         end: range.end,
       });
     },
-    [onTimeRangeChange]
+    [onTimeRangeChange],
   );
 
   // Handle custom time range apply
   const handleCustomRangeApply = useCallback(
     (start: string, end: string) => {
-      setSelectedPreset('custom');
+      setSelectedPreset("custom");
       setCustomStart(start);
       setCustomEnd(end);
       const startIso = new Date(start).toISOString();
@@ -286,29 +303,31 @@ export function AuditLogFilters({
         end: endIso,
       });
     },
-    [onTimeRangeChange]
+    [onTimeRangeChange],
   );
 
   // Get display label for time range
   const getTimeRangeLabel = () => {
     const preset = TIME_PRESETS.find((p) => p.key === selectedPreset);
     if (preset) return preset.label;
-    if (selectedPreset === 'custom' && timeRange.start && timeRange.end) {
+    if (selectedPreset === "custom" && timeRange.start && timeRange.end) {
       const start = new Date(timeRange.start);
       const end = new Date(timeRange.end);
       return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
     }
-    return 'Select time range';
+    return "Select time range";
   };
 
   // Determine which filters are currently active (have values)
   // Note: We exclude verbs and usernames from filter chips since they're handled by quick filters
   const filtersWithValues: FilterId[] = [];
   // if (filters.verbs && filters.verbs.length > 0) filtersWithValues.push('verbs'); // Handled by ActionToggle
-  if (filters.resourceTypes && filters.resourceTypes.length > 0) filtersWithValues.push('resourceTypes');
-  if (filters.namespaces && filters.namespaces.length > 0) filtersWithValues.push('namespaces');
+  if (filters.resourceTypes && filters.resourceTypes.length > 0)
+    filtersWithValues.push("resourceTypes");
+  if (filters.namespaces && filters.namespaces.length > 0)
+    filtersWithValues.push("namespaces");
   // if (filters.usernames && filters.usernames.length > 0) filtersWithValues.push('usernames'); // Handled by UserSelect
-  if (filters.resourceName) filtersWithValues.push('resourceName');
+  if (filters.resourceName) filtersWithValues.push("resourceName");
 
   // Include pendingFilter (newly added filter awaiting value selection) in the displayed filters
   const activeFilterIds: FilterId[] =
@@ -327,9 +346,9 @@ export function AuditLogFilters({
   // Build available filters list
   // Note: Action and User are now quick filters, so they're excluded from the dropdown
   const availableFilters: FilterOption[] = [
-    { id: 'resourceTypes', label: 'Resource' },
-    { id: 'namespaces', label: 'Namespace' },
-    { id: 'resourceName', label: 'Name' },
+    { id: "resourceTypes", label: "Resource" },
+    { id: "namespaces", label: "Namespace" },
+    { id: "resourceName", label: "Name" },
   ];
 
   // Handle adding a filter
@@ -343,7 +362,7 @@ export function AuditLogFilters({
       if (pendingFilter === filterId) {
         const hasValues = (() => {
           const value = filters[filterId];
-          if (filterId === 'resourceName') return !!value;
+          if (filterId === "resourceName") return !!value;
           return Array.isArray(value) && value.length > 0;
         })();
         if (!hasValues) {
@@ -351,7 +370,7 @@ export function AuditLogFilters({
         }
       }
     },
-    [pendingFilter, filters]
+    [pendingFilter, filters],
   );
 
   // Handle filter value changes
@@ -362,7 +381,7 @@ export function AuditLogFilters({
         [filterId]: values.length > 0 ? values : undefined,
       });
     },
-    [filters, onFiltersChange]
+    [filters, onFiltersChange],
   );
 
   // Handle filter clear
@@ -373,13 +392,13 @@ export function AuditLogFilters({
         [filterId]: undefined,
       });
     },
-    [filters, onFiltersChange]
+    [filters, onFiltersChange],
   );
 
   // Get options for a specific filter
   const getFilterOptions = (filterId: FilterId) => {
     switch (filterId) {
-      case 'verbs':
+      case "verbs":
         return verbs
           .filter((facet) => facet.value)
           .map((facet) => ({
@@ -387,7 +406,7 @@ export function AuditLogFilters({
             label: facet.value,
             count: facet.count,
           }));
-      case 'resourceTypes':
+      case "resourceTypes":
         return resources
           .filter((facet) => facet.value)
           .map((facet) => ({
@@ -395,7 +414,7 @@ export function AuditLogFilters({
             label: facet.value,
             count: facet.count,
           }));
-      case 'namespaces':
+      case "namespaces":
         return namespaces
           .filter((facet) => facet.value)
           .map((facet) => ({
@@ -403,7 +422,7 @@ export function AuditLogFilters({
             label: facet.value,
             count: facet.count,
           }));
-      case 'usernames':
+      case "usernames":
         return usernames
           .filter((facet) => facet.value)
           .map((facet) => ({
@@ -419,7 +438,7 @@ export function AuditLogFilters({
   // Get values for a specific filter
   const getFilterValues = (filterId: FilterId): string[] => {
     const value = filters[filterId];
-    if (filterId === 'resourceName') {
+    if (filterId === "resourceName") {
       return value ? [value as string] : [];
     }
     return (value as string[] | undefined) || [];
@@ -433,7 +452,7 @@ export function AuditLogFilters({
         verbs: selectedVerbs.length > 0 ? selectedVerbs : undefined,
       });
     },
-    [filters, onFiltersChange]
+    [filters, onFiltersChange],
   );
 
   // Get current action values for multi-select
@@ -458,7 +477,7 @@ export function AuditLogFilters({
         usernames: username ? [username] : undefined,
       });
     },
-    [filters, onFiltersChange]
+    [filters, onFiltersChange],
   );
 
   // Get current user value for select (single selection for quick filter)
@@ -478,7 +497,7 @@ export function AuditLogFilters({
     }));
 
   return (
-    <div className={`mb-3 pb-3 border-b border-border ${className}`}>
+    <div className={`border-b border-border py-4 pt-0 ${className}`}>
       <div className="flex flex-wrap gap-2 items-center">
         {/* Action Multi-Select */}
         <ActionMultiSelect
@@ -507,7 +526,11 @@ export function AuditLogFilters({
               key={filterId}
               label={config.label}
               values={getFilterValues(filterId)}
-              options={config.inputMode === 'typeahead' ? getFilterOptions(filterId) : undefined}
+              options={
+                config.inputMode === "typeahead"
+                  ? getFilterOptions(filterId)
+                  : undefined
+              }
               onValuesChange={(values) => handleFilterChange(filterId, values)}
               onClear={() => handleFilterClear(filterId)}
               onPopoverClose={() => handlePopoverClose(filterId)}

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { ChevronDown } from 'lucide-react';
-import { Checkbox } from './ui/checkbox';
+import { Checkbox } from '@datum-cloud/datum-ui/checkbox';
 import { cn } from '../lib/utils';
 
 export interface ActionMultiSelectOption {

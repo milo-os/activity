@@ -3,7 +3,7 @@ import { X, ChevronDown } from 'lucide-react';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from 'cmdk';
 import * as Popover from '@radix-ui/react-popover';
 import { cn } from '../../lib/utils';
-import { Input } from './input';
+import { Input } from '@datum-cloud/datum-ui/input';
 
 export interface FilterChipOption {
   value: string;

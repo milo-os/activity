@@ -1,120 +1,92 @@
+// Adapter shim: lets call sites continue to use shadcn-style flat exports
+// (Dialog/DialogContent/DialogHeader/DialogTitle/DialogDescription/DialogFooter/
+//  DialogTrigger/DialogClose) on top of datum-ui's compound Dialog.X API.
+//
+// datum-ui exposes Dialog as a function plus Dialog.Trigger/Content/Header/
+// Body/Footer/Overlay. This shim re-shapes those into the named exports our
+// existing components import.
 import * as React from 'react';
-import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { X } from 'lucide-react';
+import { Dialog as DUIDialog } from '@datum-cloud/datum-ui/dialog';
 
-import { cn } from '../../lib/utils';
+interface DialogProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}
 
-const Dialog = DialogPrimitive.Root;
+function Dialog(props: DialogProps) {
+  return <DUIDialog {...props} />;
+}
 
-const DialogTrigger = DialogPrimitive.Trigger;
+interface DialogTriggerProps {
+  children: React.ReactNode;
+  asChild?: boolean;
+}
 
-const DialogPortal = DialogPrimitive.Portal;
+function DialogTrigger({ children, asChild }: DialogTriggerProps) {
+  return <DUIDialog.Trigger asChild={asChild}>{children}</DUIDialog.Trigger>;
+}
 
-const DialogClose = DialogPrimitive.Close;
+interface DialogContentProps {
+  children: React.ReactNode;
+  className?: string;
+}
 
-const DialogOverlay = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn(
-      'fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-      className
-    )}
-    {...props}
-  />
-));
-DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
+function DialogContent({ children, className }: DialogContentProps) {
+  // datum-ui's Dialog.Content wraps the body. Header/Footer must be siblings
+  // inside it, but the legacy API put DialogHeader/Body/Footer as direct
+  // siblings of DialogContent. We wrap them all in a single Content node.
+  return <DUIDialog.Content className={className}>{children}</DUIDialog.Content>;
+}
 
-const DialogContent = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        'fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-white dark:bg-slate-900 p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg',
-        className
-      )}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-));
-DialogContent.displayName = DialogPrimitive.Content.displayName;
+// Legacy flat exports that map to the compound's pieces. They render their
+// children inside a Body/Header-equivalent container.
+function DialogHeader({ children, className }: { children?: React.ReactNode; className?: string }) {
+  // Legacy DialogHeader contained DialogTitle + DialogDescription children;
+  // datum-ui's Dialog.Header takes structured `title`/`description` props.
+  // To keep call-site compatibility we render the children verbatim and
+  // rely on DialogTitle/Description below to style them.
+  return <div className={className}>{children}</div>;
+}
 
-const DialogHeader = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      'flex flex-col space-y-1.5 text-center sm:text-left',
-      className
-    )}
-    {...props}
-  />
-);
-DialogHeader.displayName = 'DialogHeader';
+function DialogTitle({ children, className }: { children?: React.ReactNode; className?: string }) {
+  return <h2 className={className ?? 'text-lg font-semibold'}>{children}</h2>;
+}
 
-const DialogFooter = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      'flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2',
-      className
-    )}
-    {...props}
-  />
-);
-DialogFooter.displayName = 'DialogFooter';
+function DialogDescription({ children, className }: { children?: React.ReactNode; className?: string }) {
+  return <p className={className ?? 'text-sm text-muted-foreground'}>{children}</p>;
+}
 
-const DialogTitle = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title
-    ref={ref}
-    className={cn(
-      'text-lg font-semibold leading-none tracking-tight',
-      className
-    )}
-    {...props}
-  />
-));
-DialogTitle.displayName = DialogPrimitive.Title.displayName;
+function DialogBody({ children, className }: { children?: React.ReactNode; className?: string }) {
+  return <DUIDialog.Body className={className}>{children}</DUIDialog.Body>;
+}
 
-const DialogDescription = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Description>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description
-    ref={ref}
-    className={cn('text-sm text-muted-foreground', className)}
-    {...props}
-  />
-));
-DialogDescription.displayName = DialogPrimitive.Description.displayName;
+function DialogFooter({ children, className }: { children?: React.ReactNode; className?: string }) {
+  return <DUIDialog.Footer className={className}>{children}</DUIDialog.Footer>;
+}
+
+function DialogClose({ children }: { children?: React.ReactNode }) {
+  return <>{children}</>;
+}
+
+function DialogOverlay({ className }: { className?: string }) {
+  return <DUIDialog.Overlay className={className} />;
+}
+function DialogPortal({ children }: { children?: React.ReactNode }) {
+  return <>{children}</>;
+}
 
 export {
   Dialog,
-  DialogPortal,
-  DialogOverlay,
+  DialogBody,
   DialogClose,
-  DialogTrigger,
   DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTitle,
   DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
 };

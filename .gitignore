@@ -45,8 +45,6 @@ tmp/
 temp/
 
 # Local environment files
-.env
-.env.local
 
 # ClickHouse data
 clickhouse-data/
@@ -68,3 +66,5 @@ observability/jsonnetfile.lock.json
 node_modules/
 .pnpm-store/
 .claude/settings.local.json
+.env
+.env.local

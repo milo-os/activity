@@ -366,8 +366,10 @@ func (c *DLQRetryController) bindRetryConsumer() (*nats.Subscription, error) {
 	if c.retrySub != nil {
 		return c.retrySub, nil
 	}
+	// The subject must match the durable's filter (activity.dlq.>) exactly.
+	subject := fmt.Sprintf("%s.>", c.dlqSubjectPrefix)
 	sub, err := c.js.PullSubscribe(
-		"",
+		subject,
 		dlqRetryDurable,
 		nats.Bind(c.dlqStreamName, dlqRetryDurable),
 	)

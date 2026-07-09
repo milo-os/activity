@@ -11,6 +11,7 @@ resources:
   - events-processor-consumer.yaml
   - clickhouse-events-consumer.yaml
   - dlq-stream.yaml
+  - dlq-retry-consumer.yaml
   - reindex-stream.yaml
   - clickhouse-reindex-consumer.yaml
 

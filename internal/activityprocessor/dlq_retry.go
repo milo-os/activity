@@ -125,10 +125,20 @@ type RetryOutcome struct {
 // "successfully processed". A nil evaluator falls back to publish-ACK accounting.
 type RetryEvaluator func(ctx context.Context, event *processor.DeadLetterEvent) RetryOutcome
 
+// dlqRetryDurable is the durable pull consumer the retry controller binds to on
+// the workqueue DLQ stream. It is provisioned declaratively
+// (config/components/nats-streams/dlq-retry-consumer.yaml); a workqueue stream
+// rejects overlapping ephemeral consumers, so all replicas share this one.
+const dlqRetryDurable = "dlq-retry-worker"
+
 // DLQRetryController manages automatic retry of dead-letter queue events.
 type DLQRetryController struct {
 	js     nats.JetStreamContext
 	config DLQRetryConfig
+
+	// retrySub is the shared, lazily-bound subscription to the durable DLQ
+	// consumer. Guarded by mu (every processRetryBatch caller holds mu).
+	retrySub *nats.Subscription
 
 	// evaluator re-runs policy evaluation in place before a retry is treated as
 	// resolved. When nil, the controller cannot observe evaluation outcomes and
@@ -345,39 +355,42 @@ func extractResourceInfo(event *processor.DeadLetterEvent) (apiGroup, kind strin
 	return apiGroup, kind
 }
 
-// processRetryBatch fetches and processes retry-eligible DLQ events.
-func (c *DLQRetryController) processRetryBatch(ctx context.Context, trigger string, filter *retryFilter) (processed, succeeded, failed int) {
-	// Build subject filter
-	subject := fmt.Sprintf("%s.>", c.dlqSubjectPrefix)
-	if filter != nil {
-		// Filter by specific apiGroup and kind
-		subject = fmt.Sprintf("%s.*.%s.%s", c.dlqSubjectPrefix, filter.apiGroup, filter.kind)
+// bindRetryConsumer lazily binds the shared durable pull consumer on the
+// workqueue DLQ stream and caches it. Callers must hold c.mu.
+//
+// The durable is provisioned out of band (dlq-retry-consumer.yaml) with a fixed
+// activity.dlq.> filter. Per-policy narrowing happens client-side in
+// processRetryBatch, so we never create a second, overlapping consumer — which a
+// workqueue stream rejects with "filtered consumer not unique".
+func (c *DLQRetryController) bindRetryConsumer() (*nats.Subscription, error) {
+	if c.retrySub != nil {
+		return c.retrySub, nil
 	}
-
-	// Create ephemeral consumer for this batch
 	sub, err := c.js.PullSubscribe(
-		subject,
-		"", // Durable name empty = ephemeral
-		nats.BindStream(c.dlqStreamName),
+		"",
+		dlqRetryDurable,
+		nats.Bind(c.dlqStreamName, dlqRetryDurable),
 	)
 	if err != nil {
-		klog.ErrorS(err, "Failed to create DLQ consumer", "subject", subject)
+		return nil, err
+	}
+	c.retrySub = sub
+	return sub, nil
+}
+
+// processRetryBatch fetches and processes retry-eligible DLQ events.
+func (c *DLQRetryController) processRetryBatch(ctx context.Context, trigger string, filter *retryFilter) (processed, succeeded, failed int) {
+	// Bind the shared durable consumer. All replicas compete for messages on the
+	// same consumer; the filter argument narrows results client-side below.
+	sub, err := c.bindRetryConsumer()
+	if err != nil {
+		klog.ErrorS(err, "Failed to bind DLQ retry consumer", "durable", dlqRetryDurable)
 		return 0, 0, 0
 	}
-	defer func() {
-		if err := sub.Unsubscribe(); err != nil {
-			klog.ErrorS(err, "Failed to unsubscribe from DLQ consumer")
-		}
-	}()
 
-	// Fetch batch of messages
-	// Note: We use an ephemeral consumer that's destroyed after this batch.
-	// NAKed messages return to the stream and will be available to the next
-	// ephemeral consumer on the next retry interval. This is less efficient
-	// than server-side filtering but simpler to implement correctly.
 	msgs, err := sub.Fetch(c.config.BatchSize, nats.MaxWait(5*time.Second))
 	if err != nil && err != nats.ErrTimeout {
-		klog.ErrorS(err, "Failed to fetch DLQ messages", "subject", subject)
+		klog.ErrorS(err, "Failed to fetch DLQ messages", "durable", dlqRetryDurable)
 		return 0, 0, 0
 	}
 
@@ -419,9 +432,18 @@ func (c *DLQRetryController) processRetryBatch(ctx context.Context, trigger stri
 				continue
 			}
 		} else {
-			// For periodic retry, check backoff eligibility
+			// For periodic retry, check backoff eligibility. Defer redelivery
+			// until the backoff expires; a plain Nak redelivers immediately, so
+			// the same backed-off events are re-fetched every batch and the drain
+			// loop spins until the run deadline instead of reaching processed==0.
 			if !c.isEligibleForRetry(&dlEvent, now) {
-				if nakErr := msg.Nak(); nakErr != nil {
+				delay := c.config.BackoffBase
+				if dlEvent.NextRetryAfter != nil {
+					if d := time.Until(dlEvent.NextRetryAfter.Time); d > 0 {
+						delay = d
+					}
+				}
+				if nakErr := msg.NakWithDelay(delay); nakErr != nil {
 					klog.ErrorS(nakErr, "Failed to NAK DLQ message")
 				}
 				continue

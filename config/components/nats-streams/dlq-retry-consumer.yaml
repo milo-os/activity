@@ -1,0 +1,42 @@
+# Durable pull consumer for the DLQ retry controller.
+#
+# ACTIVITY_DEAD_LETTER is a workqueue-retention stream, which permits only one
+# consumer per non-overlapping subject filter. The retry controller must bind a
+# single shared durable consumer instead of creating an ephemeral one per batch
+# per pod; overlapping ephemeral consumers fail with
+# "filtered consumer not unique on workqueue stream" and the DLQ never drains.
+#
+# Both processor replicas bind this same durable and compete for messages.
+---
+apiVersion: jetstream.nats.io/v1beta2
+kind: Consumer
+metadata:
+  name: dlq-retry-worker
+spec:
+  # Link to the dead-letter stream
+  streamName: ACTIVITY_DEAD_LETTER
+
+  # Durable consumer name the retry controller binds to
+  durableName: dlq-retry-worker
+
+  # Delivery policy: deliver all messages so the full backlog is drained
+  deliverPolicy: all
+
+  # Ack policy: explicit acknowledgments required
+  ackPolicy: explicit
+
+  # Replay policy: instant (process as fast as possible)
+  replayPolicy: instant
+
+  # Filter subject: every DLQ event; per-policy narrowing is done client-side
+  filterSubject: activity.dlq.>
+
+  # Ack wait: long enough for re-evaluation and republish
+  ackWait: 60s
+
+  # Max ack pending: matches the retry batch size
+  maxAckPending: 100
+
+  # Redelivery is unbounded: the retry controller owns backoff and retry-count
+  # tracking via the republished DLQ message metadata, not the consumer.
+  maxDeliver: -1

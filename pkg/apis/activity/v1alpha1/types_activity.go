@@ -99,6 +99,14 @@ type ActivitySpec struct {
 	//
 	// +required
 	Origin ActivityOrigin `json:"origin"`
+
+	// Source describes where the underlying event or activity originated:
+	// plane type, cluster, region, and city.
+	//
+	// Unset means this information is unknown or not yet populated.
+	//
+	// +optional
+	Source *ActivitySource `json:"source,omitempty"`
 }
 
 // ActivityActor identifies who performed an action.
@@ -128,6 +136,30 @@ type ActivityActor struct {
 	//
 	// +optional
 	Email string `json:"email,omitempty"`
+}
+
+// ActivitySource describes where the underlying event or activity originated.
+type ActivitySource struct {
+	// PlaneType indicates which plane the event or activity originated from.
+	// Example values: "management", "edge".
+	//
+	// +optional
+	PlaneType string `json:"planeType,omitempty"`
+
+	// Cluster is the name of the cluster the event or activity originated from.
+	//
+	// +optional
+	Cluster string `json:"cluster,omitempty"`
+
+	// Region is the region the event or activity originated from.
+	//
+	// +optional
+	Region string `json:"region,omitempty"`
+
+	// City is the city the event or activity originated from.
+	//
+	// +optional
+	City string `json:"city,omitempty"`
 }
 
 // ActivityResource identifies the Kubernetes resource affected by an activity.

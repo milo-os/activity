@@ -158,14 +158,7 @@ func (p *EventProcessor) processMessage(ctx context.Context, msg *nats.Msg) erro
 		return nil
 	}
 
-	apiGroup := getStringFromMap(involvedObject, "apiGroup")
-	// For core resources, apiVersion is "v1" with empty apiGroup.
-	if apiGroup == "" {
-		if apiVersion := getStringFromMap(involvedObject, "apiVersion"); apiVersion != "" && apiVersion != "v1" {
-			apiGroup = parseAPIGroup(apiVersion)
-		}
-	}
-	kind := getStringFromMap(involvedObject, "kind")
+	kind, apiGroup := resolveKindAndAPIGroup(involvedObject)
 
 	if kind == "" {
 		klog.V(4).InfoS("Could not determine kind from event, skipping")
@@ -219,7 +212,7 @@ func (p *EventProcessor) processMessage(ctx context.Context, msg *nats.Msg) erro
 		return nil
 	}
 
-	activity := p.buildActivity(event, matched, involvedObject, matched.Summary, matched.Links)
+	activity := p.buildActivity(event, matched, matched.Summary, matched.Links)
 
 	if err := p.publishActivity(ctx, activity); err != nil {
 		return fmt.Errorf("failed to publish activity: %w", err)
@@ -257,7 +250,6 @@ func (p *EventProcessor) normalizeEvent(event map[string]interface{}, involvedOb
 func (p *EventProcessor) buildActivity(
 	event map[string]interface{},
 	matched *MatchedPolicy,
-	involvedObject map[string]interface{},
 	summary string,
 	links []cel.Link,
 ) *v1alpha1.Activity {
@@ -265,11 +257,20 @@ func (p *EventProcessor) buildActivity(
 	// -> firstTimestamp -> metadata.creationTimestamp -> now().
 	timestamp := resolveEventTimestamp(event)
 
-	// Extract resource info from involved object.
-	namespace := getStringFromMap(involvedObject, "namespace")
-	resourceName := getStringFromMap(involvedObject, "name")
-	resourceUID := getStringFromMap(involvedObject, "uid")
-	apiVersion := getStringFromMap(involvedObject, "apiVersion")
+	source := ExtractSourceFromAnnotations(event)
+
+	resourceObject := ResolveInvolvedObject(event)
+
+	// Extract resource info from the resolved resource object.
+	namespace := getStringFromMap(resourceObject, "namespace")
+	resourceName := getStringFromMap(resourceObject, "name")
+	resourceUID := getStringFromMap(resourceObject, "uid")
+	apiVersion := getStringFromMap(resourceObject, "apiVersion")
+
+	// Derived from resourceObject, not matched.APIGroup/Kind: pairing
+	// resourceObject's Name/UID with the policy match's Kind would produce an
+	// incoherent Resource if they ever diverge.
+	resourceKind, resourceAPIGroup := resolveKindAndAPIGroup(resourceObject)
 
 	// Resolve actor from reporting controller or source component.
 	actor := resolveActorFromEvent(event)
@@ -283,8 +284,11 @@ func (p *EventProcessor) buildActivity(
 		eventUID = getStringFromMap(metadata, "uid")
 	}
 
+	// originID feeds both Spec.Origin.ID and the name hash below; they must match.
+	originID := qualifiedOriginID(source, eventUID)
+
 	// Generate activity name.
-	name := activityName("event", eventUID, matched.APIGroup, matched.Kind)
+	name := activityName("event", originID, matched.APIGroup, matched.Kind)
 
 	// Convert links.
 	var activityLinks []v1alpha1.ActivityLink
@@ -301,7 +305,7 @@ func (p *EventProcessor) buildActivity(
 		})
 	}
 
-	return &v1alpha1.Activity{
+	activity := &v1alpha1.Activity{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: v1alpha1.SchemeGroupVersion.String(),
 			Kind:       "Activity",
@@ -317,9 +321,9 @@ func (p *EventProcessor) buildActivity(
 			ChangeSource: changeSource,
 			Actor:        actor,
 			Resource: v1alpha1.ActivityResource{
-				APIGroup:   matched.APIGroup,
+				APIGroup:   resourceAPIGroup,
 				APIVersion: apiVersion,
-				Kind:       matched.Kind,
+				Kind:       resourceKind,
 				Name:       resourceName,
 				Namespace:  namespace,
 				UID:        resourceUID,
@@ -329,10 +333,18 @@ func (p *EventProcessor) buildActivity(
 			Tenant: ExtractTenantFromAnnotations(event),
 			Origin: v1alpha1.ActivityOrigin{
 				Type: "event",
-				ID:   eventUID,
+				ID:   originID,
 			},
 		},
 	}
+
+	// Only attach Source when at least one field is non-empty, so events
+	// without source annotations keep Spec.Source nil.
+	if source != (v1alpha1.ActivitySource{}) {
+		activity.Spec.Source = &source
+	}
+
+	return activity
 }
 
 // publishActivity serializes and publishes an Activity to the NATS ACTIVITIES stream.

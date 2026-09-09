@@ -142,19 +142,24 @@ func (b *ActivityBuilder) BuildFromEvent(
 	links []cel.Link,
 	resolveKind KindResolver,
 ) (*v1alpha1.Activity, error) {
-	// Extract the involved/regarding object using the shared fallback chain:
-	// "regarding" (events.k8s.io/v1) -> "involvedObject" (core/v1).
-	regarding := ResolveInvolvedObject(eventMap)
+	source := ExtractSourceFromAnnotations(eventMap)
+
+	resourceObject := ResolveInvolvedObject(eventMap)
 
 	// Extract timestamp using the shared fallback chain: eventTime -> lastTimestamp
 	// -> firstTimestamp -> metadata.creationTimestamp -> now().
 	timestamp := resolveEventTimestamp(eventMap)
 
-	// Extract resource info from regarding
-	namespace := GetNestedString(regarding, "namespace")
-	resourceName := GetNestedString(regarding, "name")
-	resourceUID := GetNestedString(regarding, "uid")
-	apiVersion := GetNestedString(regarding, "apiVersion")
+	// Extract resource info from the resolved resource object.
+	namespace := GetNestedString(resourceObject, "namespace")
+	resourceName := GetNestedString(resourceObject, "name")
+	resourceUID := GetNestedString(resourceObject, "uid")
+	apiVersion := GetNestedString(resourceObject, "apiVersion")
+
+	// Derived from resourceObject, not b.APIGroup/b.Kind: pairing
+	// resourceObject's Name/UID with the policy match's Kind would produce an
+	// incoherent Resource if they ever diverge.
+	resourceKind, resourceAPIGroup := resolveKindAndAPIGroup(resourceObject)
 
 	// Events are typically system-generated
 	changeSource := ChangeSourceSystem
@@ -173,8 +178,11 @@ func (b *ActivityBuilder) BuildFromEvent(
 		eventUID = GetNestedString(metadata, "uid")
 	}
 
+	// originID feeds both Spec.Origin.ID and the name hash below; they must match.
+	originID := qualifiedOriginID(source, eventUID)
+
 	// Generate activity name
-	name := activityName("event", eventUID, b.APIGroup, b.Kind)
+	name := activityName("event", originID, b.APIGroup, b.Kind)
 
 	// Convert links
 	activityLinks, err := ConvertLinks(links, resolveKind)
@@ -182,7 +190,7 @@ func (b *ActivityBuilder) BuildFromEvent(
 		return nil, fmt.Errorf("%w: %v", ErrActivityBuild, err)
 	}
 
-	return &v1alpha1.Activity{
+	activity := &v1alpha1.Activity{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: v1alpha1.SchemeGroupVersion.String(),
 			Kind:       "Activity",
@@ -198,9 +206,9 @@ func (b *ActivityBuilder) BuildFromEvent(
 			ChangeSource: changeSource,
 			Actor:        actor,
 			Resource: v1alpha1.ActivityResource{
-				APIGroup:   b.APIGroup,
+				APIGroup:   resourceAPIGroup,
 				APIVersion: apiVersion,
-				Kind:       b.Kind,
+				Kind:       resourceKind,
 				Name:       resourceName,
 				Namespace:  namespace,
 				UID:        resourceUID,
@@ -209,8 +217,16 @@ func (b *ActivityBuilder) BuildFromEvent(
 			Tenant: tenant,
 			Origin: v1alpha1.ActivityOrigin{
 				Type: "event",
-				ID:   eventUID,
+				ID:   originID,
 			},
 		},
-	}, nil
+	}
+
+	// Only attach Source when at least one field is non-empty, so events
+	// without source annotations keep Spec.Source nil.
+	if source != (v1alpha1.ActivitySource{}) {
+		activity.Spec.Source = &source
+	}
+
+	return activity, nil
 }

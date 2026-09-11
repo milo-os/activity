@@ -184,13 +184,6 @@ func getStringFromMap(m map[string]any, key string) string {
 	return ""
 }
 
-const (
-	// scopeTypeAnnotation is the annotation key carrying the tenant scope type.
-	scopeTypeAnnotation = "platform.miloapis.com/scope.type"
-	// scopeNameAnnotation is the annotation key carrying the tenant scope name.
-	scopeNameAnnotation = "platform.miloapis.com/scope.name"
-)
-
 // ExtractTenantFromAnnotations reads scope annotations from event metadata and
 // returns the corresponding ActivityTenant. Falls back to platform scope when
 // the type annotation is absent or empty.
@@ -214,8 +207,8 @@ func ExtractTenantFromAnnotations(eventMap map[string]any) v1alpha1.ActivityTena
 		return tenant
 	}
 
-	scopeType := getStringFromMap(annotations, scopeTypeAnnotation)
-	scopeName := getStringFromMap(annotations, scopeNameAnnotation)
+	scopeType := getStringFromMap(annotations, types.ScopeTypeAnnotation)
+	scopeName := getStringFromMap(annotations, types.ScopeNameAnnotation)
 
 	if scopeType != "" {
 		tenant.Type = scopeType

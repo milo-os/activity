@@ -40,6 +40,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityQuerySpec":         schema_pkg_apis_activity_v1alpha1_ActivityQuerySpec(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityQueryStatus":       schema_pkg_apis_activity_v1alpha1_ActivityQueryStatus(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityResource":          schema_pkg_apis_activity_v1alpha1_ActivityResource(ref),
+		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivitySource":            schema_pkg_apis_activity_v1alpha1_ActivitySource(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivitySpec":              schema_pkg_apis_activity_v1alpha1_ActivitySpec(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityTenant":            schema_pkg_apis_activity_v1alpha1_ActivityTenant(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.AuditLogFacetsQuery":       schema_pkg_apis_activity_v1alpha1_AuditLogFacetsQuery(ref),
@@ -771,7 +772,7 @@ func schema_pkg_apis_activity_v1alpha1_ActivityPolicy(ref common.ReferenceCallba
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ActivityPolicy defines translation rules for a specific resource type. Service providers create one ActivityPolicy per resource kind to customize activity descriptions without modifying the Activity Processor.\n\nExample:\n\n\tapiVersion: activity.miloapis.com/v1alpha1\n\tkind: ActivityPolicy\n\tmetadata:\n\t  name: networking-httpproxy\n\tspec:\n\t  resource:\n\t    apiGroup: networking.datumapis.com\n\t    kind: HTTPProxy\n\t  auditRules:\n\t    - match: \"audit.verb == 'create'\"\n\t      summary: \"{{ actor }} created {{ link(kind + ' ' + audit.objectRef.name, audit.responseObject) }}\"\n\t  eventRules:\n\t    - match: \"event.reason == 'Programmed'\"\n\t      summary: \"{{ link(kind + ' ' + event.regarding.name, event.regarding) }} is now programmed\"",
+				Description: "ActivityPolicy defines translation rules for a specific resource type. Service providers create one ActivityPolicy per resource kind to customize activity descriptions without modifying the Activity Processor.\n\nExample:\n\n\tapiVersion: activity.miloapis.com/v1alpha1\n\tkind: ActivityPolicy\n\tmetadata:\n\t  name: networking-httpproxy\n\tspec:\n\t  resource:\n\t    apiGroup: networking.datumapis.com\n\t    kind: HTTPProxy\n\t  auditRules:\n\t    - match: \"audit.verb == 'create'\"\n\t      summary: \"{{ actor }} created {{ link(kind + ' ' + audit.objectRef.name, audit.objectRef) }}\"\n\t  eventRules:\n\t    - match: \"event.reason == 'Programmed'\"\n\t      summary: \"{{ link(kind + ' ' + event.regarding.name, event.regarding) }} is now programmed\"",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -926,7 +927,7 @@ func schema_pkg_apis_activity_v1alpha1_ActivityPolicyRule(ref common.ReferenceCa
 					},
 					"summary": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Summary is a CEL template for generating the activity summary. Use {{ }} delimiters to embed CEL expressions within strings.\n\nAvailable variables:\n  - For audit rules: audit (map), actor, actorRef, kind\n    Access audit fields via: audit.verb, audit.objectRef, audit.user, audit.responseStatus, audit.responseObject\n  - For event rules: event, actor, actorRef\n\nAvailable functions:\n  - link(displayText, resourceRef): Creates a clickable reference\n\nExamples:\n  \"{{ actor }} created {{ link(kind + ' ' + audit.objectRef.name, audit.responseObject) }}\"\n  \"{{ link(kind + ' ' + event.regarding.name, event.regarding) }} is now programmed\"",
+							Description: "Summary is a CEL template for generating the activity summary. Use {{ }} delimiters to embed CEL expressions within strings.\n\nAvailable variables:\n  - For audit rules: audit (map), actor, actorRef, kind\n    Access audit fields via: audit.verb, audit.objectRef, audit.user, audit.responseStatus, audit.responseObject\n  - For event rules: event, actor, actorRef\n\nAvailable functions:\n  - link(displayText, resourceRef): Creates a clickable reference\n\nExamples:\n  \"{{ actor }} created {{ link(kind + ' ' + audit.objectRef.name, audit.objectRef) }}\"\n  \"{{ link(kind + ' ' + event.regarding.name, event.regarding) }} is now programmed\"",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -1270,6 +1271,47 @@ func schema_pkg_apis_activity_v1alpha1_ActivityResource(ref common.ReferenceCall
 	}
 }
 
+func schema_pkg_apis_activity_v1alpha1_ActivitySource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ActivitySource describes where the underlying event or activity originated.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"planeType": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PlaneType indicates which plane the event or activity originated from. Example values: \"management\", \"edge\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cluster": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cluster is the name of the cluster the event or activity originated from.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"region": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Region is the region the event or activity originated from.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"city": {
+						SchemaProps: spec.SchemaProps{
+							Description: "City is the city the event or activity originated from.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_pkg_apis_activity_v1alpha1_ActivitySpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -1359,12 +1401,18 @@ func schema_pkg_apis_activity_v1alpha1_ActivitySpec(ref common.ReferenceCallback
 							Ref:         ref("go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityOrigin"),
 						},
 					},
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Source describes where the underlying event or activity originated: plane type, cluster, region, and city.\n\nUnset means this information is unknown or not yet populated.",
+							Ref:         ref("go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivitySource"),
+						},
+					},
 				},
 				Required: []string{"summary", "changeSource", "actor", "resource", "tenant", "origin"},
 			},
 		},
 		Dependencies: []string{
-			"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityActor", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityChange", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityLink", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityOrigin", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityResource", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityTenant"},
+			"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityActor", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityChange", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityLink", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityOrigin", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityResource", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivitySource", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityTenant"},
 	}
 }
 
@@ -1786,7 +1834,7 @@ func schema_pkg_apis_activity_v1alpha1_EventFacetQuerySpec(ref common.ReferenceC
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Facets specifies which fields to get distinct values for. Each facet returns the top N values with counts.\n\nSupported fields:\n  - regarding.kind: Resource kinds (Pod, Deployment, etc.)\n  - regarding.namespace: Namespaces of regarding objects\n  - reason: Event reasons (Scheduled, Pulled, Created, etc.)\n  - type: Event types (Normal, Warning)\n  - source.component: Source components (kubelet, scheduler, etc.)\n  - namespace: Event namespace",
+							Description: "Facets specifies which fields to get distinct values for. Each facet returns the top N values with counts.\n\nSupported fields:\n  - regarding.kind: Resource kinds (Pod, Deployment, etc.)\n  - regarding.namespace: Namespaces of regarding objects\n  - reason: Event reasons (Scheduled, Pulled, Created, etc.)\n  - type: Event types (Normal, Warning)\n  - source.component: Source components (kubelet, scheduler, etc.)\n  - namespace: Event namespace\n  - related.kind: Related resource kinds (Node, ConfigMap, etc.)\n  - related.namespace: Namespaces of related objects",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -1970,7 +2018,7 @@ func schema_pkg_apis_activity_v1alpha1_EventQuerySpec(ref common.ReferenceCallba
 					},
 					"fieldSelector": {
 						SchemaProps: spec.SchemaProps{
-							Description: "FieldSelector filters events using standard Kubernetes field selector syntax.\n\nSupported Fields:\n  metadata.name               - event name\n  metadata.namespace          - event namespace\n  metadata.uid                - event UID\n  regarding.apiVersion        - regarding resource API version\n  regarding.kind              - regarding resource kind (e.g., Pod, Deployment)\n  regarding.namespace         - regarding resource namespace\n  regarding.name              - regarding resource name\n  regarding.uid               - regarding resource UID\n  regarding.fieldPath         - regarding resource field path\n  reason                      - event reason (e.g., FailedMount, Pulled)\n  type                        - event type (Normal or Warning)\n  source.component            - reporting component\n  source.host                 - reporting host\n  reportingComponent          - reporting component (alias for source.component)\n  reportingInstance           - reporting instance (alias for source.host)\n\nOperators: = (or ==), != Multiple conditions: comma-separated (all must match)\n\nCommon Patterns:\n  \"type=Warning\"                                  - Warning events only\n  \"regarding.kind=Pod\"                            - Events for pods\n  \"reason=FailedMount\"                            - Mount failure events\n  \"regarding.name=my-pod,type=Warning\"            - Warnings for a specific pod",
+							Description: "FieldSelector filters events using standard Kubernetes field selector syntax.\n\nSupported Fields:\n  metadata.name               - event name\n  metadata.namespace          - event namespace\n  metadata.uid                - event UID\n  regarding.apiVersion        - regarding resource API version\n  regarding.kind              - regarding resource kind (e.g., Pod, Deployment)\n  regarding.namespace         - regarding resource namespace\n  regarding.name              - regarding resource name\n  regarding.uid               - regarding resource UID\n  regarding.fieldPath         - regarding resource field path\n  related.apiVersion          - related resource API version\n  related.kind                - related resource kind (e.g., Node)\n  related.namespace           - related resource namespace\n  related.name                - related resource name\n  reason                      - event reason (e.g., FailedMount, Pulled)\n  type                        - event type (Normal or Warning)\n  source.component            - reporting component\n  source.host                 - reporting host\n  reportingComponent          - reporting component (alias for source.component)\n  reportingInstance           - reporting instance (alias for source.host)\n\nOperators: = (or ==), != Multiple conditions: comma-separated (all must match)\n\nCommon Patterns:\n  \"type=Warning\"                                  - Warning events only\n  \"regarding.kind=Pod\"                            - Events for pods\n  \"reason=FailedMount\"                            - Mount failure events\n  \"regarding.name=my-pod,type=Warning\"            - Warnings for a specific pod\n  \"related.kind=Node\"                              - Events related to nodes",
 							Type:        []string{"string"},
 							Format:      "",
 						},

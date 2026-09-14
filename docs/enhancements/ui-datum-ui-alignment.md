@@ -43,7 +43,7 @@ Three cloud-portal bugs share one root: the package draws its own UI instead of 
 
 Beyond the bugs, the package cannot follow the host theme reliably. Datum-ui components carry both themes in their tokens. Activity-ui carries 206 hard-coded classes such as `bg-red-50` and `text-green-600` across 24 files, each paired by hand with a `dark:` variant, and each a place where the package drifts from the host's palette.
 
-Two apps consume the package. cloud-portal uses `ActivityFeed`, the filter serialisers, and the error formatter. staff-portal imports 28 symbols including the re-exported Tooltip primitives, `ActivityFeedFilters`, `PolicyEditor`, `PolicyList`, and `useActivityFeed`. cloud-portal is on datum-ui 2.8.0, staff-portal on 1.3.1, and the package declares a peer of `^0.8.0`, which predates the picker family.
+Two apps consume the package. cloud-portal uses `ActivityFeed`, the filter serialisers, and the error formatter. staff-portal imports 28 symbols including the re-exported Tooltip primitives, `ActivityFeedFilters`, `PolicyEditor`, `PolicyList`, and `useActivityFeed`. cloud-portal is on datum-ui 2.8.0, staff-portal on 1.3.1, and the package declares a peer of `^0.8.0`, which predates the picker family. datum-ui's current release is 2.9.1.
 
 ## Design
 
@@ -88,7 +88,7 @@ All 206 hard-coded palette classes move to semantic tokens, and every `dark:` va
 | informational (`blue-*`) | Badge `type="info"`, Alert `variant="info"`; bare colours use the theme's info scale |
 | neutral surfaces (`gray-*`, `slate-*`, `white`) | `bg-muted`, `bg-card`, `bg-background`, `border-border`, `text-muted-foreground` |
 
-Component variants come first. A bare status colour is only used where no datum-ui component carries the meaning, and each one is checked against both ends of the peer range because the status scales live in datum-ui's theme stylesheet, not in the base tokens.
+Component variants come first. A bare status colour is only used where no datum-ui component carries the meaning, and each one is verified in the example app because the status scales live in datum-ui's theme stylesheet, not in the base tokens.
 
 Files in scope: the feed items, expanded details, alert primitive, policy list, editor, detail and edit views, rule editor and list, reindex views, filter builders, events feed, and the three primitives that still carry a palette class. The whole package is in scope, not only the components cloud-portal renders.
 
@@ -104,18 +104,18 @@ Nothing exported from `ui/src/index.ts` is renamed or removed. Re-exported primi
 
 ### Peer dependency range
 
-`@datum-cloud/datum-ui` moves from `^0.8.0` to `>=1.3.0 <3.0.0`. The picker family exists from 0.10.0, so 1.3.x satisfies it, and cloud-portal's 2.x is inside the range. Radix and cmdk peers are removed. Because the peer range moves, the release is a minor bump to 0.6.0.
+`@datum-cloud/datum-ui` moves from `^0.8.0` to `^2.9.0`, and the package's development dependency moves to 2.9.1, so the build, the example app, and the Playwright suite run against what cloud-portal ships. The 2.9.x releases are additive (card layout variants, a settings nav, and picker triggers switching to `rounded-lg`). Radix and cmdk peers are removed. Because the peer range moves, the release is a minor bump to 0.6.0.
 
-The package's own development dependency on datum-ui moves to the current release, 2.9.1, so the build, the example app, and the Playwright suite run against what cloud-portal ships. The 2.9.x releases are additive (card layout variants, a settings nav, and picker triggers switching to `rounded-lg`). The lower bound is exercised separately, see [Verification](#verification).
+The package supports one datum-ui major. Supporting 1.x as well would mean every change is verified twice and still leaves room for silent runtime and stylesheet drift between majors, which a typecheck cannot catch.
 
-staff-portal stays on 1.3.1 for now. Moving it to 2.x is a separate migration because datum-ui 2.0 raised its TanStack Table and Motion peers to new majors, and staff-portal pins the previous ones.
+staff-portal is not touched. It stays on activity-ui 0.5.1 and datum-ui 1.3.1, and 0.6.0 is not installable there until it moves to datum-ui 2.x. That move is a separate migration: datum-ui 2.0 raised its TanStack Table and Motion peers to new majors, and staff-portal imports TanStack Table in 38 files, datum-ui's data table in 36, and Motion in 5. The frozen public API in this RFC is what makes that later bump a version change rather than a rewrite.
 
 ## Verification
 
 - The package has no unit tests; it has a Playwright suite against `ui/example` with route mocks. New specs cover: applying an inverted custom range is impossible; a preset round-trips through the URL as its relative key; a manual range round-trips as ISO; and a feed inside an unconstrained page loads a second page.
 - Every changed view is checked in the example app in light and dark, since token mapping is the riskiest change.
-- `rollup -c`, `tsc --noEmit`, and `eslint` pass.
-- staff-portal is typechecked against the built package before the release, because it consumes the most surface.
+- `rollup -c`, `tsc --noEmit`, and `eslint` pass against datum-ui 2.9.1.
+- staff-portal's 28 imported symbols are checked against the package's public declarations so the API freeze holds, even though staff-portal does not take this release yet.
 - cloud-portal is verified in the browser on the DNS zone activity tab and the org activity page after the bump.
 
 ## Delivery
@@ -126,7 +126,7 @@ Three pull requests in milo-os/activity, each independently reviewable and relea
 2. `TimeRangeDropdown` on the picker, and the observer root fallback.
 3. Colour tokens across the package.
 
-Then a minor release, 0.6.0, through the manual publish workflow. Then one cloud-portal pull request that bumps activity-ui to 0.6.0 and datum-ui to 2.9.1, and sets `infiniteScroll={false}`, closing #1468, #1471, and #1472. staff-portal bumps activity-ui when it is ready; nothing in its imports changes.
+Then a minor release, 0.6.0, through the manual publish workflow. Then one cloud-portal pull request that bumps activity-ui to 0.6.0 and datum-ui to 2.9.1, and sets `infiniteScroll={false}`, closing #1468, #1471, and #1472. staff-portal is left on 0.5.1 until its own datum-ui 2.x migration; nothing in its imports changes when it does bump.
 
 ## Alternatives
 
@@ -136,8 +136,8 @@ Then a minor release, 0.6.0, through the manual publish workflow. Then one cloud
 
 ## Failure modes
 
-- **A datum-ui prop shape differs from the local primitive.** Caught by the staff-portal typecheck before release; the local module adapts rather than the consumer.
-- **A token does not exist in datum-ui 1.3.x but does in 2.8.x.** Caught by building the example app against the lower bound of the peer range in CI for this change.
+- **A datum-ui prop shape differs from the local primitive.** Caught by the public-declaration check against staff-portal's imports; the local module adapts rather than the consumer.
+- **staff-portal upgrades activity-ui before datum-ui.** The `^2.9.0` peer makes the install fail loudly instead of running with a mismatched major.
 - **The viewport-root fallback fires once and stops.** The trigger stays intersecting after a load, so the observer only re-arms on `hasMore` changes. The cloud-portal footer is the belt-and-braces path; the Playwright pagination spec covers the fallback itself.
 - **Preset round-tripping breaks URL state.** Covered by the URL specs; the preset key is the relative string on purpose.
 
@@ -145,7 +145,7 @@ Then a minor release, 0.6.0, through the manual publish workflow. Then one cloud
 
 - The package never owns theme; the host does.
 - Public API is frozen for this change.
-- Peer range is `>=1.3.0 <3.0.0` so both portals stay on their current datum-ui; the package builds against 2.9.1 and cloud-portal moves to 2.9.1.
+- Peer range is `^2.9.0`; the package and cloud-portal move to datum-ui 2.9.1, and staff-portal is not touched.
 - Three PRs, one minor release.
 
 ## Open questions

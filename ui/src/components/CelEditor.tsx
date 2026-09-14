@@ -44,7 +44,6 @@ export function CelEditor({
   onChange,
   language = 'cel',
   availableFields = [],
-  placeholder = '',
   height = '100px',
   className,
   error = false,

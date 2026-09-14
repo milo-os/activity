@@ -6,7 +6,6 @@ import { PolicyActivityView } from './PolicyActivityView';
 import { PolicyActivityViewSkeleton } from './PolicyActivityViewSkeleton';
 import { Button } from '@datum-cloud/datum-ui/button';
 import { Card, CardHeader, CardContent } from '@datum-cloud/datum-ui/card';
-import { Badge } from './ui/badge';
 import { ApiErrorAlert } from './ApiErrorAlert';
 import { Alert, AlertDescription } from '@datum-cloud/datum-ui/alert';
 import { AlertTriangle, AlertCircle, Copy, Check, Edit } from 'lucide-react';

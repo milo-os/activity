@@ -66,13 +66,6 @@ function getNote(event: K8sEvent): string | undefined {
 }
 
 /**
- * Get the reporting controller (handling both new and deprecated field names)
- */
-function getReportingController(event: K8sEvent): string | undefined {
-  return event.reportingController || event.source?.component;
-}
-
-/**
  * Get the event count (handling both new and deprecated field names)
  */
 function getCount(event: K8sEvent): number | undefined {
@@ -123,7 +116,6 @@ export function EventFeedItem({
   const note = getNote(event);
   const count = getCount(event);
   const timestamp = getTimestamp(event);
-  const reportingController = getReportingController(event);
   const { type, reason } = event;
 
   const handleClick = () => {

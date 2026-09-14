@@ -8,7 +8,7 @@
  */
 function requiresBracketNotation(key: string): boolean {
   // Keys with dots, slashes, or other special characters need bracket notation
-  return /[.\/\-:]/.test(key) || /^\d/.test(key);
+  return /[./\-:]/.test(key) || /^\d/.test(key);
 }
 
 /**

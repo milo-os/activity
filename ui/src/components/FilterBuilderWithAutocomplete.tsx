@@ -116,7 +116,7 @@ export function FilterBuilderWithAutocomplete({
     // Suggest logical operators to continue
     const completedValuePattern = /["'][^"']*["']\s*$/;
     const completedNumberPattern = /\d+\s*$/;
-    const afterLogicalOp = /(\&\&|\|\|)\s*$/;
+    const afterLogicalOp = /(&&|\|\|)\s*$/;
 
     if ((completedValuePattern.test(textBeforeCursor) || completedNumberPattern.test(textBeforeCursor)) && !afterLogicalOp.test(textBeforeCursor)) {
       // After a complete value, suggest logical operators
@@ -322,7 +322,7 @@ export function FilterBuilderWithAutocomplete({
               <strong>Pro Tips:</strong>
               <ul className="mt-2 mb-0 pl-6">
                 <li>Autocomplete appears automatically as you type</li>
-                <li>After completing a value (e.g., <code className="px-1 py-0.5 bg-muted rounded text-sm">"get"</code>), suggestions show logical operators (<code className="px-1 py-0.5 bg-muted rounded text-sm">&&</code>, <code className="px-1 py-0.5 bg-muted rounded text-sm">||</code>)</li>
+                <li>After completing a value (e.g., <code className="px-1 py-0.5 bg-muted rounded text-sm">&quot;get&quot;</code>), suggestions show logical operators (<code className="px-1 py-0.5 bg-muted rounded text-sm">&&</code>, <code className="px-1 py-0.5 bg-muted rounded text-sm">||</code>)</li>
                 <li>After typing <code className="px-1 py-0.5 bg-muted rounded text-sm">&&</code> or <code className="px-1 py-0.5 bg-muted rounded text-sm">||</code>, all field names are suggested</li>
                 <li>Type <code className="px-1 py-0.5 bg-muted rounded text-sm">.</code> after a field name to see available string functions</li>
               </ul>
@@ -334,7 +334,7 @@ export function FilterBuilderWithAutocomplete({
           <div className="bg-muted p-6 rounded-lg mb-6 max-h-96 overflow-y-auto">
             <h4 className="mt-0 mb-4 text-lg font-semibold text-foreground">Available Fields & Examples</h4>
             <p className="mb-4 text-muted-foreground text-sm">
-              Click "Insert" to add an example to your query
+              Click &quot;Insert&quot; to add an example to your query
             </p>
             <div className="mt-4">
               {FILTER_FIELDS.map((field) => (

@@ -214,31 +214,34 @@ export function ActivityFeed({
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
-  // Infinite scroll using Intersection Observer
+  // Infinite scroll using Intersection Observer.
+  // The list container is the root only when it actually scrolls. Host apps
+  // such as cloud-portal scroll at the page level, so the container never
+  // overflows; in that case observe against the viewport instead.
   useEffect(() => {
     if (!infiniteScroll || !hasMore || !loadMoreTriggerRef.current) return;
+
+    const container = scrollContainerRef.current;
+    const containerScrolls =
+      !!container && container.scrollHeight > container.clientHeight + 1;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
         if (entry.isIntersecting && !isLoadingRef.current) {
-          // Call through the ref to always use the latest function
           loadMoreRef.current();
         }
       },
       {
-        root: scrollContainerRef.current,
+        root: containerScrolls ? container : null,
         rootMargin: `${loadMoreThreshold}px`,
         threshold: 0,
       },
     );
 
     observer.observe(loadMoreTriggerRef.current);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [infiniteScroll, loadMoreThreshold, hasMore]);
+    return () => observer.disconnect();
+  }, [infiniteScroll, loadMoreThreshold, hasMore, activities.length]);
 
   // Handle filter changes - refresh is automatic via the hook
   const handleFiltersChange = useCallback(

@@ -34,8 +34,11 @@ spec:
   # Ack wait: long enough for re-evaluation and republish
   ackWait: 60s
 
-  # Max ack pending: matches the retry batch size
-  maxAckPending: 100
+  # Max ack pending: two replicas share this consumer, so the ceiling must cover
+  # a full retry batch from each of them. At one batch's worth, a single replica
+  # can hold every pending slot and the other reads its empty fetch as "the DLQ
+  # is drained" and ends its run early.
+  maxAckPending: 200
 
   # Redelivery is unbounded: the retry controller owns backoff and retry-count
   # tracking via the republished DLQ message metadata, not the consumer.

@@ -218,6 +218,18 @@ func (c *DLQRetryController) Start(ctx context.Context) error {
 // it can be drained, ensuring the goroutine remains responsive to cancellation.
 const maxPeriodicRunDuration = 2 * time.Minute
 
+// maxPolicyRunDuration caps a single policy-triggered retry scan. The shared
+// durable consumer carries one fixed subject filter, so this path walks the
+// queue and matches client-side instead of fetching only its own subject; it
+// therefore has to scan past events belonging to other policies.
+const maxPolicyRunDuration = 30 * time.Second
+
+// policySkipRedeliveryDelay defers an event a policy scan did not match for
+// longer than the scan itself can run, so a single run never re-fetches what it
+// has already skipped. The periodic drain still picks those events up on its
+// own schedule.
+const policySkipRedeliveryDelay = maxPolicyRunDuration + 5*time.Second
+
 // periodicRetry drains the DLQ backlog by repeatedly calling processRetryBatch
 // until the queue is empty, the context is cancelled, or maxPeriodicRunDuration
 // is exceeded. The batch duration metric is recorded per batch; a summary log is
@@ -313,8 +325,39 @@ func (c *DLQRetryController) RetryForPolicy(ctx context.Context, policy *v1alpha
 		maxPolicyVersion: policy.Generation, // Only retry events from older policy versions
 	}
 
-	processed, succeeded, failed := c.processRetryBatch(ctx, "policy_update", filter)
-	dlqRetryBatchDuration.WithLabelValues("policy_update").Observe(time.Since(start).Seconds())
+	// Scan forward through the shared consumer until this policy's events are
+	// exhausted, the context is cancelled, or the scan cap is reached. A single
+	// batch is not enough: events for other policies sit at the head of the
+	// queue and are skipped client-side, so one batch can be consumed entirely
+	// by non-matching events and reach none of this policy's own.
+	runDeadline := time.Now().Add(maxPolicyRunDuration)
+
+	var processed, succeeded, failed int
+	for {
+		if ctx.Err() != nil {
+			break
+		}
+		if time.Now().After(runDeadline) {
+			klog.InfoS("Policy-triggered DLQ retry reached max scan duration, deferring remainder to the periodic run",
+				"policy", policy.Name,
+				"maxDuration", maxPolicyRunDuration,
+				"processed", processed,
+			)
+			break
+		}
+
+		batchStart := time.Now()
+		p, s, f := c.processRetryBatch(ctx, "policy_update", filter)
+		dlqRetryBatchDuration.WithLabelValues("policy_update").Observe(time.Since(batchStart).Seconds())
+
+		processed += p
+		succeeded += s
+		failed += f
+
+		if p == 0 {
+			break
+		}
+	}
 
 	if processed > 0 {
 		klog.InfoS("Completed policy-triggered DLQ retry",
@@ -420,15 +463,19 @@ func (c *DLQRetryController) processRetryBatch(ctx context.Context, trigger stri
 			// For policy-triggered retry, only retry events that:
 			// 1. Match the policy name (if specified)
 			// 2. Failed on an older policy version
+			//
+			// A skipped event is deferred past the end of this scan rather than
+			// NAKed outright: a plain NAK redelivers immediately, so the scan
+			// would re-fetch the events it just skipped and never advance.
 			if filter.policyName != "" && dlEvent.PolicyName != filter.policyName {
-				if nakErr := msg.Nak(); nakErr != nil {
+				if nakErr := msg.NakWithDelay(policySkipRedeliveryDelay); nakErr != nil {
 					klog.ErrorS(nakErr, "Failed to NAK DLQ message")
 				}
 				continue
 			}
 			if filter.maxPolicyVersion > 0 && dlEvent.PolicyVersion >= filter.maxPolicyVersion {
 				// Event failed on same or newer policy version, skip
-				if nakErr := msg.Nak(); nakErr != nil {
+				if nakErr := msg.NakWithDelay(policySkipRedeliveryDelay); nakErr != nil {
 					klog.ErrorS(nakErr, "Failed to NAK DLQ message")
 				}
 				continue

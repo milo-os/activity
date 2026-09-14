@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"go.miloapis.com/activity/internal/processor"
+	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 	testAuditStream = "AUDIT_EVENTS"
 	testDLQPrefix   = "activity.dlq"
 	testDLQSubject  = "activity.dlq.audit.resourcemanager.miloapis.com.Project"
+	testPolicyName  = "resourcemanager.miloapis.com-project"
 )
 
 // startJetStream boots an in-process NATS server with JetStream enabled and
@@ -83,7 +85,7 @@ func setupDLQ(t *testing.T, js nats.JetStreamContext) {
 		FilterSubject: "activity.dlq.>",
 		AckPolicy:     nats.AckExplicitPolicy,
 		AckWait:       60 * time.Second,
-		MaxAckPending: 100,
+		MaxAckPending: 200,
 		MaxDeliver:    -1,
 	}); err != nil {
 		t.Fatalf("add durable consumer: %v", err)
@@ -98,10 +100,15 @@ func newTestController(js nats.JetStreamContext) *DLQRetryController {
 
 func publishDLQEvent(t *testing.T, js nats.JetStreamContext, name string, nextRetry *metav1.Time) {
 	t.Helper()
+	publishDLQEventForPolicy(t, js, name, testPolicyName, nextRetry)
+}
+
+func publishDLQEventForPolicy(t *testing.T, js nats.JetStreamContext, name, policyName string, nextRetry *metav1.Time) {
+	t.Helper()
 	ev := processor.DeadLetterEvent{
 		Type:            processor.EventTypeAudit,
 		OriginalPayload: json.RawMessage(fmt.Sprintf(`{"name":%q}`, name)),
-		PolicyName:      "resourcemanager.miloapis.com-project",
+		PolicyName:      policyName,
 		ErrorType:       processor.ErrorTypeCELSummary,
 		Timestamp:       metav1.Now(),
 		Resource: &processor.DeadLetterResource{
@@ -199,5 +206,78 @@ func TestDLQRetryDefersBackedOffEvents(t *testing.T) {
 	processed2, _, _ := c.processRetryBatch(ctx, "periodic", nil)
 	if processed2 != 0 {
 		t.Fatalf("backed-off event redelivered immediately: processed=%d (spin regression)", processed2)
+	}
+}
+
+// TestDLQRetryPolicyScanReachesOwnEventsBehindBacklog covers the consequence of
+// binding one shared consumer: the policy-triggered path can no longer ask the
+// server for its own subject, so it has to scan past the events of every other
+// policy sitting ahead of it. A single batch would be consumed entirely by those
+// and reach none of this policy's own.
+func TestDLQRetryPolicyScanReachesOwnEventsBehindBacklog(t *testing.T) {
+	js, _ := startJetStream(t)
+	setupDLQ(t, js)
+
+	c := newTestController(js)
+
+	// More non-matching events than one batch holds, then the target event.
+	for i := 0; i < c.config.BatchSize+20; i++ {
+		publishDLQEventForPolicy(t, js, fmt.Sprintf("other-%d", i), "some-other-policy", nil)
+	}
+	publishDLQEventForPolicy(t, js, "mine", testPolicyName, nil)
+
+	c.RetryForPolicy(context.Background(), &v1alpha1.ActivityPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: testPolicyName, Generation: 2},
+		Spec: v1alpha1.ActivityPolicySpec{
+			Resource: v1alpha1.ActivityPolicyResource{
+				APIGroup: "resourcemanager.miloapis.com",
+				Kind:     "Project",
+			},
+		},
+	})
+
+	audit, err := js.StreamInfo(testAuditStream)
+	if err != nil {
+		t.Fatalf("audit stream info: %v", err)
+	}
+	if audit.State.Msgs != 1 {
+		t.Fatalf("policy scan republished %d events, want exactly the 1 matching event", audit.State.Msgs)
+	}
+
+	// Only the matching event is consumed; the other policies' events stay queued
+	// for their own retry rather than being drained by this scan.
+	dlq, err := js.StreamInfo(testDLQStream)
+	if err != nil {
+		t.Fatalf("dlq stream info: %v", err)
+	}
+	if want := uint64(c.config.BatchSize + 20); dlq.State.Msgs != want {
+		t.Fatalf("DLQ holds %d messages, want %d other-policy events left intact", dlq.State.Msgs, want)
+	}
+}
+
+// TestDLQRetryPolicyScanDefersSkippedEvents guards the scan against the spin the
+// periodic path already avoids: an event the scan skips must not be redelivered
+// inside the same scan, or the loop re-fetches what it just passed over.
+func TestDLQRetryPolicyScanDefersSkippedEvents(t *testing.T) {
+	js, _ := startJetStream(t)
+	setupDLQ(t, js)
+
+	publishDLQEventForPolicy(t, js, "other", "some-other-policy", nil)
+
+	c := newTestController(js)
+	filter := &retryFilter{
+		apiGroup:   "resourcemanager.miloapis.com",
+		kind:       "Project",
+		policyName: testPolicyName,
+	}
+
+	processed, succeeded, _ := c.processRetryBatch(context.Background(), "policy_update", filter)
+	if processed != 1 || succeeded != 0 {
+		t.Fatalf("first batch: processed=%d succeeded=%d, want 1/0", processed, succeeded)
+	}
+
+	processed2, _, _ := c.processRetryBatch(context.Background(), "policy_update", filter)
+	if processed2 != 0 {
+		t.Fatalf("skipped event redelivered inside the same scan: processed=%d (spin regression)", processed2)
 	}
 }

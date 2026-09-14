@@ -668,3 +668,62 @@ export async function mockActivityFacetQueryAPI(
     });
   });
 }
+
+/**
+ * Facet result in the array form returned by AuditLogFacetsQuery
+ */
+export interface MockFacetResult {
+  field: string;
+  values: MockFacetValue[];
+}
+
+/**
+ * Mock POST /auditlogfacetsqueries endpoint
+ * @param page - Playwright page instance
+ * @param facets - Mock facet results to return (optional)
+ * @param options - Mock options (delay, error)
+ */
+export async function mockAuditLogFacetQueryAPI(
+  page: Page,
+  facets?: MockFacetResult[],
+  options?: MockApiOptions
+) {
+  await page.route('**/auditlogfacetsqueries', async (route: Route) => {
+    if (options?.delay) {
+      await new Promise(resolve => setTimeout(resolve, options.delay));
+    }
+
+    if (options?.error) {
+      return route.fulfill({
+        status: options.error.status,
+        json: {
+          kind: 'Status',
+          apiVersion: 'v1',
+          status: 'Failure',
+          message: options.error.message,
+          code: options.error.status,
+        },
+      });
+    }
+
+    const request = route.request().postDataJSON();
+    const defaultFacets: MockFacetResult[] = [
+      { field: 'verb', values: [{ value: 'create', count: 12 }, { value: 'delete', count: 4 }] },
+      { field: 'objectRef.resource', values: [{ value: 'deployments', count: 9 }] },
+      { field: 'objectRef.namespace', values: [{ value: 'default', count: 16 }] },
+      { field: 'user.username', values: [{ value: 'alice', count: 16 }] },
+    ];
+
+    return route.fulfill({
+      status: 200,
+      json: {
+        apiVersion: 'activity.miloapis.com/v1alpha1',
+        kind: 'AuditLogFacetsQuery',
+        spec: request?.spec || {},
+        status: {
+          facets: facets || defaultFacets,
+        },
+      },
+    });
+  });
+}

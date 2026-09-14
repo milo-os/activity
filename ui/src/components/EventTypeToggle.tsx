@@ -1,6 +1,5 @@
-import { Button } from '@datum-cloud/datum-ui/button';
-import { cn } from '../lib/utils';
 import type { K8sEventType } from '../types/k8s-event';
+import { SegmentedToggle, type SegmentedToggleOption } from './ui/segmented-toggle';
 
 export type EventTypeOption = K8sEventType | 'all';
 
@@ -18,7 +17,7 @@ export interface EventTypeToggleProps {
 /**
  * Options for the event type toggle
  */
-const OPTIONS: { value: EventTypeOption; label: string; description: string }[] = [
+const OPTIONS: SegmentedToggleOption<EventTypeOption>[] = [
   {
     value: 'all',
     label: 'All',
@@ -42,38 +41,17 @@ const OPTIONS: { value: EventTypeOption; label: string; description: string }[] 
 export function EventTypeToggle({
   value,
   onChange,
-  className = '',
+  className,
   disabled = false,
 }: EventTypeToggleProps) {
   return (
-    <div
-      className={cn('inline-flex border border-input rounded-md overflow-hidden', className)}
-      role="group"
-      aria-label="Filter by event type"
-    >
-      {OPTIONS.map((option, index) => {
-        const active = value === option.value;
-        return (
-          <Button
-            key={option.value}
-            htmlType="button"
-            type={active ? 'primary' : 'quaternary'}
-            theme={active ? 'solid' : 'borderless'}
-            className={cn(
-              'px-2 h-7 text-xs font-medium transition-all duration-200',
-              index < OPTIONS.length - 1 && 'border-r border-input',
-              !active && 'bg-muted text-foreground hover:bg-muted/80'
-            )}
-            style={active ? { borderRadius: 0, border: 0 } : { borderRadius: 0 }}
-            onClick={() => onChange(option.value)}
-            disabled={disabled}
-            aria-pressed={active}
-            title={option.description}
-          >
-            {option.label}
-          </Button>
-        );
-      })}
-    </div>
+    <SegmentedToggle
+      options={OPTIONS}
+      value={value}
+      onChange={onChange}
+      ariaLabel="Filter by event type"
+      className={className}
+      disabled={disabled}
+    />
   );
 }

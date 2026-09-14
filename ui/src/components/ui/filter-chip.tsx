@@ -9,6 +9,8 @@ import {
   CommandItem,
 } from '@datum-cloud/datum-ui/command';
 import { Popover, PopoverTrigger, PopoverContent } from '@datum-cloud/datum-ui/popover';
+import { Button } from '@datum-cloud/datum-ui/button';
+import { ButtonGroup } from '@datum-cloud/datum-ui/button-group';
 import { cn } from '../../lib/utils';
 import { Input } from '@datum-cloud/datum-ui/input';
 
@@ -209,22 +211,21 @@ export function FilterChip({
   const selectedOptions = options.filter((opt) => values.includes(opt.value));
 
   return (
-    <div className={cn('inline-flex items-center', className)}>
+    <ButtonGroup aria-label={`${label} filter`} className={className}>
       <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
-          <button
-            type="button"
+          <Button
+            htmlType="button"
+            type="quaternary"
+            theme="outline"
+            size="small"
             disabled={disabled}
-            className={cn(
-              'flex h-7 items-center gap-2 rounded-l-md border border-r-0 border-border bg-card px-2 text-xs outline-none',
-              'hover:bg-accent/40 data-[state=open]:bg-accent/40 transition-colors',
-              'disabled:cursor-not-allowed disabled:opacity-50'
-            )}
+            className="gap-2 font-normal data-[state=open]:bg-btn-neutral-bg"
           >
-            <span className="font-medium text-foreground">{label}:</span>
-            <span className="text-foreground truncate max-w-[120px]">{displayValue}</span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground ml-1" />
-          </button>
+            <span className="font-medium">{label}:</span>
+            <span className="truncate max-w-[120px]">{displayValue}</span>
+            <ChevronDown className="h-3 w-3 text-muted-foreground" />
+          </Button>
         </PopoverTrigger>
         <PopoverContent
           className="w-auto min-w-[var(--radix-popover-trigger-width)] max-w-[320px] p-0"
@@ -302,19 +303,17 @@ export function FilterChip({
           )}
         </PopoverContent>
       </Popover>
-      <button
-        type="button"
+      <Button
+        htmlType="button"
+        type="quaternary"
+        theme="outline"
+        size="small"
         onClick={handleClearAll}
         disabled={disabled}
-        className={cn(
-          'flex h-7 items-center rounded-r-md border border-border bg-card px-2 outline-none',
-          'hover:bg-accent/40 transition-colors',
-          'disabled:cursor-not-allowed disabled:opacity-50'
-        )}
         aria-label={`Clear ${label} filter`}
       >
         <X className="h-3 w-3 text-muted-foreground" />
-      </button>
-    </div>
+      </Button>
+    </ButtonGroup>
   );
 }

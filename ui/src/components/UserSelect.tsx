@@ -78,11 +78,7 @@ export function UserSelect({
           type="tertiary" theme="outline"
           size="small"
           disabled={disabled}
-          className={cn(
-            'h-7 text-xs font-medium gap-1.5 px-2',
-            value && 'pr-1',
-            className
-          )}
+          className={cn('gap-1.5', value && 'pr-1.5', className)}
         >
           <User className="h-3.5 w-3.5" />
           <span>{displayLabel}</span>

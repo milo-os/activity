@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Popover, PopoverTrigger, PopoverContent } from '@datum-cloud/datum-ui/popover';
 import { ChevronDown } from 'lucide-react';
 import { Checkbox } from '@datum-cloud/datum-ui/checkbox';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { cn } from '../lib/utils';
 
 export interface ActionMultiSelectOption {
@@ -59,20 +60,17 @@ export function ActionMultiSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
+        <Button
+          htmlType="button"
+          type="quaternary"
+          theme="outline"
+          size="small"
           disabled={disabled || isLoading}
-          className={cn(
-            'flex h-7 items-center justify-between gap-2 rounded-md border border-input bg-background px-2 text-xs min-w-[100px]',
-            'hover:bg-accent hover:text-accent-foreground transition-colors',
-            'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-            'disabled:cursor-not-allowed disabled:opacity-50',
-            className
-          )}
+          className={cn('min-w-[100px] justify-between gap-2', className)}
         >
           <span className="font-medium">{displayText}</span>
           <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto min-w-[160px] p-0" sideOffset={4} align="start">
           <div className="p-1">

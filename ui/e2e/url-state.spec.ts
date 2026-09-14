@@ -234,10 +234,9 @@ test.describe('Activity Feed URL State Persistence', () => {
     await page.goto('/activity-feed?startTime=now-24h');
     await page.waitForTimeout(500);
 
-    // Verify the time range button shows the correct selection
-    // This will depend on how the UI formats the display text
-    const timeRangeButton = page.getByRole('button', { name: /24/i });
-    await expect(timeRangeButton).toBeVisible();
+    // Verify the time range picker trigger (a combobox) shows the selection
+    const timeRangeTrigger = page.getByRole('combobox').filter({ hasText: /24/i });
+    await expect(timeRangeTrigger).toBeVisible();
 
     // Verify URL persists the parameter
     expect(page.url()).toContain('startTime=now-24h');

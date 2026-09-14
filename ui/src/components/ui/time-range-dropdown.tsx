@@ -1,10 +1,5 @@
 import * as React from 'react';
-import { Calendar, ChevronDown } from 'lucide-react';
-import { Popover, PopoverTrigger, PopoverContent } from '@datum-cloud/datum-ui/popover';
-import { cn } from '../../lib/utils';
-import { Button } from '@datum-cloud/datum-ui/button';
-import { Input } from '@datum-cloud/datum-ui/input';
-import { Label } from '@datum-cloud/datum-ui/label';
+import { DateTimeRangePicker, type PickerPreset } from '@datum-cloud/datum-ui/picker';
 
 export interface TimeRangePreset {
   key: string;
@@ -12,13 +7,13 @@ export interface TimeRangePreset {
 }
 
 export interface TimeRangeDropdownProps {
-  /** Available time range presets */
+  /** Available time range presets, keyed by relative strings such as `now-24h`. */
   presets: TimeRangePreset[];
   /** Currently selected preset key, or 'custom' for custom range */
   selectedPreset: string;
   /** Handler when a preset is selected */
   onPresetSelect: (presetKey: string) => void;
-  /** Handler when custom range is applied */
+  /** Handler when custom range is applied; values are `datetime-local` strings */
   onCustomRangeApply: (start: string, end: string) => void;
   /** Initial custom start value (datetime-local format) */
   customStart?: string;
@@ -32,163 +27,86 @@ export interface TimeRangeDropdownProps {
   displayLabel?: string;
 }
 
+const RELATIVE_KEY = /^now-(\d+)([mhd])$/;
+
+/** Resolve a relative key such as `now-7d` to a `{ from, to }` window ending now. */
+export function relativeKeyToRange(key: string, now: Date = new Date()): { from: Date; to: Date } | null {
+  const match = RELATIVE_KEY.exec(key);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unitMs = { m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] as 'm' | 'h' | 'd'];
+  return { from: new Date(now.getTime() - amount * unitMs), to: now };
+}
+
+/** `YYYY-MM-DDTHH:mm` in local time, the format the filter components store. */
+export function toDatetimeLocal(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function toPickerPresets(presets: TimeRangePreset[]): PickerPreset[] {
+  return presets
+    .filter((p) => RELATIVE_KEY.test(p.key))
+    .map((p) => ({
+      key: p.key,
+      label: p.label,
+      getRange: () => relativeKeyToRange(p.key)!,
+    }));
+}
+
 /**
- * TimeRangeDropdown - A compact dropdown for selecting time ranges
+ * TimeRangeDropdown - relative presets plus an absolute range, on datum-ui's
+ * DateTimeRangePicker. The emitted value carries `preset` when a preset was
+ * clicked, which keeps `start=now-7d` style URL state intact.
  */
 export function TimeRangeDropdown({
   presets,
   selectedPreset,
   onPresetSelect,
   onCustomRangeApply,
-  customStart: initialCustomStart,
-  customEnd: initialCustomEnd,
+  customStart,
+  customEnd,
   disabled = false,
   className,
   displayLabel,
 }: TimeRangeDropdownProps) {
-  const [open, setOpen] = React.useState(false);
-  const [showCustomInputs, setShowCustomInputs] = React.useState(false);
-  const [customStart, setCustomStart] = React.useState(initialCustomStart || '');
-  const [customEnd, setCustomEnd] = React.useState(initialCustomEnd || '');
+  const pickerPresets = React.useMemo(() => toPickerPresets(presets), [presets]);
 
-  // Update custom values when props change
-  React.useEffect(() => {
-    if (initialCustomStart) setCustomStart(initialCustomStart);
-    if (initialCustomEnd) setCustomEnd(initialCustomEnd);
-  }, [initialCustomStart, initialCustomEnd]);
-
-  const selectedPresetObj = presets.find((p) => p.key === selectedPreset);
-  const label = displayLabel || selectedPresetObj?.label || 'Select time range';
-
-  const handlePresetClick = (presetKey: string) => {
-    onPresetSelect(presetKey);
-    setShowCustomInputs(false);
-    setOpen(false);
-  };
-
-  const handleCustomClick = () => {
-    setShowCustomInputs(true);
-  };
-
-  const handleCustomApply = () => {
-    if (customStart && customEnd) {
-      onCustomRangeApply(customStart, customEnd);
-      setShowCustomInputs(false);
-      setOpen(false);
+  const value = React.useMemo(() => {
+    if (selectedPreset !== 'custom') {
+      const range = relativeKeyToRange(selectedPreset);
+      return range
+        ? { from: range.from.toISOString(), to: range.to.toISOString(), preset: selectedPreset }
+        : null;
     }
-  };
+    if (customStart && customEnd) {
+      return { from: new Date(customStart).toISOString(), to: new Date(customEnd).toISOString() };
+    }
+    return null;
+  }, [selectedPreset, customStart, customEnd]);
 
-  const handleCustomCancel = () => {
-    setShowCustomInputs(false);
+  const handleChange = (next: { from: string; to: string } | null) => {
+    if (!next) return;
+    const preset = (next as { preset?: string }).preset;
+    if (preset) {
+      onPresetSelect(preset);
+      return;
+    }
+    onCustomRangeApply(toDatetimeLocal(next.from), toDatetimeLocal(next.to));
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          className={cn(
-            'flex h-7 items-center gap-2 rounded-md border border-input bg-background px-2 text-xs ring-offset-background',
-            'hover:bg-accent hover:text-accent-foreground',
-            'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-            'disabled:cursor-not-allowed disabled:opacity-50',
-            className
-          )}
-        >
-          <Calendar className="h-4 w-4 text-muted-foreground" />
-          <span className="whitespace-nowrap">{label}</span>
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto min-w-[200px] p-0" sideOffset={4} align="end">
-          {!showCustomInputs ? (
-            <div className="p-1">
-              {presets.map((preset) => (
-                <button
-                  key={preset.key}
-                  type="button"
-                  onClick={() => handlePresetClick(preset.key)}
-                  className={cn(
-                    'relative flex w-full cursor-pointer select-none items-center rounded-sm px-3 py-2 text-sm outline-none',
-                    'hover:bg-accent hover:text-accent-foreground',
-                    selectedPreset === preset.key && 'bg-accent text-accent-foreground font-medium'
-                  )}
-                >
-                  {preset.label}
-                </button>
-              ))}
-              <div className="my-1 h-px bg-border" />
-              <button
-                type="button"
-                onClick={handleCustomClick}
-                className={cn(
-                  'relative flex w-full cursor-pointer select-none items-center rounded-sm px-3 py-2 text-sm outline-none',
-                  'hover:bg-accent hover:text-accent-foreground',
-                  selectedPreset === 'custom' && 'bg-accent text-accent-foreground font-medium'
-                )}
-              >
-                Custom range...
-              </button>
-            </div>
-          ) : (
-            <div className="p-4 min-w-[280px]">
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label
-                    htmlFor="time-range-start"
-                    className="text-xs text-muted-foreground font-semibold uppercase tracking-tight"
-                  >
-                    Start
-                  </Label>
-                  <Input
-                    id="time-range-start"
-                    type="datetime-local"
-                    value={customStart}
-                    onChange={(e) => setCustomStart(e.target.value)}
-                    className="w-full"
-                    disabled={disabled}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label
-                    htmlFor="time-range-end"
-                    className="text-xs text-muted-foreground font-semibold uppercase tracking-tight"
-                  >
-                    End
-                  </Label>
-                  <Input
-                    id="time-range-end"
-                    type="datetime-local"
-                    value={customEnd}
-                    onChange={(e) => setCustomEnd(e.target.value)}
-                    className="w-full"
-                    disabled={disabled}
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-border">
-                <Button
-                  htmlType="button"
-                  type="quaternary"
-                  theme="borderless"
-                  size="small"
-                  onClick={handleCustomCancel}
-                >
-                  Back
-                </Button>
-                <Button
-                  htmlType="button"
-                  size="small"
-                  onClick={handleCustomApply}
-                  disabled={!customStart || !customEnd}
-                >
-                  Apply
-                </Button>
-              </div>
-            </div>
-          )}
-        </PopoverContent>
-    </Popover>
+    <DateTimeRangePicker
+      className={className}
+      value={value}
+      onChange={handleChange}
+      presets={pickerPresets}
+      disableFuture
+      clearable={false}
+      disabled={disabled}
+      placeholder={displayLabel ?? 'Select time range'}
+      triggerLabel={displayLabel ? () => displayLabel : undefined}
+    />
   );
 }

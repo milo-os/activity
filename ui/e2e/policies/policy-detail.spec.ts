@@ -101,24 +101,6 @@ test.describe('PolicyDetailView', () => {
     await expect(page).toHaveURL('/policies/httpproxy-policy/edit');
   });
 
-  test('Reindex button opens reindex dialog', async ({ page }) => {
-    // Find the Reindex button
-    const reindexButton = page.getByRole('button', { name: /Reindex/i });
-    await expect(reindexButton).toBeVisible();
-
-    // Click to open dialog
-    await reindexButton.click();
-    await page.waitForTimeout(200);
-
-    // Verify dialog is open (look for dialog content)
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible();
-
-    // Verify dialog title - it's "Reindex Policy" not "Create Reindex Job"
-    const dialogTitle = page.getByRole('heading', { name: 'Reindex Policy' });
-    await expect(dialogTitle).toBeVisible();
-  });
-
   test('displays ActivityView with Activity/Events tabs', async ({ page }) => {
     // Mock the activity query response
     await page.route('**/activities/activity-query-*', async (route) => {

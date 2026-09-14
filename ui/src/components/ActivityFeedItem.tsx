@@ -125,23 +125,23 @@ function getActionIconClasses(verb: string): {
   switch (normalizedVerb) {
     case "create":
       return {
-        container: "bg-blue-50 dark:bg-blue-950",
-        icon: "text-blue-500 dark:text-blue-400",
+        container: "bg-[var(--success-100)]",
+        icon: "text-[var(--success-500)]",
       };
     case "update":
       return {
-        container: "bg-green-50 dark:bg-green-950",
-        icon: "text-green-600 dark:text-green-400",
+        container: "bg-[var(--info-100)]",
+        icon: "text-[var(--info-500)]",
       };
     case "delete":
       return {
-        container: "bg-red-50 dark:bg-red-950",
-        icon: "text-red-500 dark:text-red-400",
+        container: "bg-destructive/10",
+        icon: "text-destructive",
       };
     default:
       return {
-        container: "bg-slate-100 dark:bg-slate-800",
-        icon: "text-slate-500 dark:text-slate-400",
+        container: "bg-muted",
+        icon: "text-muted-foreground",
       };
   }
 }
@@ -342,7 +342,7 @@ export function ActivityFeedItem({
         data-state={isSelected ? "selected" : undefined}
         className={cn(
           "cursor-pointer",
-          isNew && "bg-green-50/40 dark:bg-green-950/20",
+          isNew && "bg-[var(--success-100)]/60",
           className,
         )}
         onClick={(e) => {

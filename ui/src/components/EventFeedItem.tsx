@@ -11,6 +11,7 @@ import type { K8sEvent } from '../types/k8s-event';
 import { EventExpandedDetails } from './EventExpandedDetails';
 import { cn } from '../lib/utils';
 import { Button } from '@datum-cloud/datum-ui/button';
+import { Badge } from '@datum-cloud/datum-ui/badge';
 import {
   Tooltip,
   TooltipContent,
@@ -163,11 +164,11 @@ export function EventFeedItem({
   if (variant === 'timeline') {
     const TypeIcon = isWarning ? AlertTriangle : Bell;
     const iconBg = isWarning
-      ? 'bg-red-50 dark:bg-red-950'
-      : 'bg-blue-50 dark:bg-blue-950';
+      ? 'bg-destructive/10'
+      : 'bg-[var(--info-100)]';
     const iconColor = isWarning
-      ? 'text-red-500 dark:text-red-400'
-      : 'text-blue-500 dark:text-blue-400';
+      ? 'text-destructive'
+      : 'text-[var(--info-500)]';
     const objectLabel = regarding.namespace
       ? `${regarding.kind || 'Unknown'} · ${regarding.namespace}/${regarding.name || ''}`
       : `${regarding.kind || 'Unknown'} · ${regarding.name || ''}`;
@@ -255,8 +256,8 @@ export function EventFeedItem({
         data-state={isSelected ? 'selected' : undefined}
         className={cn(
           'cursor-pointer',
-          isNew && 'bg-green-50/40 dark:bg-green-950/20',
-          isWarning && !isSelected && 'border-l-2 border-l-red-400',
+          isNew && 'bg-[var(--success-100)]/60',
+          isWarning && !isSelected && 'border-l-2 border-l-destructive',
           className
         )}
         onClick={(e) => {
@@ -266,16 +267,13 @@ export function EventFeedItem({
         aria-expanded={isExpanded}
       >
         <TableCell className="py-2 align-middle whitespace-nowrap">
-          <span
-            className={cn(
-              'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium',
-              isWarning
-                ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-            )}
+          <Badge
+            type={isWarning ? 'danger' : 'info'}
+            theme="light"
+            className="px-1.5 py-0.5 text-xs font-medium"
           >
             {type || 'Unknown'}
-          </span>
+          </Badge>
         </TableCell>
         <TableCell className="py-2 align-middle whitespace-nowrap text-sm font-medium">
           {reason || ''}
@@ -327,14 +325,14 @@ export function EventFeedItem({
             </Tooltip>
             <button
               onClick={handleCopyResourceName}
-              className="inline-flex items-center justify-center p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+              className="inline-flex items-center justify-center p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted cursor-pointer"
               aria-label="Copy resource name"
               type="button"
             >
               {isCopied ? (
-                <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
+                <Check className="h-3 w-3 text-[var(--success-500)]" />
               ) : (
-                <Copy className="h-3 w-3 text-gray-500 dark:text-gray-400" />
+                <Copy className="h-3 w-3 text-muted-foreground" />
               )}
             </button>
           </div>

@@ -104,7 +104,11 @@ Nothing exported from `ui/src/index.ts` is renamed or removed. Re-exported primi
 
 ### Peer dependency range
 
-`@datum-cloud/datum-ui` moves from `^0.8.0` to `>=1.3.0 <3.0.0`. The picker family exists from 0.10.0, so 1.3.x satisfies it, and cloud-portal's 2.8.0 is inside the range. Radix and cmdk peers are removed. Because the peer range moves, the release is a minor bump to 0.6.0.
+`@datum-cloud/datum-ui` moves from `^0.8.0` to `>=1.3.0 <3.0.0`. The picker family exists from 0.10.0, so 1.3.x satisfies it, and cloud-portal's 2.x is inside the range. Radix and cmdk peers are removed. Because the peer range moves, the release is a minor bump to 0.6.0.
+
+The package's own development dependency on datum-ui moves to the current release, 2.9.1, so the build, the example app, and the Playwright suite run against what cloud-portal ships. The 2.9.x releases are additive (card layout variants, a settings nav, and picker triggers switching to `rounded-lg`). The lower bound is exercised separately, see [Verification](#verification).
+
+staff-portal stays on 1.3.1 for now. Moving it to 2.x is a separate migration because datum-ui 2.0 raised its TanStack Table and Motion peers to new majors, and staff-portal pins the previous ones.
 
 ## Verification
 
@@ -122,7 +126,7 @@ Three pull requests in milo-os/activity, each independently reviewable and relea
 2. `TimeRangeDropdown` on the picker, and the observer root fallback.
 3. Colour tokens across the package.
 
-Then a minor release, 0.6.0, through the manual publish workflow. Then one cloud-portal pull request that bumps the package and sets `infiniteScroll={false}`, closing #1468, #1471, and #1472. staff-portal bumps when it is ready; nothing in its imports changes.
+Then a minor release, 0.6.0, through the manual publish workflow. Then one cloud-portal pull request that bumps activity-ui to 0.6.0 and datum-ui to 2.9.1, and sets `infiniteScroll={false}`, closing #1468, #1471, and #1472. staff-portal bumps activity-ui when it is ready; nothing in its imports changes.
 
 ## Alternatives
 
@@ -141,7 +145,7 @@ Then a minor release, 0.6.0, through the manual publish workflow. Then one cloud
 
 - The package never owns theme; the host does.
 - Public API is frozen for this change.
-- Peer range is `>=1.3.0 <3.0.0` so both portals stay on their current datum-ui.
+- Peer range is `>=1.3.0 <3.0.0` so both portals stay on their current datum-ui; the package builds against 2.9.1 and cloud-portal moves to 2.9.1.
 - Three PRs, one minor release.
 
 ## Open questions

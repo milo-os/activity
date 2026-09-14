@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@datum-cloud/datum-ui/styles";
 
 /* Scan library components for Tailwind classes */
 @source "../../../src/**/*.{ts,tsx}";

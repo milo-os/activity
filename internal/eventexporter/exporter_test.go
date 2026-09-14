@@ -6,6 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -160,4 +161,89 @@ func TestExporter_SourceAnnotations(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExporter_QualifiedMsgID(t *testing.T) {
+	event := &eventsv1.Event{
+		ObjectMeta: metav1.ObjectMeta{UID: "a1b2c3", ResourceVersion: "42"},
+	}
+
+	tests := []struct {
+		name      string
+		planeType string
+		cluster   string
+		eventType string
+		want      string
+	}{
+		{
+			name:      "edge deployment, added event: qualified UID",
+			planeType: planeTypeEdge,
+			cluster:   "cluster-dfw-1",
+			eventType: "ADDED",
+			want:      "edge/cluster-dfw-1/a1b2c3",
+		},
+		{
+			name:      "edge deployment, modified event: qualified UID-ResourceVersion",
+			planeType: planeTypeEdge,
+			cluster:   "cluster-dfw-1",
+			eventType: "MODIFIED",
+			want:      "edge/cluster-dfw-1/a1b2c3-42",
+		},
+		{
+			name:      "empty plane type: unqualified",
+			eventType: "ADDED",
+			want:      "a1b2c3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exporter := &Exporter{planeType: tt.planeType, clusterName: tt.cluster}
+			if got := exporter.qualifiedMsgID(event, tt.eventType); got != tt.want {
+				t.Errorf("qualifiedMsgID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExporter_Enqueue(t *testing.T) {
+	t.Run("room in queue: job enqueued, depth updated", func(t *testing.T) {
+		exporter := &Exporter{queue: make(chan eventJob, 2)}
+
+		beforeDropped := testutil.ToFloat64(droppedEvents)
+		exporter.enqueue(&eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "event-a"}}, "ADDED")
+
+		if got := testutil.ToFloat64(droppedEvents); got != beforeDropped {
+			t.Errorf("droppedEvents incremented unexpectedly: before=%v after=%v", beforeDropped, got)
+		}
+		if got := testutil.ToFloat64(queueDepth); got != 1 {
+			t.Errorf("queueDepth = %v, want 1", got)
+		}
+		if got := len(exporter.queue); got != 1 {
+			t.Errorf("len(queue) = %d, want 1", got)
+		}
+	})
+
+	t.Run("queue full: incoming event dropped, queued job kept", func(t *testing.T) {
+		exporter := &Exporter{queue: make(chan eventJob, 1)}
+		exporter.queue <- eventJob{event: &eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "sentinel"}}, eventType: "ADDED"}
+
+		beforeDropped := testutil.ToFloat64(droppedEvents)
+		exporter.enqueue(&eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "incoming"}}, "ADDED")
+
+		if got := testutil.ToFloat64(droppedEvents); got != beforeDropped+1 {
+			t.Errorf("droppedEvents did not increment: before=%v after=%v", beforeDropped, got)
+		}
+		if got := testutil.ToFloat64(queueDepth); got != 1 {
+			t.Errorf("queueDepth = %v, want 1", got)
+		}
+		if got := len(exporter.queue); got != 1 {
+			t.Errorf("len(queue) = %d, want 1", got)
+		}
+
+		queued := <-exporter.queue
+		if queued.event.Name != "sentinel" {
+			t.Errorf("queue kept %q, want the already-queued sentinel event", queued.event.Name)
+		}
+	})
 }

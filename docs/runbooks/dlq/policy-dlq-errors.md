@@ -26,11 +26,18 @@ Alert includes these labels:
 kubectl get activitypolicy <policy-name> -o yaml
 ```
 
-### 2. Check processor logs for this policy
+### 2. Check processor logs for this policy (Loki)
 
-```bash
-kubectl logs -n activity-system -l app=activity-processor --tail=200 | grep "<policy-name>"
+Query Loki (failures may predate the current pods) — see
+[querying-logs-with-loki.md](./querying-logs-with-loki.md):
+
+```logql
+{namespace="activity-system", container="processor"} | json | policy="<policy-name>" |~ "(?i)evaluat|dlq"
 ```
+
+Read the `err` field — for `errorType="cel_summary"` it names the failing rule
+and the missing key (e.g. `no such key: name`), which tells you exactly which
+field the summary/match dereferences unsafely.
 
 ### 3. Test policy with sample event
 

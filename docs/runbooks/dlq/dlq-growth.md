@@ -29,14 +29,22 @@ kubectl exec -n activity-system deploy/prometheus -- \
   promtool query instant 'topk(10, sum by (policy_name) (rate(activity_processor_dlq_events_published_total[5m])))'
 ```
 
-### 2. Check processor logs
+### 2. Check processor logs (Loki)
 
-```bash
-# Look for DLQ-related errors
-kubectl logs -n activity-system -l app=activity-processor --tail=100 | grep -i "dlq\|dead.letter\|error"
+DLQ failures often predate the current pods, so query Loki rather than
+`kubectl logs`. Full query guide: [querying-logs-with-loki.md](./querying-logs-with-loki.md).
 
-# Check for policy evaluation errors
-kubectl logs -n activity-system -l app=activity-processor --tail=100 | grep -i "failed to evaluate"
+```logql
+# what's failing, grouped by policy + error class (last 15m)
+sum by (policy, errorType) (
+  count_over_time({namespace="activity-system", container="processor"} | json | errorType != "" [15m])
+)
+```
+
+Read `err` on a sample line to see the failing rule/field, then drill into one policy:
+
+```logql
+{namespace="activity-system", container="processor"} | json | policy="<policy-name>" |~ "(?i)evaluat|dlq"
 ```
 
 ### 3. Common error patterns

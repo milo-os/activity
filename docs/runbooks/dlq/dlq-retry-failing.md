@@ -29,11 +29,21 @@ kubectl exec -n activity-system deploy/prometheus -- \
   promtool query instant 'sum by (api_group, kind) (rate(activity_processor_dlq_retry_attempts_total{result="failed"}[15m]))'
 ```
 
-### 2. Check processor logs for retry errors
+### 2. Check processor logs for retry errors (Loki)
 
-```bash
-# Look for retry failures
-kubectl logs -n activity-system -l app=activity-processor --tail=300 | grep -i "failed to republish\|failed to retry"
+Query Loki — see [querying-logs-with-loki.md](./querying-logs-with-loki.md).
+Compare failed vs. succeeded across retry runs:
+
+```logql
+sum(sum_over_time({namespace="activity-system", container="processor"} | json |~ "retry run" | unwrap totalFailed [15m]))
+sum(sum_over_time({namespace="activity-system", container="processor"} | json |~ "retry run" | unwrap totalSucceeded [15m]))
+```
+
+If the same `auditID` keeps re-failing, the underlying policy is still broken
+(retry can't fix a bad policy) — pull the IDs to confirm a loop:
+
+```logql
+{namespace="activity-system", container="processor"} | json | errorType != "" | line_format "{{.auditID}}"
 ```
 
 ### 3. Identify root cause

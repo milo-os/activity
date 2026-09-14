@@ -199,13 +199,13 @@ export function PolicyEditView({
                     <TooltipTrigger asChild>
                       <button
                         onClick={handleCopyResourceName}
-                        className="inline-flex items-center justify-center p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-opacity cursor-pointer"
+                        className="inline-flex items-center justify-center p-0.5 rounded hover:bg-muted transition-opacity cursor-pointer"
                         aria-label="Copy resource name"
                       >
                         {isCopied ? (
-                          <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
+                          <Check className="h-3 w-3 text-[var(--success-500)]" />
                         ) : (
-                          <Copy className="h-3 w-3 text-gray-500 dark:text-gray-400" />
+                          <Copy className="h-3 w-3 text-muted-foreground" />
                         )}
                       </button>
                     </TooltipTrigger>
@@ -385,7 +385,7 @@ export function PolicyEditView({
             >
               {isDeleting ? (
                 <>
-                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                  <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
                   Deleting...
                 </>
               ) : (

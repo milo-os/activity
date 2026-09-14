@@ -150,12 +150,12 @@ export function PolicyDetailView({
                       <span
                         className={`w-2 h-2 rounded-full ${
                           policyStatus?.status === 'ready'
-                            ? 'bg-green-500'
+                            ? 'bg-[var(--success-500)]'
                             : policyStatus?.status === 'error'
-                            ? 'bg-red-500'
+                            ? 'bg-destructive'
                             : policyStatus?.status === 'pending'
-                            ? 'bg-yellow-500'
-                            : 'bg-green-500'
+                            ? 'bg-[var(--badge-warning)]'
+                            : 'bg-[var(--success-500)]'
                         }`}
                       />
                     </TooltipTrigger>
@@ -179,13 +179,13 @@ export function PolicyDetailView({
                     <TooltipTrigger asChild>
                       <button
                         onClick={handleCopyResourceName}
-                        className="inline-flex items-center justify-center p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-opacity cursor-pointer"
+                        className="inline-flex items-center justify-center p-0.5 rounded hover:bg-muted transition-opacity cursor-pointer"
                         aria-label="Copy resource name"
                       >
                         {isCopied ? (
-                          <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
+                          <Check className="h-3 w-3 text-[var(--success-500)]" />
                         ) : (
-                          <Copy className="h-3 w-3 text-gray-500 dark:text-gray-400" />
+                          <Copy className="h-3 w-3 text-muted-foreground" />
                         )}
                       </button>
                     </TooltipTrigger>

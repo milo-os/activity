@@ -7,9 +7,12 @@ package eventexporter
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -102,6 +105,11 @@ type Config struct {
 
 	// Health probe server bind address
 	HealthProbeAddr string
+
+	NATSTLSEnabled  bool   // Enable TLS for NATS connection
+	NATSTLSCertFile string // Path to client certificate file (for mTLS)
+	NATSTLSKeyFile  string // Path to client private key file (for mTLS)
+	NATSTLSCAFile   string // Path to CA certificate file for server verification
 }
 
 // Run starts the event exporter and blocks until the context is cancelled.
@@ -122,9 +130,9 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Connect to NATS with metrics tracking
 	natsConnectionStatus.Set(0)
-	nc, err := nats.Connect(cfg.NATSUrl,
+	natsOpts := []nats.Option{
 		nats.Name("k8s-event-exporter"),
-		nats.ReconnectWait(2*time.Second),
+		nats.ReconnectWait(2 * time.Second),
 		nats.MaxReconnects(-1), // Unlimited reconnects
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
 			klog.ErrorS(err, "NATS disconnected")
@@ -134,7 +142,18 @@ func Run(ctx context.Context, cfg Config) error {
 			klog.InfoS("NATS reconnected")
 			natsConnectionStatus.Set(1)
 		}),
-	)
+	}
+
+	if cfg.NATSTLSEnabled {
+		tlsConfig, err := buildNATSTLSConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to build NATS TLS config: %w", err)
+		}
+		natsOpts = append(natsOpts, nats.Secure(tlsConfig))
+		klog.InfoS("NATS TLS enabled")
+	}
+
+	nc, err := nats.Connect(cfg.NATSUrl, natsOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS: %w", err)
 	}
@@ -290,6 +309,49 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 	return nil
 }
 
+// buildNATSTLSConfig creates a TLS configuration for the NATS connection.
+func buildNATSTLSConfig(cfg Config) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	// Load client certificate and key if provided (for mTLS). Require both or
+	// neither: silently skipping a half-specified pair would leave the
+	// connection looking TLS-enabled while carrying no client identity.
+	switch {
+	case cfg.NATSTLSCertFile != "" && cfg.NATSTLSKeyFile != "":
+		cert, err := tls.LoadX509KeyPair(cfg.NATSTLSCertFile, cfg.NATSTLSKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load NATS client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+		klog.V(2).InfoS("Loaded NATS client certificate",
+			"certFile", cfg.NATSTLSCertFile,
+			"keyFile", cfg.NATSTLSKeyFile,
+		)
+	case cfg.NATSTLSCertFile != "":
+		return nil, fmt.Errorf("NATS TLS cert file set without a key file")
+	case cfg.NATSTLSKeyFile != "":
+		return nil, fmt.Errorf("NATS TLS key file set without a cert file")
+	}
+
+	// Load CA certificate if provided for server verification
+	if cfg.NATSTLSCAFile != "" {
+		caCert, err := os.ReadFile(cfg.NATSTLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read NATS CA certificate: %w", err)
+		}
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse NATS CA certificate")
+		}
+		tlsConfig.RootCAs = caCertPool
+		klog.V(2).InfoS("Loaded NATS CA certificate", "caFile", cfg.NATSTLSCAFile)
+	}
+
+	return tlsConfig, nil
+}
+
 // createK8sClient creates a Kubernetes client.
 func createK8sClient(kubeconfig string) (*kubernetes.Clientset, error) {
 	var config *rest.Config
@@ -327,8 +389,8 @@ func startHealthServer(addr string, exporter *Exporter, informer cache.SharedInd
 	// Readiness probe - checks if the exporter is ready to process events
 	mux.Handle("/readyz", http.StripPrefix("/readyz", &healthz.Handler{
 		Checks: map[string]healthz.Checker{
-			"ping":           healthz.Ping,
-			"nats":           natsHealthChecker(exporter),
+			"ping":            healthz.Ping,
+			"nats":            natsHealthChecker(exporter),
 			"informer-synced": informerSyncedChecker(informer),
 		},
 	}))

@@ -57,14 +57,16 @@ Every module under `ui/src/components/ui/` becomes either a re-export of the dat
 
 | Local module | Importing files | Replacement |
 |---|---|---|
-| button, card, input, label, textarea, skeleton, separator, checkbox, tabs, dialog, sheet, tooltip, alert, badge | 34 down to 1 | re-export from `@datum-cloud/datum-ui/<name>` |
+| button, card, input, label, textarea, skeleton, separator, checkbox, tabs, sheet, alert | 34 down to 0 | already re-exported from `@datum-cloud/datum-ui/<name>` by the index; the local copies are dead and are deleted |
+| badge, dialog | 16, 4 | existing adapters over datum-ui's Badge and compound Dialog; kept as they are |
+| tooltip | 16 | kept as a local adapter on `@radix-ui/react-tooltip`; datum-ui's `Tooltip` wraps the trigger in an inline-flex span that breaks truncation in feed rows, which the file documents |
 | select | 3 | re-export from `@datum-cloud/datum-ui/select` |
 | combobox | 2 | wrapper around `@datum-cloud/datum-ui/autocomplete`; datum-ui exports no combobox subpath |
 | multi-combobox | 1 | re-export from `@datum-cloud/datum-ui/multi-select` |
 | add-filter-dropdown, filter-chip | 3 each | rebuilt on `@datum-cloud/datum-ui/popover` and `command`; stay local because datum-ui has no filter chip |
 | time-range-dropdown | 5 | see [Time range picker](#time-range-picker) |
 
-Direct imports of `@radix-ui/*` and `cmdk` disappear from the package. The corresponding peer dependencies are removed in the same release as the peer range change.
+Direct imports of `@radix-ui/*` and `cmdk` disappear from the package except `@radix-ui/react-tooltip`, which the tooltip adapter keeps. The other Radix peers and `cmdk` are removed in the same release as the peer range change.
 
 ### Time range picker
 
@@ -104,7 +106,7 @@ Nothing exported from `ui/src/index.ts` is renamed or removed. Re-exported primi
 
 ### Peer dependency range
 
-`@datum-cloud/datum-ui` moves from `^0.8.0` to `^2.9.0`, and the package's development dependency moves to 2.9.1, so the build, the example app, and the Playwright suite run against what cloud-portal ships. The 2.9.x releases are additive (card layout variants, a settings nav, and picker triggers switching to `rounded-lg`). Radix and cmdk peers are removed. Because the peer range moves, the release is a minor bump to 0.6.0.
+`@datum-cloud/datum-ui` moves from `^0.8.0` to `^2.9.0`, and the package's development dependency moves to 2.9.1, so the build, the example app, and the Playwright suite run against what cloud-portal ships. The 2.9.x releases are additive (card layout variants, a settings nav, and picker triggers switching to `rounded-lg`). Radix and cmdk peers are removed, except `@radix-ui/react-tooltip`. Because the peer range moves, the release is a minor bump to 0.6.0.
 
 The package supports one datum-ui major. Supporting 1.x as well would mean every change is verified twice and still leaves room for silent runtime and stylesheet drift between majors, which a typecheck cannot catch.
 
@@ -112,6 +114,7 @@ staff-portal is not touched. It stays on activity-ui 0.5.1 and datum-ui 1.3.1, a
 
 ## Verification
 
+- CI runs only Go tests today; a `ui-tests` job (lint, typecheck, build, Playwright) is added so every PR here is checked.
 - The package has no unit tests; it has a Playwright suite against `ui/example` with route mocks. New specs cover: applying an inverted custom range is impossible; a preset round-trips through the URL as its relative key; a manual range round-trips as ISO; and a feed inside an unconstrained page loads a second page.
 - Every changed view is checked in the example app in light and dark, since token mapping is the riskiest change.
 - `rollup -c`, `tsc --noEmit`, and `eslint` pass against datum-ui 2.9.1.

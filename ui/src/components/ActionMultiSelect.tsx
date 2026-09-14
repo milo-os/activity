@@ -1,5 +1,5 @@
 import * as React from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover, PopoverTrigger, PopoverContent } from '@datum-cloud/datum-ui/popover';
 import { ChevronDown } from 'lucide-react';
 import { Checkbox } from '@datum-cloud/datum-ui/checkbox';
 import { cn } from '../lib/utils';
@@ -57,8 +57,8 @@ export function ActionMultiSelect({
   }, [value.length]);
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <button
           type="button"
           disabled={disabled || isLoading}
@@ -73,19 +73,8 @@ export function ActionMultiSelect({
           <span className="font-medium">{displayText}</span>
           <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
         </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          className={cn(
-            'z-50 min-w-[160px] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
-            'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-            'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
-            'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2'
-          )}
-          sideOffset={4}
-          align="start"
-        >
+      </PopoverTrigger>
+      <PopoverContent className="w-auto min-w-[160px] p-0" sideOffset={4} align="start">
           <div className="p-1">
             {isLoading ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">Loading...</div>
@@ -116,8 +105,7 @@ export function ActionMultiSelect({
               })
             )}
           </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+        </PopoverContent>
+    </Popover>
   );
 }

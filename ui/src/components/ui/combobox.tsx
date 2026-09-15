@@ -24,7 +24,8 @@ export interface ComboboxProps {
   allOptionLabel?: string;
 }
 
-const ALL_VALUE = '';
+/** Sentinel for the "All" item; the public value stays '' for "no filter". */
+const ALL_VALUE = '__all__';
 
 export function Combobox({
   options,
@@ -36,20 +37,23 @@ export function Combobox({
   disabled,
   loading,
   className,
-  clearable,
-  showAllOption,
+  clearable = false,
+  showAllOption = true,
   allOptionLabel = 'All',
 }: ComboboxProps) {
-  const items = React.useMemo(() => {
+  const items = React.useMemo<ComboboxOption[]>(() => {
     const base = options.map((o) => ({ value: o.value, label: o.label, count: o.count }));
     return showAllOption ? [{ value: ALL_VALUE, label: allOptionLabel }, ...base] : base;
   }, [options, showAllOption, allOptionLabel]);
+
+  // An empty value selects the "All" item so the trigger reads its label.
+  const selectedValue = value === '' && showAllOption ? ALL_VALUE : value;
 
   return (
     <Autocomplete
       className={className}
       options={items}
-      value={value}
+      value={selectedValue}
       onValueChange={(next) => onValueChange(next === ALL_VALUE ? '' : next)}
       placeholder={placeholder}
       searchPlaceholder={searchPlaceholder}
@@ -67,6 +71,11 @@ export function Combobox({
           </button>
         ) : undefined
       }
+      renderValue={(option) => (
+        <span className="truncate">
+          {option.count !== undefined ? `${option.label} (${option.count})` : option.label}
+        </span>
+      )}
       renderOption={(option) => (
         <span className="flex w-full items-center justify-between gap-2">
           <span className="truncate">{option.label}</span>

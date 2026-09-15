@@ -120,14 +120,14 @@ export function PolicyRuleEditor({
     <Card
       className={`mb-3 transition-all duration-200 ${
         isHighlighted
-          ? 'border-emerald-600 bg-emerald-50'
+          ? 'border-[var(--success-500)] bg-[var(--success-100)]'
           : 'bg-muted'
       } ${className}`}
     >
       <CardHeader className="flex flex-row justify-between items-center p-3 pb-0">
         <span
           className={`text-xs font-semibold uppercase tracking-wide ${
-            isHighlighted ? 'text-emerald-600' : 'text-muted-foreground'
+            isHighlighted ? 'text-[var(--success-500)]' : 'text-muted-foreground'
           }`}
         >
           {ruleType === 'audit' ? 'Audit' : 'Event'} Rule #{index + 1}
@@ -136,7 +136,7 @@ export function PolicyRuleEditor({
           htmlType="button"
           type="quaternary" theme="borderless"
           size="icon"
-          className="w-6 h-6 text-xl leading-none text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+          className="w-6 h-6 text-xl leading-none text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
           onClick={onDelete}
           title="Delete rule"
         >

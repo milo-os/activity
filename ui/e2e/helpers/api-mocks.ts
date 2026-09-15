@@ -17,6 +17,8 @@ export interface MockApiOptions {
     status: number;
     message: string;
   };
+  /** Slice results by spec.limit and return a continue token while more remain. */
+  paginate?: boolean;
 }
 
 /**
@@ -404,6 +406,15 @@ export interface MockActivity {
  * @param activities - Mock activities to return (optional)
  * @param options - Mock options (delay, error)
  */
+/**
+ * Read the changeSource an ActivityQuery request asks for.
+ * useActivityFeed sends it as a CEL clause in spec.filter
+ * (`spec.changeSource == "human"`), never as a top-level field.
+ */
+export function changeSourceFromSpec(spec: { filter?: string } | undefined): string | undefined {
+  return spec?.filter?.match(/spec\.changeSource == "([^"]+)"/)?.[1];
+}
+
 export async function mockActivityQueryAPI(
   page: Page,
   activities?: MockActivity[],
@@ -428,13 +439,21 @@ export async function mockActivityQueryAPI(
     }
 
     const request = route.request().postDataJSON();
-    const changeSourceFilter = request?.spec?.changeSource;
+    const changeSourceFilter = changeSourceFromSpec(request?.spec);
 
     // Filter activities by changeSource if specified
     let filteredActivities = activities || [];
     if (changeSourceFilter && activities) {
       filteredActivities = activities.filter(a => a.spec.changeSource === changeSourceFilter);
     }
+
+    const limit: number = request?.spec?.limit ?? filteredActivities.length;
+    const offset: number = options?.paginate && request?.spec?.continue
+      ? Number(request.spec.continue)
+      : 0;
+    const page = options?.paginate ? filteredActivities.slice(offset, offset + limit) : filteredActivities;
+    const nextOffset = offset + page.length;
+    const hasMore = options?.paginate && nextOffset < filteredActivities.length;
 
     return route.fulfill({
       status: 200,
@@ -443,7 +462,8 @@ export async function mockActivityQueryAPI(
         kind: 'ActivityQuery',
         spec: request?.spec || {},
         status: {
-          results: filteredActivities,
+          results: page,
+          ...(hasMore ? { continue: String(nextOffset) } : {}),
         },
       },
     });
@@ -643,6 +663,65 @@ export async function mockActivityFacetQueryAPI(
         spec: request?.spec || {},
         status: {
           facets: facets || {},
+        },
+      },
+    });
+  });
+}
+
+/**
+ * Facet result in the array form returned by AuditLogFacetsQuery
+ */
+export interface MockFacetResult {
+  field: string;
+  values: MockFacetValue[];
+}
+
+/**
+ * Mock POST /auditlogfacetsqueries endpoint
+ * @param page - Playwright page instance
+ * @param facets - Mock facet results to return (optional)
+ * @param options - Mock options (delay, error)
+ */
+export async function mockAuditLogFacetQueryAPI(
+  page: Page,
+  facets?: MockFacetResult[],
+  options?: MockApiOptions
+) {
+  await page.route('**/auditlogfacetsqueries', async (route: Route) => {
+    if (options?.delay) {
+      await new Promise(resolve => setTimeout(resolve, options.delay));
+    }
+
+    if (options?.error) {
+      return route.fulfill({
+        status: options.error.status,
+        json: {
+          kind: 'Status',
+          apiVersion: 'v1',
+          status: 'Failure',
+          message: options.error.message,
+          code: options.error.status,
+        },
+      });
+    }
+
+    const request = route.request().postDataJSON();
+    const defaultFacets: MockFacetResult[] = [
+      { field: 'verb', values: [{ value: 'create', count: 12 }, { value: 'delete', count: 4 }] },
+      { field: 'objectRef.resource', values: [{ value: 'deployments', count: 9 }] },
+      { field: 'objectRef.namespace', values: [{ value: 'default', count: 16 }] },
+      { field: 'user.username', values: [{ value: 'alice', count: 16 }] },
+    ];
+
+    return route.fulfill({
+      status: 200,
+      json: {
+        apiVersion: 'activity.miloapis.com/v1alpha1',
+        kind: 'AuditLogFacetsQuery',
+        spec: request?.spec || {},
+        status: {
+          facets: facets || defaultFacets,
         },
       },
     });

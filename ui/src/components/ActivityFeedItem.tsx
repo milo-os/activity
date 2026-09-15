@@ -13,10 +13,10 @@ import { ActivityExpandedDetails } from "./ActivityExpandedDetails";
 import { TenantBadge } from "./TenantBadge";
 import { cn } from "../lib/utils";
 import { Button } from "@datum-cloud/datum-ui/button";
-import { Plus, Pencil, Trash2, Activity as ActivityIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { TableCell, TableRow } from "@datum-cloud/datum-ui/table";
 import { Timestamp } from "./Timestamp";
+import { extractVerb, getActionIconClasses, getTimelineIcon } from "../lib/verb";
 
 // Number of columns rendered for the feed variant. Used as the colSpan on
 // the expanded-detail row so it stretches across the full width.
@@ -51,6 +51,13 @@ export interface ActivityFeedItemProps {
   isLast?: boolean;
   /** Whether the item starts expanded */
   defaultExpanded?: boolean;
+  /**
+   * Row density for the timeline variant. `'compact'` tightens vertical
+   * padding — used by the digest variant, which already leads with day
+   * headers and a summary strip and benefits from denser rows. Defaults to
+   * `'default'` so plain `variant="timeline"` consumers are unaffected.
+   */
+  density?: "default" | "compact";
 }
 
 /**
@@ -84,86 +91,6 @@ function getActorAvatarClasses(actorType: string, compact: boolean): string {
 }
 
 /**
- * Extract verb from activity summary (e.g., "alice created HTTPProxy" -> "created")
- */
-function extractVerb(summary: string): string {
-  const words = summary.split(/\s+/);
-  if (words.length >= 2) {
-    return words[1].toLowerCase();
-  }
-  return "unknown";
-}
-
-/**
- * Normalize verb to a canonical form for coloring
- */
-function normalizeVerb(verb: string): "create" | "update" | "delete" | "other" {
-  const normalized = verb.toLowerCase();
-  if (normalized.includes("create") || normalized.includes("add"))
-    return "create";
-  if (normalized.includes("delete") || normalized.includes("remove"))
-    return "delete";
-  if (
-    normalized.includes("update") ||
-    normalized.includes("patch") ||
-    normalized.includes("modify") ||
-    normalized.includes("change") ||
-    normalized.includes("edit")
-  )
-    return "update";
-  return "other";
-}
-
-/**
- * Get icon container + icon color classes based on verb
- */
-function getActionIconClasses(verb: string): {
-  container: string;
-  icon: string;
-} {
-  const normalizedVerb = normalizeVerb(verb);
-  switch (normalizedVerb) {
-    case "create":
-      return {
-        container: "bg-blue-50 dark:bg-blue-950",
-        icon: "text-blue-500 dark:text-blue-400",
-      };
-    case "update":
-      return {
-        container: "bg-green-50 dark:bg-green-950",
-        icon: "text-green-600 dark:text-green-400",
-      };
-    case "delete":
-      return {
-        container: "bg-red-50 dark:bg-red-950",
-        icon: "text-red-500 dark:text-red-400",
-      };
-    default:
-      return {
-        container: "bg-slate-100 dark:bg-slate-800",
-        icon: "text-slate-500 dark:text-slate-400",
-      };
-  }
-}
-
-/**
- * Get the Lucide icon component for the timeline node based on verb
- */
-function getTimelineIcon(verb: string): React.ElementType {
-  const normalizedVerb = normalizeVerb(verb);
-  switch (normalizedVerb) {
-    case "create":
-      return Plus;
-    case "update":
-      return Pencil;
-    case "delete":
-      return Trash2;
-    default:
-      return ActivityIcon;
-  }
-}
-
-/**
  * ActivityFeedItem renders a single activity in the feed or timeline
  */
 export function ActivityFeedItem({
@@ -181,6 +108,7 @@ export function ActivityFeedItem({
   variant = "feed",
   isLast = false,
   defaultExpanded = false,
+  density = "default",
 }: ActivityFeedItemProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
@@ -216,7 +144,8 @@ export function ActivityFeedItem({
       >
         <div
           className={cn(
-            "flex items-center gap-3 py-3 cursor-pointer group",
+            "flex items-center gap-3 cursor-pointer group",
+            density === "compact" ? "py-1.5" : "py-3",
             isSelected && "bg-muted/40",
           )}
           onClick={toggleExpand}
@@ -224,7 +153,8 @@ export function ActivityFeedItem({
           {/* Action icon square */}
           <div
             className={cn(
-              "w-8 h-8 rounded-md shrink-0 flex items-center justify-center",
+              "rounded-md shrink-0 flex items-center justify-center",
+              density === "compact" ? "w-6 h-6" : "w-8 h-8",
               iconBg,
               iconColor,
             )}
@@ -342,7 +272,7 @@ export function ActivityFeedItem({
         data-state={isSelected ? "selected" : undefined}
         className={cn(
           "cursor-pointer",
-          isNew && "bg-green-50/40 dark:bg-green-950/20",
+          isNew && "bg-[var(--success-100)]/60",
           className,
         )}
         onClick={(e) => {

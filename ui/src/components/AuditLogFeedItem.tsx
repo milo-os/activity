@@ -4,7 +4,7 @@ import type { Event } from '../types';
 import { AuditLogExpandedDetails } from './AuditLogExpandedDetails';
 import { cn } from '../lib/utils';
 import { Button } from '@datum-cloud/datum-ui/button';
-import { Badge } from './ui/badge';
+import { Badge, type BadgeProps } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { TableCell, TableRow } from '@datum-cloud/datum-ui/table';
 import { Timestamp } from './Timestamp';
@@ -34,23 +34,22 @@ export interface AuditLogFeedItemProps {
   isLast?: boolean;
 }
 
-/**
- * Get Tailwind classes for verb badge
- */
-function getVerbBadgeClasses(verb?: string): string {
-  const baseClasses = 'text-[0.55rem] h-5 px-2 py-1 leading-3';
-  const normalized = verb?.toLowerCase();
+const VERB_BADGE_CLASSES = 'text-[0.55rem] h-5 px-2 py-1 leading-3';
 
-  switch (normalized) {
+/**
+ * Get the badge variant for a verb
+ */
+function getVerbBadgeVariant(verb?: string): BadgeProps['variant'] {
+  switch (verb?.toLowerCase()) {
     case 'create':
-      return cn(baseClasses, 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300');
+      return 'success';
     case 'update':
     case 'patch':
-      return cn(baseClasses, 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300');
+      return 'warning';
     case 'delete':
-      return cn(baseClasses, 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300');
+      return 'destructive';
     default:
-      return cn(baseClasses, 'bg-muted text-muted-foreground');
+      return 'outline';
   }
 }
 
@@ -63,10 +62,10 @@ function getResponseStatusIndicator(code?: number): { icon: string; className: s
   }
 
   if (code >= 200 && code < 300) {
-    return { icon: '✓', className: 'text-green-600 dark:text-green-400' };
+    return { icon: '✓', className: 'text-[var(--success-500)]' };
   }
 
-  return { icon: '✗', className: 'text-red-600 dark:text-red-400' };
+  return { icon: '✗', className: 'text-destructive' };
 }
 
 /**
@@ -127,15 +126,15 @@ export function AuditLogFeedItem({
       verb === 'update' || verb === 'patch' ? Pencil :
       ActivityIcon;
     const iconBg =
-      verb === 'create' ? 'bg-green-50 dark:bg-green-950' :
-      verb === 'delete' ? 'bg-red-50 dark:bg-red-950' :
-      verb === 'update' || verb === 'patch' ? 'bg-amber-50 dark:bg-amber-950' :
-      'bg-slate-100 dark:bg-slate-800';
+      verb === 'create' ? 'bg-[var(--success-100)]' :
+      verb === 'delete' ? 'bg-destructive/10' :
+      verb === 'update' || verb === 'patch' ? 'bg-[color-mix(in_oklab,var(--badge-warning)_15%,transparent)]' :
+      'bg-muted';
     const iconColor =
-      verb === 'create' ? 'text-green-600 dark:text-green-400' :
-      verb === 'delete' ? 'text-red-500 dark:text-red-400' :
-      verb === 'update' || verb === 'patch' ? 'text-amber-600 dark:text-amber-400' :
-      'text-slate-500 dark:text-slate-400';
+      verb === 'create' ? 'text-[var(--success-500)]' :
+      verb === 'delete' ? 'text-destructive' :
+      verb === 'update' || verb === 'patch' ? 'text-[var(--badge-warning)]' :
+      'text-muted-foreground';
 
     return (
       <div className={cn(!isLast && !isExpanded && 'border-b border-border', className)}>
@@ -214,7 +213,7 @@ export function AuditLogFeedItem({
         data-state={isSelected ? 'selected' : undefined}
         className={cn(
           'cursor-pointer',
-          isNew && 'bg-green-50/40 dark:bg-green-950/20',
+          isNew && 'bg-[var(--success-100)]/60',
           className
         )}
         onClick={(e) => {
@@ -224,7 +223,7 @@ export function AuditLogFeedItem({
         aria-expanded={isExpanded}
       >
         <TableCell className="py-2 align-middle whitespace-nowrap">
-          <Badge className={getVerbBadgeClasses(event.verb)}>
+          <Badge variant={getVerbBadgeVariant(event.verb)} className={VERB_BADGE_CLASSES}>
             {event.verb?.toUpperCase() || 'UNKNOWN'}
           </Badge>
         </TableCell>

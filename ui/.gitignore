@@ -34,3 +34,6 @@ yarn-error.log*
 /playwright-report/
 /playwright/.cache/
 /blob-report/
+
+# Local visual-check screenshots
+/.scratch-screenshots/

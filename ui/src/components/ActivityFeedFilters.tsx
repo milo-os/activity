@@ -437,18 +437,18 @@ export function ActivityFeedFilters({
 
         {/* Search Input */}
         <div className="relative min-w-[200px] flex-1 max-w-xs">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
             placeholder="Search activities..."
             value={searchInputValue}
             onChange={handleSearchChange}
-            className="pl-8 h-7 text-xs pr-6"
+            className="h-9 pl-9 pr-9 text-xs md:text-xs"
           />
           {searchInputValue && (
             <button
               onClick={handleSearchClear}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" />

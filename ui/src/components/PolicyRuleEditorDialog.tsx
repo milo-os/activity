@@ -165,7 +165,7 @@ export function PolicyRuleEditorDialog({
 
   // Sample data for autocomplete (fetched once when dialog opens)
   const [sampleData, setSampleData] = useState<unknown[]>([]);
-  const [sampleDataLoading, setSampleDataLoading] = useState(false);
+  const [, setSampleDataLoading] = useState(false);
 
   // Extract field paths from sample data OR preview data for autocomplete
   const availableFields = useMemo(() => {

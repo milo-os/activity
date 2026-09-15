@@ -93,7 +93,7 @@ test.describe('Policy CRUD Integration Tests', () => {
     await expect(page.locator('h1, h2').filter({ hasText: policyName })).toBeVisible();
 
     // Verify status indicator shows (may be Ready or Pending initially)
-    const statusIndicator = page.locator('.bg-green-500, .bg-yellow-500, [data-status]').first();
+    const statusIndicator = page.locator('[class*="success-500"], [class*="badge-warning"], [data-status]').first();
     await expect(statusIndicator).toBeVisible({ timeout: 10000 });
   });
 

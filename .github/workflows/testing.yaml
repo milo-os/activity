@@ -1,6 +1,7 @@
 name: "Execute Golang Tests"
 on:
   push:
+  pull_request:
 
 jobs:
   execute-tests:
@@ -12,3 +13,25 @@ jobs:
         run: go mod download
       - name: Execute golang tests
         run: go test -timeout 5m ./...
+  ui-tests:
+    name: UI lint, typecheck, build, e2e
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run type-check
+      - run: pnpm run build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run test:e2e

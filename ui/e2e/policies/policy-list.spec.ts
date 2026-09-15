@@ -94,8 +94,8 @@ test.describe('PolicyList', () => {
     // Find the HTTPProxy policy row
     const httpProxyRow = page.locator('tr', { has: page.locator('text=HTTPProxy') });
 
-    // Verify green ready indicator is present (dot in the row)
-    const readyIndicator = httpProxyRow.locator('div.bg-green-500.w-2.h-2.rounded-full');
+    // Verify the success-toned ready indicator is present (dot in the row)
+    const readyIndicator = httpProxyRow.locator('div[class*="success-500"].w-2.h-2.rounded-full');
     await expect(readyIndicator).toBeVisible();
   });
 
@@ -124,8 +124,8 @@ test.describe('PolicyList', () => {
       await page.waitForTimeout(300);
     }
 
-    // Verify error indicator (AlertTriangle icon with red color class)
-    const errorIndicator = brokenRow.locator('svg.text-red-500, svg.text-red-400');
+    // Verify error indicator (AlertTriangle icon with the destructive text token)
+    const errorIndicator = brokenRow.locator('svg.text-destructive');
     await expect(errorIndicator.first()).toBeVisible();
   });
 

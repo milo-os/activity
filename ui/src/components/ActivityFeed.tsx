@@ -214,31 +214,34 @@ export function ActivityFeed({
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
-  // Infinite scroll using Intersection Observer
+  // Infinite scroll using Intersection Observer.
+  // The list container is the root only when it actually scrolls. Host apps
+  // such as cloud-portal scroll at the page level, so the container never
+  // overflows; in that case observe against the viewport instead.
   useEffect(() => {
     if (!infiniteScroll || !hasMore || !loadMoreTriggerRef.current) return;
+
+    const container = scrollContainerRef.current;
+    const containerScrolls =
+      !!container && container.scrollHeight > container.clientHeight + 1;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
         if (entry.isIntersecting && !isLoadingRef.current) {
-          // Call through the ref to always use the latest function
           loadMoreRef.current();
         }
       },
       {
-        root: scrollContainerRef.current,
+        root: containerScrolls ? container : null,
         rootMargin: `${loadMoreThreshold}px`,
         threshold: 0,
       },
     );
 
     observer.observe(loadMoreTriggerRef.current);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [infiniteScroll, loadMoreThreshold, hasMore]);
+    return () => observer.disconnect();
+  }, [infiniteScroll, loadMoreThreshold, hasMore, activities.length]);
 
   // Handle filter changes - refresh is automatic via the hook
   const handleFiltersChange = useCallback(
@@ -307,8 +310,8 @@ export function ActivityFeed({
                     <TooltipTrigger asChild>
                       <div className="flex items-center gap-2">
                         <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 dark:bg-green-500 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500 dark:bg-green-400"></span>
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--success-500)] opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--success-500)]"></span>
                         </span>
                         <span className="text-xs text-muted-foreground">
                           Streaming activity...
@@ -327,7 +330,7 @@ export function ActivityFeed({
                     <TooltipTrigger asChild>
                       <div className="flex items-center gap-2">
                         <span className="relative flex h-2 w-2">
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 dark:bg-red-400"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-destructive"></span>
                         </span>
                         <span className="text-xs text-destructive">
                           Connection error

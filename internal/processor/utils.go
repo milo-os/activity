@@ -47,6 +47,18 @@ func GetNestedString(m map[string]any, keys ...string) string {
 	return ""
 }
 
+// resolveKindAndAPIGroup extracts kind and apiGroup from an event's involved/
+// regarding/related object, falling back to parsing apiVersion when apiGroup
+// is absent.
+func resolveKindAndAPIGroup(obj map[string]interface{}) (kind, apiGroup string) {
+	kind = GetNestedString(obj, "kind")
+	apiGroup = GetNestedString(obj, "apiGroup")
+	if apiGroup == "" {
+		apiGroup = parseAPIGroup(GetNestedString(obj, "apiVersion"))
+	}
+	return kind, apiGroup
+}
+
 // ExtractTenant extracts tenant information from user extra fields.
 func ExtractTenant(user authnv1.UserInfo) v1alpha1.ActivityTenant {
 	tenant := v1alpha1.ActivityTenant{
@@ -213,6 +225,34 @@ func ExtractTenantFromAnnotations(eventMap map[string]any) v1alpha1.ActivityTena
 	return tenant
 }
 
+// ExtractSourceFromAnnotations reads source-* annotations from event metadata
+// and returns the corresponding ActivitySource, defaulting to an empty struct
+// when absent.
+func ExtractSourceFromAnnotations(eventMap map[string]any) v1alpha1.ActivitySource {
+	var source v1alpha1.ActivitySource
+
+	if eventMap == nil {
+		return source
+	}
+
+	metadata, ok := eventMap["metadata"].(map[string]any)
+	if !ok {
+		return source
+	}
+
+	annotations, ok := metadata["annotations"].(map[string]any)
+	if !ok {
+		return source
+	}
+
+	source.PlaneType = getStringFromMap(annotations, types.SourcePlaneTypeAnnotation)
+	source.Cluster = getStringFromMap(annotations, types.SourceClusterAnnotation)
+	source.Region = getStringFromMap(annotations, types.SourceRegionAnnotation)
+	source.City = getStringFromMap(annotations, types.SourceCityAnnotation)
+
+	return source
+}
+
 // ResolveInvolvedObject extracts an event's subject object, preferring the
 // modern "regarding" field (events.k8s.io/v1) over the legacy "involvedObject"
 // field (core/v1). Shared by every Event-to-Activity code path to prevent
@@ -225,6 +265,28 @@ func ResolveInvolvedObject(event map[string]interface{}) map[string]interface{} 
 		return involvedObject
 	}
 	return nil
+}
+
+// isFederatedSource reports whether source carries enough information to
+// treat its event as federated. Both fields are required together: a
+// Cluster with no PlaneType can't be composed into a well-formed qualified
+// origin ID, so partial annotations must be treated as absent everywhere
+// federation status is checked.
+func isFederatedSource(source v1alpha1.ActivitySource) bool {
+	return source.PlaneType != "" && source.Cluster != ""
+}
+
+// qualifiedOriginID prefixes originID with the source plane and cluster for
+// a federated source, so same-UID events from different clusters don't
+// collide; otherwise it returns originID unchanged. Callers must pass the
+// same value to both Spec.Origin.ID and activityName for a given event:
+// Spec.Origin.ID is the column ReplacingMergeTree dedups on, and
+// activityName hashes it into metadata.name, so the two must never disagree.
+func qualifiedOriginID(source v1alpha1.ActivitySource, originID string) string {
+	if isFederatedSource(source) {
+		return source.PlaneType + "/" + source.Cluster + "/" + originID
+	}
+	return originID
 }
 
 // resolveEventTimestamp extracts a timestamp from an event map, trying in

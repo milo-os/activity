@@ -48,7 +48,7 @@ func TestEventBuildersParity(t *testing.T) {
 
 	// Live path: EventProcessor.buildActivity.
 	p := &EventProcessor{}
-	liveActivity := p.buildActivity(event, matched, involvedObject, matched.Summary, nil)
+	liveActivity := p.buildActivity(event, matched, matched.Summary, nil)
 
 	// PolicyPreview/reindex path: ActivityBuilder.BuildFromEvent.
 	builder := &ActivityBuilder{APIGroup: matched.APIGroup, Kind: matched.Kind}

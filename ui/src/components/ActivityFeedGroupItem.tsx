@@ -83,7 +83,10 @@ export function ActivityFeedGroupItem({
     group.count
   )}`;
 
-  const toggleExpand = () => setIsExpanded((prev) => !prev);
+  const toggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsExpanded((prev) => !prev);
+  };
 
   return (
     <div className={cn(!isLast && !isExpanded && "border-b border-border")}>

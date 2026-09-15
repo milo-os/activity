@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -379,9 +380,9 @@ func eventsToRows(events []auditv1.Event) []metav1.TableRow {
 	for i := range events {
 		timestamp := "<unknown>"
 		if !events[i].StageTimestamp.IsZero() {
-			timestamp = events[i].StageTimestamp.Format("2006-01-02T15:04:05Z")
+			timestamp = events[i].StageTimestamp.UTC().Format(time.RFC3339)
 		} else if !events[i].RequestReceivedTimestamp.IsZero() {
-			timestamp = events[i].RequestReceivedTimestamp.Format("2006-01-02T15:04:05Z")
+			timestamp = events[i].RequestReceivedTimestamp.UTC().Format(time.RFC3339)
 		}
 		verb := events[i].Verb
 		username := events[i].User.Username

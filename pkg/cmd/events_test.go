@@ -382,6 +382,19 @@ func TestKubeEventsToRows(t *testing.T) {
 			},
 		},
 		{
+			name: "non-UTC timestamp converted to UTC for output",
+			events: []activityv1alpha1.EventRecord{
+				makeEventRecord(metav1.NewMicroTime(time.Date(2026, 2, 21, 15, 30, 0, 0, time.FixedZone("EST", -5*60*60))), "Warning", "FailedMount", corev1.ObjectReference{
+					Kind:      "Pod",
+					Name:      "my-pod",
+					Namespace: "production",
+				}, "Unable to mount volume"),
+			},
+			wantCells: [][]interface{}{
+				{"2026-02-21T20:30:00Z", "Warning", "FailedMount", "production/Pod/my-pod", "Unable to mount volume"},
+			},
+		},
+		{
 			name: "event with long message truncated",
 			events: []activityv1alpha1.EventRecord{
 				makeEventRecord(now, "Warning", "LongMessage", corev1.ObjectReference{

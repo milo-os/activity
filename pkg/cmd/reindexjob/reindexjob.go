@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -485,10 +486,10 @@ func (o *StatusOptions) printDetail(job *activityv1alpha1.ReindexJob) error {
 	if job.Status.StartedAt != nil || job.Status.CompletedAt != nil {
 		fmt.Fprintf(o.Out, "\nTimestamps:\n")
 		if job.Status.StartedAt != nil {
-			fmt.Fprintf(o.Out, "  Started:   %s\n", job.Status.StartedAt.Format("2006-01-02T15:04:05Z"))
+			fmt.Fprintf(o.Out, "  Started:   %s\n", 		job.Status.StartedAt.UTC().Format(time.RFC3339))
 		}
 		if job.Status.CompletedAt != nil {
-			fmt.Fprintf(o.Out, "  Completed: %s\n", job.Status.CompletedAt.Format("2006-01-02T15:04:05Z"))
+			fmt.Fprintf(o.Out, "  Completed: %s\n", 		job.Status.CompletedAt.UTC().Format(time.RFC3339))
 		}
 	}
 
@@ -636,12 +637,12 @@ func reindexJobsToRows(jobs []activityv1alpha1.ReindexJob) []metav1.TableRow {
 
 		started := ""
 		if job.Status.StartedAt != nil {
-			started = job.Status.StartedAt.Format("2006-01-02T15:04:05Z")
+			started = 		job.Status.StartedAt.UTC().Format(time.RFC3339)
 		}
 
 		completed := ""
 		if job.Status.CompletedAt != nil {
-			completed = job.Status.CompletedAt.Format("2006-01-02T15:04:05Z")
+			completed = 		job.Status.CompletedAt.UTC().Format(time.RFC3339)
 		}
 
 		row := metav1.TableRow{

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -389,7 +390,7 @@ func (p *ToolProvider) handleQueryActivities(ctx context.Context, req *mcp.CallT
 				"name":      activity.Spec.Resource.Name,
 				"namespace": activity.Spec.Resource.Namespace,
 			},
-			"timestamp": activity.CreationTimestamp.Format("2006-01-02T15:04:05Z"),
+			"timestamp": activity.CreationTimestamp.UTC().Format(time.RFC3339),
 		}
 		activities = append(activities, activityMap)
 	}
@@ -586,7 +587,7 @@ func (p *ToolProvider) handleFindFailedOperations(ctx context.Context, req *mcp.
 		statusCodeCounts[code]++
 
 		failure := map[string]any{
-			"timestamp":  event.RequestReceivedTimestamp.Format("2006-01-02T15:04:05Z"),
+			"timestamp":  event.RequestReceivedTimestamp.UTC().Format(time.RFC3339),
 			"user":       event.User.Username,
 			"verb":       event.Verb,
 			"resource":   event.ObjectRef.Resource,
@@ -688,10 +689,10 @@ func (p *ToolProvider) handleGetResourceHistory(ctx context.Context, req *mcp.Ca
 		}
 
 		entry := map[string]any{
-			"timestamp":    activity.CreationTimestamp.Format("2006-01-02T15:04:05Z"),
-			"actor":        activity.Spec.Actor.Name,
-			"summary":      activity.Spec.Summary,
-			"changeSource": activity.Spec.ChangeSource,
+		"timestamp":    activity.CreationTimestamp.UTC().Format(time.RFC3339),
+		"actor":        activity.Spec.Actor.Name,
+		"summary":      activity.Spec.Summary,
+		"changeSource": activity.Spec.ChangeSource,
 		}
 
 		history = append(history, entry)
@@ -788,7 +789,7 @@ func (p *ToolProvider) handleGetUserActivitySummary(ctx context.Context, req *mc
 
 		if args.IncludeDetails && i < 20 {
 			recentActivities = append(recentActivities, map[string]any{
-				"timestamp":    activity.CreationTimestamp.Format("2006-01-02T15:04:05Z"),
+				"timestamp":    activity.CreationTimestamp.UTC().Format(time.RFC3339),
 				"summary":      activity.Spec.Summary,
 				"changeSource": activity.Spec.ChangeSource,
 				"resource": map[string]any{
@@ -1423,9 +1424,9 @@ func (p *ToolProvider) handleQueryEvents(ctx context.Context, req *mcp.CallToolR
 
 		// eventsv1 uses EventTime, or Series.LastObservedTime for recurring events
 		if event.Series != nil && !event.Series.LastObservedTime.IsZero() {
-			eventMap["timestamp"] = event.Series.LastObservedTime.Format("2006-01-02T15:04:05Z")
+			eventMap["timestamp"] = event.Series.LastObservedTime.UTC().Format(time.RFC3339)
 		} else if !event.EventTime.IsZero() {
-			eventMap["timestamp"] = event.EventTime.Format("2006-01-02T15:04:05Z")
+			eventMap["timestamp"] = event.EventTime.UTC().Format(time.RFC3339)
 		}
 
 		events = append(events, eventMap)

@@ -182,8 +182,12 @@ func (r *Reindexer) evaluateEventBatch(ctx context.Context, batch []map[string]i
 	var activities []*v1alpha1.Activity
 
 	for _, eventMap := range batch {
-		// Extract apiGroup and kind from the event's regarding field
-		regarding, _ := eventMap["regarding"].(map[string]interface{})
+		// Extract apiGroup and kind from the event's involved/regarding object,
+		// using the shared fallback chain: "regarding" (events.k8s.io/v1) ->
+		// "involvedObject" (core/v1). This must match the resolution used by
+		// processor.ActivityBuilder.BuildFromEvent so policy matching and
+		// activity building agree on the same involved object.
+		regarding := processor.ResolveInvolvedObject(eventMap)
 		if regarding == nil {
 			continue
 		}

@@ -3,6 +3,7 @@ package processor
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
 
@@ -210,4 +211,82 @@ func ExtractTenantFromAnnotations(eventMap map[string]any) v1alpha1.ActivityTena
 	}
 
 	return tenant
+}
+
+// ResolveInvolvedObject extracts an event's subject object, preferring the
+// modern "regarding" field (events.k8s.io/v1) over the legacy "involvedObject"
+// field (core/v1). Shared by every Event-to-Activity code path to prevent
+// divergence.
+func ResolveInvolvedObject(event map[string]interface{}) map[string]interface{} {
+	if regarding, ok := event["regarding"].(map[string]interface{}); ok {
+		return regarding
+	}
+	if involvedObject, ok := event["involvedObject"].(map[string]interface{}); ok {
+		return involvedObject
+	}
+	return nil
+}
+
+// resolveEventTimestamp extracts a timestamp from an event map, trying in
+// order: eventTime, lastTimestamp, firstTimestamp, metadata.creationTimestamp,
+// then now(). A candidate must parse and be non-zero, or it falls through to
+// the next one.
+func resolveEventTimestamp(event map[string]interface{}) time.Time {
+	if ts := getStringFromMap(event, "eventTime"); ts != "" {
+		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && !t.IsZero() {
+			return t
+		}
+	}
+	if ts := getStringFromMap(event, "lastTimestamp"); ts != "" {
+		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && !t.IsZero() {
+			return t
+		}
+	}
+	if ts := getStringFromMap(event, "firstTimestamp"); ts != "" {
+		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && !t.IsZero() {
+			return t
+		}
+	}
+	if metadata, ok := event["metadata"].(map[string]interface{}); ok {
+		if ts := getStringFromMap(metadata, "creationTimestamp"); ts != "" {
+			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && !t.IsZero() {
+				return t
+			}
+		}
+	}
+	return time.Now()
+}
+
+// resolveActorFromEvent resolves an event's acting controller: reportingController,
+// then the legacy source.component, then "unknown". Always attributed as a
+// controller actor.
+func resolveActorFromEvent(event map[string]interface{}) v1alpha1.ActivityActor {
+	reportingController := getStringFromMap(event, "reportingController")
+
+	if reportingController == "" {
+		if source, ok := event["source"].(map[string]interface{}); ok {
+			reportingController = getStringFromMap(source, "component")
+		}
+	}
+
+	if reportingController == "" {
+		reportingController = "unknown"
+	}
+
+	return v1alpha1.ActivityActor{
+		Type: ActorTypeController,
+		Name: reportingController,
+	}
+}
+
+// eventActivityLabels builds the standard label set for an Activity generated
+// from a Kubernetes event, shared across all Event-to-Activity code paths.
+func eventActivityLabels(changeSource, apiGroup, kind, eventReason string) map[string]string {
+	return map[string]string{
+		"activity.miloapis.com/origin-type":   "event",
+		"activity.miloapis.com/change-source": changeSource,
+		"activity.miloapis.com/api-group":     apiGroup,
+		"activity.miloapis.com/resource-kind": kind,
+		"activity.miloapis.com/event-reason":  eventReason,
+	}
 }

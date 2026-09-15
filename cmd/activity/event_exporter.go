@@ -22,6 +22,10 @@ type EventExporterOptions struct {
 	Kubeconfig      string
 	ResyncPeriod    time.Duration
 	HealthProbeAddr string
+	PlaneType       string
+	ClusterName     string
+	ClusterRegion   string
+	LocationName    string
 
 	Logs *logsapi.LoggingConfiguration
 }
@@ -37,6 +41,10 @@ func NewEventExporterOptions() *EventExporterOptions {
 		Kubeconfig:      os.Getenv("KUBECONFIG"),
 		ResyncPeriod:    30 * time.Minute,
 		HealthProbeAddr: getEnvOrDefault("HEALTH_PROBE_ADDR", ":8081"),
+		PlaneType:       os.Getenv("PLANE_TYPE"),
+		ClusterName:     os.Getenv("CLUSTER_NAME"),
+		ClusterRegion:   os.Getenv("CLUSTER_REGION"),
+		LocationName:    os.Getenv("LOCATION_NAME"),
 	}
 }
 
@@ -49,6 +57,10 @@ func (o *EventExporterOptions) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.Kubeconfig, "kubeconfig", o.Kubeconfig, "Path to kubeconfig (empty for in-cluster)")
 	fs.DurationVar(&o.ResyncPeriod, "resync-period", o.ResyncPeriod, "Informer resync period")
 	fs.StringVar(&o.HealthProbeAddr, "health-probe-addr", o.HealthProbeAddr, "Health probe server bind address")
+	fs.StringVar(&o.PlaneType, "plane-type", o.PlaneType, "This deployment's plane: \"management\" or \"edge\". Empty disables source-* annotation emission.")
+	fs.StringVar(&o.ClusterName, "cluster-name", o.ClusterName, "Name of the Kubernetes cluster this exporter runs in")
+	fs.StringVar(&o.ClusterRegion, "cluster-region", o.ClusterRegion, "Region of the Kubernetes cluster this exporter runs in")
+	fs.StringVar(&o.LocationName, "location-name", o.LocationName, "Fallback Location name for city resolution, used until a ServingLocation is delivered to this cell")
 	logsapi.AddFlags(o.Logs, fs)
 }
 
@@ -76,6 +88,10 @@ Events are published with scope annotations for multi-tenant isolation.`,
 				Kubeconfig:      options.Kubeconfig,
 				ResyncPeriod:    options.ResyncPeriod,
 				HealthProbeAddr: options.HealthProbeAddr,
+				PlaneType:       options.PlaneType,
+				ClusterName:     options.ClusterName,
+				ClusterRegion:   options.ClusterRegion,
+				LocationName:    options.LocationName,
 			}
 			return eventexporter.Run(cmd.Context(), cfg)
 		},

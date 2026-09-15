@@ -23,8 +23,11 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	"go.miloapis.com/activity/internal/types"
 )
 
 var (
@@ -69,6 +72,22 @@ var (
 			Buckets:   prometheus.DefBuckets,
 		},
 	)
+
+	unscopedEvents = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "event_exporter",
+			Name:      "unscoped_events_total",
+			Help:      "Total number of edge events published without a recovered tenant scope",
+		},
+	)
+
+	noCityEvents = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "event_exporter",
+			Name:      "no_city_events_total",
+			Help:      "Total number of edge events published before this cell's city resolved",
+		},
+	)
 )
 
 func init() {
@@ -79,8 +98,14 @@ func init() {
 		informerSynced,
 		natsConnectionStatus,
 		publishLatency,
+		unscopedEvents,
+		noCityEvents,
 	)
 }
+
+// planeTypeEdge is the Config.PlaneType value for an edge deployment: one
+// running in a workload cluster rather than the management plane.
+const planeTypeEdge = "edge"
 
 // Config holds the exporter configuration.
 type Config struct {
@@ -102,6 +127,21 @@ type Config struct {
 
 	// Health probe server bind address
 	HealthProbeAddr string
+
+	// PlaneType is this deployment's plane: "management" or "edge". Empty
+	// means this exporter does not tag events with source metadata.
+	PlaneType string
+
+	// ClusterName identifies the Kubernetes cluster this exporter runs in,
+	// e.g. "us-central-1-alice".
+	ClusterName string
+
+	// ClusterRegion is this cluster's region, e.g. "us-central-1".
+	ClusterRegion string
+
+	// LocationName is a fallback Location name for city resolution, used
+	// only until a ServingLocation is delivered to this cell.
+	LocationName string
 }
 
 // Run starts the event exporter and blocks until the context is cancelled.
@@ -114,10 +154,25 @@ func Run(ctx context.Context, cfg Config) error {
 		"healthProbeAddr", cfg.HealthProbeAddr,
 	)
 
+	restConfig, err := buildRestConfig(cfg.Kubeconfig)
+	if err != nil {
+		return fmt.Errorf("failed to build Kubernetes client config: %w", err)
+	}
+
 	// Create Kubernetes client
-	k8sClient, err := createK8sClient(cfg.Kubeconfig)
+	k8sClient, err := createK8sClient(restConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
+	}
+
+	var city *cityResolver
+	if cfg.PlaneType == planeTypeEdge {
+		locationsClient, err := client.New(restConfig, client.Options{Scheme: locationsScheme})
+		if err != nil {
+			return fmt.Errorf("failed to create locations client: %w", err)
+		}
+		city = newCityResolver(locationsClient, cfg.LocationName)
+		go city.Run(ctx)
 	}
 
 	// Connect to NATS with metrics tracking
@@ -149,6 +204,18 @@ func Run(ctx context.Context, cfg Config) error {
 
 	klog.InfoS("Connected to NATS", "url", cfg.NATSUrl)
 
+	// Create informer factory for all namespaces
+	factory := informers.NewSharedInformerFactory(k8sClient, cfg.ResyncPeriod)
+	eventInformer := factory.Events().V1().Events().Informer()
+
+	var scopeResolver *namespaceScopeResolver
+	cacheSyncs := []cache.InformerSynced{eventInformer.HasSynced}
+	if cfg.PlaneType == planeTypeEdge {
+		namespaceInformer := factory.Core().V1().Namespaces()
+		scopeResolver = newNamespaceScopeResolver(namespaceInformer.Lister())
+		cacheSyncs = append(cacheSyncs, namespaceInformer.Informer().HasSynced)
+	}
+
 	// Create the event exporter
 	exporter := &Exporter{
 		nc:            nc,
@@ -156,11 +223,12 @@ func Run(ctx context.Context, cfg Config) error {
 		subjectPrefix: cfg.SubjectPrefix,
 		scopeType:     cfg.ScopeType,
 		scopeName:     cfg.ScopeName,
+		planeType:     cfg.PlaneType,
+		clusterName:   cfg.ClusterName,
+		clusterRegion: cfg.ClusterRegion,
+		scope:         scopeResolver,
+		city:          city,
 	}
-
-	// Create informer factory for all namespaces
-	factory := informers.NewSharedInformerFactory(k8sClient, cfg.ResyncPeriod)
-	eventInformer := factory.Events().V1().Events().Informer()
 
 	// Register event handlers
 	eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -207,7 +275,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// Wait for cache sync
 	klog.InfoS("Waiting for informer cache to sync")
 	informerSynced.Set(0)
-	if !cache.WaitForCacheSync(ctx.Done(), eventInformer.HasSynced) {
+	if !cache.WaitForCacheSync(ctx.Done(), cacheSyncs...) {
 		return fmt.Errorf("failed to sync informer cache")
 	}
 	informerSynced.Set(1)
@@ -226,6 +294,44 @@ type Exporter struct {
 	subjectPrefix string
 	scopeType     string
 	scopeName     string
+	planeType     string
+	clusterName   string
+	clusterRegion string
+	scope         *namespaceScopeResolver
+	city          *cityResolver
+}
+
+// resolveScope returns the tenant scope to stamp on an event from the given
+// namespace. A management deployment always uses its static, per-deployment
+// scope flags. An edge deployment serves many projects, so its static flags
+// don't name a real tenant; it recovers the tenant per event instead, and
+// emits unscoped - rather than misattributing to whatever the flags happen
+// to hold - when recovery fails.
+func (e *Exporter) resolveScope(namespace string) (scopeType, scopeName string) {
+	if e.planeType != planeTypeEdge || e.scope == nil {
+		return e.scopeType, e.scopeName
+	}
+
+	if scopeType, scopeName, ok := e.scope.Resolve(namespace); ok {
+		return scopeType, scopeName
+	}
+
+	unscopedEvents.Inc()
+	return "", ""
+}
+
+// sourceAnnotations returns this cell's plane type, cluster, region, and
+// city for stamping onto a published event. City is empty until this cell's
+// cityResolver first resolves; an edge deployment still publishes in that
+// window rather than waiting, so noCityEvents counts how often that happens.
+func (e *Exporter) sourceAnnotations() (planeType, cluster, region, city string) {
+	if e.city != nil {
+		city = e.city.City()
+		if e.planeType == planeTypeEdge && city == "" {
+			noCityEvents.Inc()
+		}
+	}
+	return e.planeType, e.clusterName, e.clusterRegion, city
 }
 
 // publishEvent publishes a Kubernetes event to NATS JetStream.
@@ -239,8 +345,16 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 	if eventCopy.Annotations == nil {
 		eventCopy.Annotations = make(map[string]string)
 	}
-	eventCopy.Annotations["platform.miloapis.com/scope.type"] = e.scopeType
-	eventCopy.Annotations["platform.miloapis.com/scope.name"] = e.scopeName
+
+	scopeType, scopeName := e.resolveScope(event.Namespace)
+	eventCopy.Annotations[types.ScopeTypeAnnotation] = scopeType
+	eventCopy.Annotations[types.ScopeNameAnnotation] = scopeName
+
+	planeType, cluster, region, city := e.sourceAnnotations()
+	eventCopy.Annotations[types.SourcePlaneTypeAnnotation] = planeType
+	eventCopy.Annotations[types.SourceClusterAnnotation] = cluster
+	eventCopy.Annotations[types.SourceRegionAnnotation] = region
+	eventCopy.Annotations[types.SourceCityAnnotation] = city
 
 	// TypeMeta should be correctly populated by eventsv1.Event marshaling
 	// but we'll set it explicitly to ensure consistency
@@ -290,26 +404,23 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 	return nil
 }
 
-// createK8sClient creates a Kubernetes client.
-func createK8sClient(kubeconfig string) (*kubernetes.Clientset, error) {
-	var config *rest.Config
-	var err error
-
+// buildRestConfig loads the Kubernetes client configuration, from a
+// kubeconfig file if given, or in-cluster config otherwise.
+func buildRestConfig(kubeconfig string) (*rest.Config, error) {
 	if kubeconfig != "" {
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		config, err = rest.InClusterConfig()
+		return clientcmd.BuildConfigFromFlags("", kubeconfig)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to build config: %w", err)
-	}
+	return rest.InClusterConfig()
+}
 
-	client, err := kubernetes.NewForConfig(config)
+// createK8sClient creates a Kubernetes client.
+func createK8sClient(config *rest.Config) (*kubernetes.Clientset, error) {
+	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
 
-	return client, nil
+	return clientset, nil
 }
 
 // startHealthServer starts the HTTP health probe server.
@@ -327,8 +438,8 @@ func startHealthServer(addr string, exporter *Exporter, informer cache.SharedInd
 	// Readiness probe - checks if the exporter is ready to process events
 	mux.Handle("/readyz", http.StripPrefix("/readyz", &healthz.Handler{
 		Checks: map[string]healthz.Checker{
-			"ping":           healthz.Ping,
-			"nats":           natsHealthChecker(exporter),
+			"ping":            healthz.Ping,
+			"nats":            natsHealthChecker(exporter),
 			"informer-synced": informerSyncedChecker(informer),
 		},
 	}))

@@ -45,8 +45,8 @@ export function AuditLogExpandedDetails({ event, compact = true }: AuditLogExpan
                   <span
                     className={
                       isOk
-                        ? 'text-green-600 dark:text-green-400'
-                        : 'text-red-600 dark:text-red-400'
+                        ? 'text-[var(--success-500)]'
+                        : 'text-destructive'
                     }
                   >
                     {isOk ? '✓ ' : '✗ '}

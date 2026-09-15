@@ -299,7 +299,7 @@ export function FilterBuilderWithAutocomplete({
 
       <CardContent className="p-0">
         {showShortcuts && (
-          <div className="bg-blue-50 border border-blue-500 dark:bg-blue-950/50 dark:border-blue-700 p-6 rounded-lg mb-6 max-h-96 overflow-y-auto">
+          <div className="bg-[var(--info-100)] border border-[var(--info-300)] p-6 rounded-lg mb-6 max-h-96 overflow-y-auto">
             <h4 className="mt-0 mb-4 text-lg font-semibold text-foreground">Keyboard Shortcuts</h4>
             <div className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 items-start">
               <kbd className="px-2 py-1 bg-background border border-input rounded font-mono text-sm">Ctrl+Space</kbd>
@@ -352,10 +352,9 @@ export function FilterBuilderWithAutocomplete({
                           <code className="flex-1 px-2 py-1 bg-background rounded text-sm font-mono">{example}</code>
                           <Button
                             onClick={() => insertExample(example)}
-                            type="primary" theme="solid"
+                            type="success" theme="solid"
                             size="small"
                             htmlType="button"
-                            className="bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
                           >
                             Insert
                           </Button>
@@ -397,7 +396,7 @@ export function FilterBuilderWithAutocomplete({
                 <div
                   key={idx}
                   className={`px-4 py-3 cursor-pointer flex items-center gap-3 border-b border-border transition-colors ${
-                    idx === selectedSuggestion ? 'bg-pink-100' : 'hover:bg-muted'
+                    idx === selectedSuggestion ? 'bg-accent' : 'hover:bg-muted'
                   }`}
                   onClick={() => insertSuggestion(suggestion)}
                   onMouseEnter={() => setSelectedSuggestion(idx)}

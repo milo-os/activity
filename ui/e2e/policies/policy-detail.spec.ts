@@ -55,8 +55,8 @@ test.describe('PolicyDetailView', () => {
   });
 
   test('displays health status indicator (green dot for Ready)', async ({ page }) => {
-    // Look for the green status dot
-    const statusDot = page.locator('span.bg-green-500.w-2.h-2.rounded-full').first();
+    // Look for the success-toned status dot
+    const statusDot = page.locator('span[class*="success-500"].w-2.h-2.rounded-full').first();
     await expect(statusDot).toBeVisible();
 
     // Hover over the dot to see the tooltip

@@ -83,9 +83,8 @@ export function FilterBuilder({
                           </code>
                           <Button
                             onClick={() => insertExample(example)}
-                            type="primary" theme="solid"
+                            type="success" theme="solid"
                             size="small"
-                            className="bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
                             htmlType="button"
                           >
                             Insert

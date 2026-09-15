@@ -17,6 +17,8 @@ export interface MockApiOptions {
     status: number;
     message: string;
   };
+  /** Slice results by spec.limit and return a continue token while more remain. */
+  paginate?: boolean;
 }
 
 /**
@@ -445,6 +447,14 @@ export async function mockActivityQueryAPI(
       filteredActivities = activities.filter(a => a.spec.changeSource === changeSourceFilter);
     }
 
+    const limit: number = request?.spec?.limit ?? filteredActivities.length;
+    const offset: number = options?.paginate && request?.spec?.continue
+      ? Number(request.spec.continue)
+      : 0;
+    const page = options?.paginate ? filteredActivities.slice(offset, offset + limit) : filteredActivities;
+    const nextOffset = offset + page.length;
+    const hasMore = options?.paginate && nextOffset < filteredActivities.length;
+
     return route.fulfill({
       status: 200,
       json: {
@@ -452,7 +462,8 @@ export async function mockActivityQueryAPI(
         kind: 'ActivityQuery',
         spec: request?.spec || {},
         status: {
-          results: filteredActivities,
+          results: page,
+          ...(hasMore ? { continue: String(nextOffset) } : {}),
         },
       },
     });

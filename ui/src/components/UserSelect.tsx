@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { User, X } from 'lucide-react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover, PopoverTrigger, PopoverContent } from '@datum-cloud/datum-ui/popover';
 import { Button } from '@datum-cloud/datum-ui/button';
 import { cn } from '../lib/utils';
 
@@ -71,8 +71,8 @@ export function UserSelect({
   );
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <Button
           htmlType="button"
           type="tertiary" theme="outline"
@@ -96,14 +96,9 @@ export function UserSelect({
             </button>
           )}
         </Button>
-      </Popover.Trigger>
+      </PopoverTrigger>
 
-      <Popover.Portal>
-        <Popover.Content
-          className="z-50 w-64 rounded-md border bg-popover p-0 text-popover-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
-          align="start"
-          sideOffset={4}
-        >
+      <PopoverContent className="w-64 p-0" align="start" sideOffset={4}>
           {/* Search Input */}
           <div className="border-b p-2">
             <input
@@ -177,8 +172,7 @@ export function UserSelect({
               </div>
             )}
           </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+        </PopoverContent>
+    </Popover>
   );
 }

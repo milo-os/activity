@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Plus } from 'lucide-react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover, PopoverTrigger, PopoverContent } from '@datum-cloud/datum-ui/popover';
 import { cn } from '../../lib/utils';
 
 export interface FilterOption {
@@ -53,8 +53,8 @@ export function AddFilterDropdown({
   const buttonLabel = hasActiveFilters ? 'Filters' : 'Add Filters';
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <button
           type="button"
           disabled={disabled}
@@ -69,20 +69,8 @@ export function AddFilterDropdown({
           <Plus className="h-4 w-4" />
           <span className="font-medium">{buttonLabel}</span>
         </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          className={cn(
-            'z-50 min-w-[180px] overflow-hidden rounded-md border shadow-md',
-            'bg-white dark:bg-slate-900 text-foreground',
-            'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-            'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
-            'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2'
-          )}
-          sideOffset={4}
-          align="start"
-        >
+      </PopoverTrigger>
+      <PopoverContent className="w-auto min-w-[180px] p-0" sideOffset={4} align="start">
           <div className="p-1">
             {availableFilters.map((filter) => {
               const active = isFilterActive(filter.id);
@@ -108,8 +96,7 @@ export function AddFilterDropdown({
               );
             })}
           </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   );
 }

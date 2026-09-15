@@ -1,4 +1,4 @@
-import { Button } from './ui/button';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { cn } from '../lib/utils';
 
 export type VerbOption = 'all' | 'create' | 'update' | 'patch' | 'delete' | 'get' | 'list' | 'watch';
@@ -63,8 +63,9 @@ export function VerbToggle({
       {OPTIONS.map((option, index) => (
         <Button
           key={option.value}
-          type="button"
-          variant="ghost"
+          htmlType="button"
+          type="quaternary"
+          theme="borderless"
           className={cn(
             'rounded-none px-2 h-7 text-xs font-medium transition-all duration-200',
             index < OPTIONS.length - 1 && 'border-r border-input',

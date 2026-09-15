@@ -404,6 +404,15 @@ export interface MockActivity {
  * @param activities - Mock activities to return (optional)
  * @param options - Mock options (delay, error)
  */
+/**
+ * Read the changeSource an ActivityQuery request asks for.
+ * useActivityFeed sends it as a CEL clause in spec.filter
+ * (`spec.changeSource == "human"`), never as a top-level field.
+ */
+export function changeSourceFromSpec(spec: { filter?: string } | undefined): string | undefined {
+  return spec?.filter?.match(/spec\.changeSource == "([^"]+)"/)?.[1];
+}
+
 export async function mockActivityQueryAPI(
   page: Page,
   activities?: MockActivity[],
@@ -428,7 +437,7 @@ export async function mockActivityQueryAPI(
     }
 
     const request = route.request().postDataJSON();
-    const changeSourceFilter = request?.spec?.changeSource;
+    const changeSourceFilter = changeSourceFromSpec(request?.spec);
 
     // Filter activities by changeSource if specified
     let filteredActivities = activities || [];

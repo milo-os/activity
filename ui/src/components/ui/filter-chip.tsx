@@ -1,7 +1,14 @@
 import * as React from 'react';
 import { X, ChevronDown } from 'lucide-react';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from 'cmdk';
-import * as Popover from '@radix-ui/react-popover';
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from '@datum-cloud/datum-ui/command';
+import { Popover, PopoverTrigger, PopoverContent } from '@datum-cloud/datum-ui/popover';
 import { cn } from '../../lib/utils';
 import { Input } from '@datum-cloud/datum-ui/input';
 
@@ -203,8 +210,8 @@ export function FilterChip({
 
   return (
     <div className={cn('inline-flex items-center', className)}>
-      <Popover.Root open={open} onOpenChange={handleOpenChange}>
-        <Popover.Trigger asChild>
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
           <button
             type="button"
             disabled={disabled}
@@ -218,29 +225,19 @@ export function FilterChip({
             <span className="text-foreground truncate max-w-[120px]">{displayValue}</span>
             <ChevronDown className="h-3 w-3 text-muted-foreground ml-1" />
           </button>
-        </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          className={cn(
-            'z-50 min-w-[var(--radix-popover-trigger-width)] max-w-[320px] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
-            'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-            'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
-            'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2'
-          )}
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-auto min-w-[var(--radix-popover-trigger-width)] max-w-[320px] p-0"
           sideOffset={4}
           align="start"
         >
           {inputMode === 'typeahead' ? (
-            <Command filter={filterOptions} className="w-full">
-              <div className="flex items-center border-b px-3">
-                <CommandInput
-                  placeholder={searchPlaceholder}
-                  value={search}
-                  onValueChange={setSearch}
-                  className="flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </div>
+            <Command filter={filterOptions}>
+              <CommandInput
+                placeholder={searchPlaceholder}
+                value={search}
+                onValueChange={setSearch}
+              />
               {/* Selected items chips */}
               {values.length > 0 && (
                 <div className="flex flex-wrap gap-1 p-2 border-b">
@@ -261,21 +258,14 @@ export function FilterChip({
                   ))}
                 </div>
               )}
-              <CommandList className="max-h-[300px] overflow-y-auto p-1">
-                <CommandEmpty className="py-6 text-center text-sm text-muted-foreground">
-                  No results found.
-                </CommandEmpty>
+              <CommandList>
+                <CommandEmpty>No results found.</CommandEmpty>
                 <CommandGroup>
                   {options.map((option) => (
                     <CommandItem
                       key={option.value}
                       value={option.value}
                       onSelect={() => handleSelect(option.value)}
-                      className={cn(
-                        'relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none',
-                        'data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground',
-                        'hover:bg-accent hover:text-accent-foreground'
-                      )}
                     >
                       <div className={cn(
                         'mr-2 h-4 w-4 shrink-0 rounded-sm border border-border',
@@ -310,9 +300,8 @@ export function FilterChip({
               />
             </div>
           )}
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+        </PopoverContent>
+      </Popover>
       <button
         type="button"
         onClick={handleClearAll}

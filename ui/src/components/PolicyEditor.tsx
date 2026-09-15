@@ -9,7 +9,6 @@ import { PolicyActivityView } from './PolicyActivityView';
 import { Input } from '@datum-cloud/datum-ui/input';
 import { Button } from '@datum-cloud/datum-ui/button';
 import { Card, CardHeader, CardContent } from '@datum-cloud/datum-ui/card';
-import { Badge } from './ui/badge';
 import { Label } from '@datum-cloud/datum-ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@datum-cloud/datum-ui/tabs';
 import { ApiErrorAlert } from './ApiErrorAlert';

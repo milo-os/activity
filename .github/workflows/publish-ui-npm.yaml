@@ -29,50 +29,65 @@ jobs:
       release-mode: dev
     secrets: inherit
 
-  # ── Bump version ─────────────────────────────────────────────────────────
-  # Runs only on manual dispatch. Delegates to the shared bump-npm-version
-  # reusable workflow, which bumps package.json, commits, tags, and pushes.
-  # Downstream jobs read new-version from this job's outputs automatically.
-  bump-version:
-    name: Bump version
+  # ── Open release pull request ────────────────────────────────────────────
+  # Runs only on manual dispatch. Bumps ui/package.json on a release branch
+  # and opens a pull request against main. main only accepts pull requests,
+  # so nothing is pushed to main here; merging the pull request is what
+  # publishes the release.
+  open-release-pr:
+    name: Open release pull request
     if: github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: write
-    uses: datum-cloud/actions/.github/workflows/bump-npm-version.yaml@v1.14.0
-    with:
-      package-path: ui
-      package-name: "@datum-cloud/activity-ui"
-      bump-type: ${{ inputs.bump-type }}
-
-  # ── Publish release to npm ───────────────────────────────────────────────
-  # Runs after bump-version. package.json already has the bumped version.
-  publish-release:
-    name: Publish release
-    needs: bump-version
-    permissions:
-      contents: read
-      id-token: write
-    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.14.0
-    with:
-      package-name: "@datum-cloud/activity-ui"
-      package-path: ui
-      release-mode: release
-    secrets: inherit
-
-  # ── Create GitHub Release ────────────────────────────────────────────────
-  create-release:
-    name: Create GitHub Release
-    needs: [bump-version, publish-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
-      - name: Create GitHub Release
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Bump version
+        id: bump
+        working-directory: ui
+        env:
+          BUMP_TYPE: ${{ inputs.bump-type }}
+        run: |
+          npm version "$BUMP_TYPE" --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "branch=chore/release-activity-ui-v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Push release branch
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          BRANCH: ${{ steps.bump.outputs.branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add ui/package.json
+          git commit -m "chore(ui): release @datum-cloud/activity-ui v${VERSION}"
+          git push origin "$BRANCH"
+
+      - name: Open pull request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_VERSION: ${{ needs.bump-version.outputs.new-version }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          BRANCH: ${{ steps.bump.outputs.branch }}
+          BUMP_TYPE: ${{ inputs.bump-type }}
         run: |
-          gh release create "$RELEASE_VERSION" \
-            --title "@datum-cloud/activity-ui $RELEASE_VERSION" \
-            --generate-notes \
-            --repo ${{ github.repository }}
+          BODY="Bumps \`ui/package.json\` to **${VERSION}** (${BUMP_TYPE} bump).
+
+          Merging this pull request publishes \`@datum-cloud/activity-ui\` v${VERSION} to npm's \`latest\` tag and creates the tag \`activity-ui/v${VERSION}\` with a GitHub release."
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(ui): release @datum-cloud/activity-ui v${VERSION}" \
+            --body "$BODY"

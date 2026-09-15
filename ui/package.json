@@ -1,6 +1,6 @@
 {
   "name": "@datum-cloud/activity-ui",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "packageManager": "pnpm@10.33.0",
   "description": "React components for Kubernetes Activity",
   "main": "dist/index.js",

@@ -281,6 +281,20 @@ task ui:test             # Run lint + type-check
 task ui:all              # Build library and example
 ```
 
+### Releasing
+
+1. Run the **Publish UI to NPM** workflow from the Actions tab with a bump type
+   (`patch`, `minor`, or `major`). It opens a `chore/release-activity-ui-v<version>`
+   pull request, since `main` only accepts pull requests. Alternatively run
+   `npm version <bump> --no-git-tag-version` in `ui/` and open the pull request yourself.
+2. Merge the pull request. The push to `main` publishes `@datum-cloud/activity-ui`
+   to npm's `latest` tag, creates the tag `activity-ui/v<version>`, and creates the
+   matching GitHub release.
+
+Every other push to `main` publishes a pre-release build to the `dev` npm tag.
+The Go API server keeps its own manual `v*` GitHub releases; the `activity-ui/`
+prefix keeps the two apart.
+
 ## TypeScript Support
 
 Full TypeScript support with exported types:

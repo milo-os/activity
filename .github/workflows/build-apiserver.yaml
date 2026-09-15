@@ -12,6 +12,9 @@ jobs:
   publish-container-image:
     # No point in trying to build the container image if the deployment
     # manifests are invalid.
+    # activity-ui releases (tags activity-ui/v*) ship an npm package, not a
+    # new API server, so skip the image build for them.
+    if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'activity-ui/')) }}
     needs:
       - validate-kustomize
     permissions:
@@ -46,6 +49,9 @@ jobs:
     # Ensure the kustomize manifests are valid and the container is published
     # before we publish the kustomize manifests. We expect publishing the
     # kustomize manifests to result in new deployments going out.
+    # activity-ui releases (tags activity-ui/v*) ship an npm package, not a
+    # new API server, so skip the bundle publish for them.
+    if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'activity-ui/')) }}
     needs:
       - validate-kustomize
       - publish-container-image

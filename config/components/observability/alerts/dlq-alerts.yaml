@@ -10,7 +10,7 @@ metadata:
 spec:
   groups:
     # =========================================================================
-    # DLQ Health Alerts - Platform SRE Ownership
+    # DLQ Health Alerts - SRE Ownership
     # =========================================================================
     - name: dlq-health
       interval: 30s
@@ -25,7 +25,7 @@ spec:
           labels:
             severity: warning
             component: activity-processor
-            team: platform-sre
+            team: sre
           annotations:
             summary: "DLQ is growing - messages not being processed"
             description: "DLQ is receiving {{ $value }} events/sec for 15+ minutes. Events are failing processing faster than retry can handle."
@@ -39,7 +39,7 @@ spec:
           labels:
             severity: warning
             component: activity-processor
-            team: platform-sre
+            team: sre
           annotations:
             summary: "Failed to publish events to DLQ"
             description: "{{ $value }} DLQ publish errors/sec. Events may be lost entirely."
@@ -54,7 +54,7 @@ spec:
           labels:
             severity: warning
             component: activity-processor
-            team: platform-sre
+            team: sre
           annotations:
             summary: "DLQ events with excessive retry attempts"
             description: "{{ $value }} events have exceeded the high retry threshold for {{ $labels.api_group }}/{{ $labels.kind }}."
@@ -69,7 +69,7 @@ spec:
           labels:
             severity: warning
             component: activity-processor
-            team: platform-sre
+            team: sre
           annotations:
             summary: "DLQ receiving events at a slow but steady rate"
             description: "{{ $value }} events sent to DLQ in the last 6 hours. A policy may be failing for specific event shapes."
@@ -94,7 +94,7 @@ spec:
           labels:
             severity: warning
             component: activity-processor
-            team: platform-sre
+            team: sre
           annotations:
             summary: "DLQ retry success rate is low"
             description: "{{ $value | humanizePercentage }} of retry attempts are failing. Events not recovering after retry."

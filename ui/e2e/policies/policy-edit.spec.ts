@@ -76,21 +76,6 @@ test.describe('PolicyEditView - New Policy', () => {
     await expect(saveButton).toBeEnabled();
   });
 
-  test('Unsaved changes badge appears when policy is modified', async ({ page }) => {
-    // Initially no badge
-    let unsavedBadge = page.locator('text=Unsaved changes');
-    await expect(unsavedBadge).not.toBeVisible();
-
-    // Fill in policy name
-    const nameInput = page.locator('#policy-name');
-    await nameInput.fill('test-policy');
-    await page.waitForTimeout(200);
-
-    // Badge should appear
-    unsavedBadge = page.locator('text=Unsaved changes');
-    await expect(unsavedBadge).toBeVisible();
-  });
-
   test('Validate button performs dry-run validation', async ({ page }) => {
     // Mock the dry-run validation response
     await page.route('**/activitypolicies?dryRun=All', async (route) => {

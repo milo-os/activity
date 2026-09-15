@@ -516,6 +516,7 @@ func (p *Processor) Start(ctx context.Context) error {
 			p.config.NATSEventStream,
 			dlqConfig.StreamName,
 			dlqConfig.SubjectPrefix,
+			p.reEvaluateDeadLetter,
 		)
 
 		p.wg.Add(1)
@@ -951,17 +952,7 @@ func (p *Processor) processMessage(msg *nats.Msg) error {
 			p.eventEmitter.EmitEvaluationError(p.ctx, policy.Name, ruleIndex, err)
 
 			// Classify error type for DLQ using sentinel errors
-			errorType := processor.ErrorTypeCELMatch
-			if ruleIndex >= 0 {
-				// If we have a rule index, check if it's a kind resolution or summary error
-				if errors.Is(err, processor.ErrKindResolution) {
-					errorType = processor.ErrorTypeKindResolve
-				} else if errors.Is(err, processor.ErrActivityBuild) {
-					errorType = processor.ErrorTypeKindResolve // Activity build errors are typically kind resolution
-				} else {
-					errorType = processor.ErrorTypeCELSummary
-				}
-			}
+			errorType := classifyEvaluationError(err, ruleIndex)
 
 			// Publish to DLQ
 			policyVersion := int64(0)
@@ -1035,6 +1026,51 @@ func (p *Processor) processMessage(msg *nats.Msg) error {
 // evaluateCompiledAuditRules evaluates audit rules using pre-compiled CEL programs.
 func (p *Processor) evaluateCompiledAuditRules(policy *CompiledPolicy, auditMap map[string]any, audit *auditv1.Event) (*v1alpha1.Activity, int, error) {
 	return EvaluateCompiledAuditRules(policy, auditMap, audit, p.resourceToKind)
+}
+
+// reEvaluateDeadLetter re-runs audit policy evaluation against a dead-letter
+// event's original payload so the DLQ retry worker can distinguish a genuinely
+// resolved event from one that merely re-publishes and fails again. It mirrors
+// the ingest evaluation path (auditToMap + EvaluateCompiledAuditRules) without
+// emitting an activity; the retry worker republishes resolved events itself.
+func (p *Processor) reEvaluateDeadLetter(_ context.Context, event *processor.DeadLetterEvent) RetryOutcome {
+	var audit auditv1.Event
+	if err := json.Unmarshal(event.OriginalPayload, &audit); err != nil {
+		return RetryOutcome{ErrorType: processor.ErrorTypeUnmarshal, Err: err}
+	}
+
+	auditMap, err := auditToMap(&audit)
+	if err != nil {
+		return RetryOutcome{ErrorType: processor.ErrorTypeUnmarshal, Err: err}
+	}
+
+	policies := p.policyCache.Get(audit.ObjectRef.APIGroup, audit.ObjectRef.Resource)
+	if len(policies) == 0 {
+		// No policy still targets this resource; nothing left to evaluate, so the
+		// event can leave the DLQ rather than retry forever.
+		return RetryOutcome{Resolved: true}
+	}
+
+	for _, policy := range policies {
+		_, ruleIndex, err := p.evaluateCompiledAuditRules(policy, auditMap, &audit)
+		if err != nil {
+			return RetryOutcome{ErrorType: classifyEvaluationError(err, ruleIndex), Err: err}
+		}
+	}
+
+	return RetryOutcome{Resolved: true}
+}
+
+// classifyEvaluationError maps an audit evaluation error to a DLQ error type,
+// matching the classification used on the ingest path.
+func classifyEvaluationError(err error, ruleIndex int) processor.ErrorType {
+	if ruleIndex < 0 {
+		return processor.ErrorTypeCELMatch
+	}
+	if errors.Is(err, processor.ErrKindResolution) || errors.Is(err, processor.ErrActivityBuild) {
+		return processor.ErrorTypeKindResolve
+	}
+	return processor.ErrorTypeCELSummary
 }
 
 // auditToMap converts an audit event to a map for CEL evaluation.

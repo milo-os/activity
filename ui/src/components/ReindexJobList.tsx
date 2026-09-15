@@ -123,7 +123,7 @@ export function ReindexJobList({
             </p>
             {isWatching && (
               <Badge variant="success" className="text-xs">
-                <span className="w-1.5 h-1.5 bg-green-500 rounded-full mr-1.5 animate-pulse" />
+                <span className="w-1.5 h-1.5 bg-[var(--success-500)] rounded-full mr-1.5 animate-pulse" />
                 Live
               </Badge>
             )}

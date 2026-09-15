@@ -25,13 +25,13 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center justify-center p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-opacity cursor-pointer ml-1 opacity-0 group-hover:opacity-100"
+          className="inline-flex items-center justify-center p-0.5 rounded hover:bg-muted transition-opacity cursor-pointer ml-1 opacity-0 group-hover:opacity-100"
           aria-label={`Copy ${label}`}
         >
           {isCopied ? (
-            <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
+            <Check className="h-3 w-3 text-[var(--success-500)]" />
           ) : (
-            <Copy className="h-3 w-3 text-gray-500 dark:text-gray-400" />
+            <Copy className="h-3 w-3 text-muted-foreground" />
           )}
         </button>
       </TooltipTrigger>

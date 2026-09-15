@@ -317,7 +317,7 @@ test.describe('PolicyRuleEditorDialog', () => {
     await celHelp.getByText('Available variables').click();
 
     // Verify variables are visible (use .first() to handle multiple matches)
-    await expect(celHelp.getByText(/^verb -/).first()).toBeVisible();
+    await expect(celHelp.getByText(/^audit\.verb -/).first()).toBeVisible();
     await expect(celHelp.getByText(/user\.username/).first()).toBeVisible();
   });
 
@@ -338,8 +338,8 @@ test.describe('PolicyRuleEditorDialog', () => {
     await page.waitForTimeout(200);
 
     // Verify variables are visible (use .first() to handle multiple matches)
-    await expect(templateHelp.getByText(/actor\.name/).first()).toBeVisible();
-    await expect(templateHelp.getByText(/resource\.name/).first()).toBeVisible();
+    await expect(templateHelp.getByText(/\{\{ actor \}\}/).first()).toBeVisible();
+    await expect(templateHelp.getByText(/objectRef\.name/).first()).toBeVisible();
   });
 
   test('Save button creates new rule and closes dialog', async ({ page }) => {

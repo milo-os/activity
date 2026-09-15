@@ -51,6 +51,16 @@ var (
 		},
 		[]string{"api_group", "kind", "policy_name"},
 	)
+
+	dlqRetryFailedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "activity_processor",
+			Subsystem: "dlq_retry",
+			Name:      "failed_total",
+			Help:      "Total number of DLQ retries that failed re-evaluation and produced no activity",
+		},
+		[]string{"api_group", "kind", "policy_name", "error_type"},
+	)
 )
 
 func init() {
@@ -58,6 +68,7 @@ func init() {
 		dlqRetryAttemptsTotal,
 		dlqRetryBatchDuration,
 		dlqEventsHighRetryTotal,
+		dlqRetryFailedTotal,
 	)
 }
 
@@ -98,10 +109,31 @@ func DefaultDLQRetryConfig() DLQRetryConfig {
 	}
 }
 
+// RetryOutcome describes the result of re-evaluating a dead-letter event in place.
+type RetryOutcome struct {
+	// Resolved is true when re-evaluation succeeded (no error). Only resolved
+	// events are republished onto the source stream to generate an activity.
+	Resolved bool
+	// ErrorType classifies the failure when Resolved is false, for metrics.
+	ErrorType processor.ErrorType
+	// Err is the underlying re-evaluation error when Resolved is false.
+	Err error
+}
+
+// RetryEvaluator re-runs policy evaluation against a dead-letter event's original
+// payload so the retry worker can tell "republished to NATS" apart from
+// "successfully processed". A nil evaluator falls back to publish-ACK accounting.
+type RetryEvaluator func(ctx context.Context, event *processor.DeadLetterEvent) RetryOutcome
+
 // DLQRetryController manages automatic retry of dead-letter queue events.
 type DLQRetryController struct {
 	js     nats.JetStreamContext
 	config DLQRetryConfig
+
+	// evaluator re-runs policy evaluation in place before a retry is treated as
+	// resolved. When nil, the controller cannot observe evaluation outcomes and
+	// only reports that events were republished.
+	evaluator RetryEvaluator
 
 	auditStreamName  string
 	eventStreamName  string
@@ -117,7 +149,8 @@ type DLQRetryController struct {
 	activeRetriesMu sync.Mutex
 }
 
-// NewDLQRetryController creates a new DLQ retry controller.
+// NewDLQRetryController creates a new DLQ retry controller. evaluator may be nil,
+// in which case retries are reported as "republished" rather than "succeeded".
 func NewDLQRetryController(
 	js nats.JetStreamContext,
 	config DLQRetryConfig,
@@ -125,10 +158,12 @@ func NewDLQRetryController(
 	eventStreamName string,
 	dlqStreamName string,
 	dlqSubjectPrefix string,
+	evaluator RetryEvaluator,
 ) *DLQRetryController {
 	return &DLQRetryController{
 		js:               js,
 		config:           config,
+		evaluator:        evaluator,
 		auditStreamName:  auditStreamName,
 		eventStreamName:  eventStreamName,
 		dlqStreamName:    dlqStreamName,
@@ -393,7 +428,21 @@ func (c *DLQRetryController) processRetryBatch(ctx context.Context, trigger stri
 			}
 		}
 
-		// Attempt to republish
+		// Re-evaluate the event in place before treating the retry as resolved.
+		// A NATS-publish ACK only means the republish was accepted, not that
+		// policy evaluation passed, so a re-failing event must count as a real
+		// failure and keep accumulating its retry count rather than resetting.
+		if c.evaluator != nil && dlEvent.Type == processor.EventTypeAudit {
+			outcome := c.evaluator(ctx, &dlEvent)
+			if !outcome.Resolved {
+				c.handleReEvaluationFailure(ctx, msg, &dlEvent, now, trigger, apiGroup, kind, outcome)
+				failed++
+				continue
+			}
+		}
+
+		// Evaluation passed (or no evaluator wired): republish so the event
+		// re-enters the ingest path and produces an activity.
 		if err := c.republishEvent(ctx, &dlEvent); err != nil {
 			klog.ErrorS(err, "Failed to republish DLQ event",
 				"eventType", dlEvent.Type,
@@ -418,21 +467,71 @@ func (c *DLQRetryController) processRetryBatch(ctx context.Context, trigger stri
 			continue
 		}
 
-		// Success - ack the DLQ message
+		// Republish accepted - ack the DLQ message.
 		if ackErr := msg.Ack(); ackErr != nil {
 			klog.ErrorS(ackErr, "Failed to ack successfully retried DLQ message")
 		}
-		dlqRetryAttemptsTotal.WithLabelValues(trigger, apiGroup, kind, "succeeded").Inc()
 		succeeded++
 
-		klog.V(2).InfoS("Successfully retried DLQ event",
+		// "succeeded" means evaluation passed and an activity will be generated;
+		// "republished" means we put the event back without observing the
+		// outcome (no evaluator for this event type).
+		result := "republished"
+		if c.evaluator != nil && dlEvent.Type == processor.EventTypeAudit {
+			result = "succeeded"
+		}
+		dlqRetryAttemptsTotal.WithLabelValues(trigger, apiGroup, kind, result).Inc()
+
+		klog.V(2).InfoS("Retried DLQ event",
 			"eventType", dlEvent.Type,
 			"policy", dlEvent.PolicyName,
 			"retryCount", dlEvent.RetryCount,
+			"result", result,
 		)
 	}
 
 	return processed, succeeded, failed
+}
+
+// handleReEvaluationFailure records a re-failing dead-letter event as a genuine
+// failure: it counts the failure, advances the retry count via the DLQ metadata
+// loop, and avoids republishing into the dedup window where the event would be
+// silently dropped. On metadata-update failure the message is NAKed to preserve it.
+func (c *DLQRetryController) handleReEvaluationFailure(
+	ctx context.Context,
+	msg *nats.Msg,
+	event *processor.DeadLetterEvent,
+	now time.Time,
+	trigger, apiGroup, kind string,
+	outcome RetryOutcome,
+) {
+	errorType := outcome.ErrorType
+	if errorType == "" {
+		errorType = processor.ErrorTypeCELSummary
+	}
+
+	klog.ErrorS(outcome.Err, "DLQ event re-failed evaluation",
+		"eventType", event.Type,
+		"policy", event.PolicyName,
+		"errorType", errorType,
+		"retryCount", event.RetryCount,
+	)
+
+	dlqRetryAttemptsTotal.WithLabelValues(trigger, apiGroup, kind, "failed").Inc()
+	dlqRetryFailedTotal.WithLabelValues(apiGroup, kind, event.PolicyName, string(errorType)).Inc()
+
+	// Advance the retry count instead of republishing into ingest, so the
+	// failure is durably tracked and high-retry alerting can fire.
+	if err := c.updateAndRepublishMetadata(ctx, event, now); err != nil {
+		klog.ErrorS(err, "Failed to update retry metadata after re-failure, NAKing to preserve event")
+		if nakErr := msg.Nak(); nakErr != nil {
+			klog.ErrorS(nakErr, "Failed to NAK DLQ message after metadata update failure")
+		}
+		return
+	}
+	if ackErr := msg.Ack(); ackErr != nil {
+		klog.ErrorS(ackErr, "Failed to ack DLQ message after re-failure metadata update")
+	}
 }
 
 // isEligibleForRetry checks if an event's backoff has expired.

@@ -45,7 +45,7 @@ export default {
     'react/jsx-runtime',
     /^react\//,
     /^react-dom\//,
-    /^@radix-ui\//,
+    '@radix-ui/react-tooltip',
     // Externalize @datum-cloud/datum-ui (and its subpath imports) so the
     // consumer brings its own pinned copy. Avoids duplicating primitives
     // and prevents CSS conflicts with the host's datum-ui styles.

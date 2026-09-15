@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { mockActivityQueryAPI, type MockActivity } from './helpers/api-mocks';
+import { mockActivityQueryAPI, changeSourceFromSpec, type MockActivity } from './helpers/api-mocks';
 
 /**
  * E2E tests for Activity Feed changeSource filter
@@ -69,7 +69,7 @@ test.describe('Activity Feed Source Filter', () => {
 
       // Filter activities based on changeSource
       const requestData = JSON.parse(request.postData() || '{}');
-      const changeSourceFilter = requestData?.spec?.changeSource;
+      const changeSourceFilter = changeSourceFromSpec(requestData?.spec);
       let filteredActivities = mockActivities;
       if (changeSourceFilter) {
         filteredActivities = mockActivities.filter(a => a.spec.changeSource === changeSourceFilter);
@@ -106,7 +106,7 @@ test.describe('Activity Feed Source Filter', () => {
 
     if (newRequests.length > 0) {
       const lastRequest = newRequests[newRequests.length - 1];
-      expect(lastRequest.spec.changeSource).toBe('human');
+      expect(changeSourceFromSpec(lastRequest.spec)).toBe('human');
     } else {
       // Human may already be selected - click All then Human
       await page.getByRole('button', { name: 'All' }).click();
@@ -121,7 +121,7 @@ test.describe('Activity Feed Source Filter', () => {
       expect(humanRequests.length).toBeGreaterThan(0);
 
       const humanRequest = humanRequests[humanRequests.length - 1];
-      expect(humanRequest.spec.changeSource).toBe('human');
+      expect(changeSourceFromSpec(humanRequest.spec)).toBe('human');
     }
   });
 
@@ -136,7 +136,7 @@ test.describe('Activity Feed Source Filter', () => {
       }
 
       const requestData = JSON.parse(request.postData() || '{}');
-      const changeSourceFilter = requestData?.spec?.changeSource;
+      const changeSourceFilter = changeSourceFromSpec(requestData?.spec);
       let filteredActivities = mockActivities;
       if (changeSourceFilter) {
         filteredActivities = mockActivities.filter(a => a.spec.changeSource === changeSourceFilter);
@@ -166,7 +166,7 @@ test.describe('Activity Feed Source Filter', () => {
     expect(newRequests.length).toBeGreaterThan(0);
 
     const lastRequest = newRequests[newRequests.length - 1];
-    expect(lastRequest.spec.changeSource).toBe('system');
+    expect(changeSourceFromSpec(lastRequest.spec)).toBe('system');
   });
 
   test('All filter does NOT include changeSource in API request', async ({ page }) => {
@@ -215,7 +215,7 @@ test.describe('Activity Feed Source Filter', () => {
 
     await page.route('**/activityqueries', async (route) => {
       const requestData = JSON.parse(route.request().postData() || '{}');
-      const changeSourceFilter = requestData?.spec?.changeSource;
+      const changeSourceFilter = changeSourceFromSpec(requestData?.spec);
       let filteredActivities = mockActivities;
       if (changeSourceFilter) {
         filteredActivities = mockActivities.filter(a => a.spec.changeSource === changeSourceFilter);

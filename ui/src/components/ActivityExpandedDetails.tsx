@@ -42,13 +42,13 @@ export function ActivityExpandedDetails({
                   {change.field}
                 </span>
                 {change.old ? (
-                  <span className="block ml-2 text-red-600 dark:text-red-400">
+                  <span className="block ml-2 text-destructive">
                     <span className="mr-1 font-medium">−</span>
                     <span className="line-through">{change.old}</span>
                   </span>
                 ) : null}
                 {change.new ? (
-                  <span className="block ml-2 text-green-600 dark:text-green-400">
+                  <span className="block ml-2 text-[var(--success-500)]">
                     <span className="mr-1 font-medium">+</span>
                     {change.new}
                   </span>

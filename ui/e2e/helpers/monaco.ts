@@ -1,105 +1,120 @@
 import type { Page } from '@playwright/test';
 
 /**
- * Type text into a Monaco editor OR fallback textarea
- * Monaco editors don't support standard page.fill() because they use complex DOM structure.
- * This helper detects whether Monaco loaded or if we're using the fallback textarea,
- * and uses the appropriate method to fill the content.
+ * Wait until the CEL editor container has finished loading: either Monaco
+ * has mounted (`.monaco-editor`) or a plain textarea is rendered.
+ *
+ * Monaco 0.50+ uses the EditContext API in Chromium, so its input is a
+ * `div[role="textbox"]` rather than the `textarea.inputarea` older builds
+ * rendered. Detect the editor by its root element, not by the input.
  */
-export async function fillMonacoEditor(page: Page, testId: string, text: string) {
-  // Wait for the editor container to be visible
+async function waitForEditor(page: Page, testId: string) {
   const editor = page.getByTestId(testId);
   await editor.waitFor({ state: 'visible', timeout: 10000 });
 
-  // Wait for Monaco to load or timeout (component has 2 second timeout to fallback)
-  // We'll wait up to 8 seconds to be safe (Monaco can be slow in CI)
+  // Wait up to 8 seconds for Monaco or the fallback (Monaco can be slow in CI)
   await page.waitForFunction(
     (testId) => {
       const container = document.querySelector(`[data-testid="${testId}"]`);
       if (!container) return false;
-
-      // Check for loading state
-      const isLoading = container.textContent?.includes('Loading editor...');
-      if (isLoading) return false; // Still loading
-
-      // Check if Monaco loaded (has textarea.inputarea)
-      const hasMonaco = container.querySelector('textarea.inputarea') !== null;
-      if (hasMonaco) return true;
-
-      // Check if fallback textarea exists
-      const hasFallback = container.querySelector('textarea') !== null;
-      if (hasFallback) return true;
-
-      return false;
+      if (container.textContent?.includes('Loading editor...')) return false;
+      if (container.querySelector('.monaco-editor .view-lines')) return true;
+      return container.querySelector('textarea') !== null;
     },
     testId,
-    { timeout: 8000 } // Wait up to 8 seconds for Monaco or fallback
+    { timeout: 8000 }
   );
 
-  // Now determine what type of editor we have
-  const monacoTextarea = editor.locator('textarea.inputarea');
-  const fallbackTextarea = editor.locator('textarea').first();
-  const hasMonaco = (await monacoTextarea.count()) > 0;
+  return editor;
+}
 
-  if (hasMonaco) {
-    // Monaco editor detected - use keyboard input
-    await editor.click();
-    await page.waitForTimeout(100);
+/**
+ * Find the Monaco editor instance mounted inside the container and run `fn`
+ * against it in the page. Returns `undefined` when Monaco is not mounted or
+ * the global `monaco` namespace is unavailable.
+ */
+async function withMonacoInstance<T, A = undefined>(
+  page: Page,
+  testId: string,
+  fn: (editor: { getValue(): string; setValue(v: string): void }, arg: A) => T,
+  arg?: A
+): Promise<T | undefined> {
+  return page.evaluate(
+    ({ testId, fnSource, arg }) => {
+      type Instance = { getDomNode(): HTMLElement | null; getValue(): string; setValue(v: string): void };
+      const container = document.querySelector(`[data-testid="${testId}"]`);
+      const monaco = (window as unknown as { monaco?: { editor?: { getEditors?: () => Instance[] } } }).monaco;
+      if (!container || !monaco?.editor?.getEditors) return undefined;
+      const instance = monaco.editor.getEditors().find((e) => {
+        const node = e.getDomNode();
+        return node !== null && container.contains(node);
+      });
+      if (!instance) return undefined;
+      return new Function('editor', 'arg', `return (${fnSource})(editor, arg);`)(instance, arg) as T;
+    },
+    { testId, fnSource: fn.toString(), arg }
+  );
+}
 
-    // Select all and replace
-    await page.keyboard.press('Meta+A');
-    await page.keyboard.type(text, { delay: 5 });
-  } else {
-    // Fallback textarea - use standard fill
-    await fallbackTextarea.fill(text);
+/**
+ * Type text into a Monaco editor OR fallback textarea.
+ * Monaco editors don't support standard page.fill() because they use a
+ * complex DOM structure. Prefer setting the model value through Monaco's own
+ * API (which fires onChange like typing does); fall back to keyboard input.
+ */
+export async function fillMonacoEditor(page: Page, testId: string, text: string) {
+  const editor = await waitForEditor(page, testId);
+  const hasMonaco = (await editor.locator('.monaco-editor').count()) > 0;
+
+  if (!hasMonaco) {
+    await editor.locator('textarea').first().fill(text);
+    return;
   }
+
+  const setViaApi = await withMonacoInstance(
+    page,
+    testId,
+    (instance, value: string) => {
+      instance.setValue(value);
+      return true;
+    },
+    text
+  ).catch(() => undefined);
+
+  if (setViaApi) return;
+
+  // Keyboard fallback: focus the editor, select all, replace
+  await editor.locator('.monaco-editor').click();
+  await page.waitForTimeout(100);
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type(text, { delay: 5 });
 }
 
 /**
  * Get the value from a Monaco editor OR fallback textarea
  */
 export async function getMonacoEditorValue(page: Page, testId: string): Promise<string> {
-  const editor = page.getByTestId(testId);
-
-  // Wait for editor to be ready (same logic as fillMonacoEditor)
+  let editor;
   try {
-    await page.waitForFunction(
-      (testId) => {
-        const container = document.querySelector(`[data-testid="${testId}"]`);
-        if (!container) return false;
-
-        const isLoading = container.textContent?.includes('Loading editor...');
-        if (isLoading) return false;
-
-        const hasMonaco = container.querySelector('textarea.inputarea') !== null;
-        const hasFallback = container.querySelector('textarea') !== null;
-
-        return hasMonaco || hasFallback;
-      },
-      testId,
-      { timeout: 8000 }
-    );
-  } catch (e) {
-    // Log what we found for debugging
-    const content = await editor.textContent();
+    editor = await waitForEditor(page, testId);
+  } catch {
+    const content = await page.getByTestId(testId).textContent();
     throw new Error(`Editor not ready for test-id ${testId}. Content: ${content}`);
   }
 
-  // Check if we have Monaco or fallback
-  const monacoLines = editor.locator('.view-line');
-  const monacoTextarea = editor.locator('textarea.inputarea');
-  const fallbackTextarea = editor.locator('textarea').first();
-
-  const hasMonaco = (await monacoTextarea.count()) > 0;
-
-  if (hasMonaco) {
-    // Monaco renders content in .view-line elements
-    const lines = await monacoLines.allTextContents();
-    return lines.join('\n').trim();
-  } else {
-    // Fallback textarea
-    return await fallbackTextarea.inputValue();
+  const hasMonaco = (await editor.locator('.monaco-editor').count()) > 0;
+  if (!hasMonaco) {
+    return editor.locator('textarea').first().inputValue();
   }
+
+  const viaApi = await withMonacoInstance(page, testId, (instance) => instance.getValue()).catch(
+    () => undefined
+  );
+  if (typeof viaApi === 'string') return viaApi;
+
+  // Monaco renders content in .view-line elements (with non-breaking spaces)
+  const lines = await editor.locator('.view-line').allTextContents();
+  return lines.join('\n').replace(/\u00a0/g, ' ').trim();
 }
 
 /**

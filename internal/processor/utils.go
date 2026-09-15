@@ -276,10 +276,7 @@ func isFederatedSource(source v1alpha1.ActivitySource) bool {
 // Spec.Origin.ID is the column ReplacingMergeTree dedups on, and
 // activityName hashes it into metadata.name, so the two must never disagree.
 func qualifiedOriginID(source v1alpha1.ActivitySource, originID string) string {
-	if isFederatedSource(source) {
-		return source.PlaneType + "/" + source.Cluster + "/" + originID
-	}
-	return originID
+	return types.PrefixWithSource(source.PlaneType, source.Cluster, originID)
 }
 
 // resolveEventTimestamp extracts a timestamp from an event map, trying in

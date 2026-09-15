@@ -88,6 +88,22 @@ var (
 			Help:      "Total number of edge events published before this cell's city resolved",
 		},
 	)
+
+	droppedEvents = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "event_exporter",
+			Name:      "dropped_events_total",
+			Help:      "Total number of events dropped because the publish queue was full. The newest event is dropped, not an already-queued one.",
+		},
+	)
+
+	queueDepth = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "event_exporter",
+			Name:      "queue_depth",
+			Help:      "Current number of events buffered in the publish queue awaiting NATS publish.",
+		},
+	)
 )
 
 func init() {
@@ -100,12 +116,24 @@ func init() {
 		publishLatency,
 		unscopedEvents,
 		noCityEvents,
+		droppedEvents,
+		queueDepth,
 	)
 }
 
 // planeTypeEdge is the Config.PlaneType value for an edge deployment: one
 // running in a workload cluster rather than the management plane.
 const planeTypeEdge = "edge"
+
+// publishQueueSize bounds the publish queue between the informer callback
+// and the NATS publish call.
+const publishQueueSize = 1000
+
+// eventJob is a queued event awaiting publish.
+type eventJob struct {
+	event     *eventsv1.Event
+	eventType string
+}
 
 // Config holds the exporter configuration.
 type Config struct {
@@ -228,7 +256,9 @@ func Run(ctx context.Context, cfg Config) error {
 		clusterRegion: cfg.ClusterRegion,
 		scope:         scopeResolver,
 		city:          city,
+		queue:         make(chan eventJob, publishQueueSize),
 	}
+	go exporter.drainQueue(ctx)
 
 	// Register event handlers
 	eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -237,24 +267,14 @@ func Run(ctx context.Context, cfg Config) error {
 			if !ok {
 				return
 			}
-			if err := exporter.publishEvent(ctx, event, "ADDED"); err != nil {
-				klog.ErrorS(err, "Failed to publish event",
-					"namespace", event.Namespace,
-					"name", event.Name,
-				)
-			}
+			exporter.enqueue(event, "ADDED")
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			event, ok := newObj.(*eventsv1.Event)
 			if !ok {
 				return
 			}
-			if err := exporter.publishEvent(ctx, event, "MODIFIED"); err != nil {
-				klog.ErrorS(err, "Failed to publish event",
-					"namespace", event.Namespace,
-					"name", event.Name,
-				)
-			}
+			exporter.enqueue(event, "MODIFIED")
 		},
 		// We don't need to handle deletes - events are ephemeral and TTL'd
 	})
@@ -299,6 +319,7 @@ type Exporter struct {
 	clusterRegion string
 	scope         *namespaceScopeResolver
 	city          *cityResolver
+	queue         chan eventJob
 }
 
 // resolveScope returns the tenant scope to stamp on an event from the given
@@ -332,6 +353,60 @@ func (e *Exporter) sourceAnnotations() (planeType, cluster, region, city string)
 		}
 	}
 	return e.planeType, e.clusterName, e.clusterRegion, city
+}
+
+// qualifiedMsgID returns the NATS message ID for event, qualified with this
+// cell's plane and cluster so the same UID from a different cluster can't
+// collide. It must stay in sync with the Activity origin ID the processor
+// derives from this event's source annotations.
+func (e *Exporter) qualifiedMsgID(event *eventsv1.Event, eventType string) string {
+	msgID := string(event.UID)
+	if eventType == "MODIFIED" {
+		// For updates, include resource version to allow updates through
+		msgID = fmt.Sprintf("%s-%s", event.UID, event.ResourceVersion)
+	}
+	return types.PrefixWithSource(e.planeType, e.clusterName, msgID)
+}
+
+// enqueue copies event and queues it for publish. If the queue is full, the
+// incoming event is dropped rather than blocking the informer callback.
+func (e *Exporter) enqueue(event *eventsv1.Event, eventType string) {
+	job := eventJob{event: event.DeepCopy(), eventType: eventType}
+
+	select {
+	case e.queue <- job:
+	default:
+		droppedEvents.Inc()
+		klog.ErrorS(fmt.Errorf("publish queue full (size %d)", cap(e.queue)), "Dropped event",
+			"namespace", event.Namespace,
+			"name", event.Name,
+		)
+	}
+	queueDepth.Set(float64(len(e.queue)))
+}
+
+// drainQueue publishes queued events until ctx is cancelled. A job already
+// pulled off the queue when ctx is cancelled is dropped rather than
+// published, since publishEvent would otherwise run with an already-dead
+// ctx and fail.
+func (e *Exporter) drainQueue(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job := <-e.queue:
+			if ctx.Err() != nil {
+				return
+			}
+			if err := e.publishEvent(ctx, job.event, job.eventType); err != nil {
+				klog.ErrorS(err, "Failed to publish event",
+					"namespace", job.event.Namespace,
+					"name", job.event.Name,
+				)
+			}
+			queueDepth.Set(float64(len(e.queue)))
+		}
+	}
 }
 
 // publishEvent publishes a Kubernetes event to NATS JetStream.
@@ -373,15 +448,8 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 	// Build subject: events.k8s.{namespace}
 	subject := fmt.Sprintf("%s.%s", e.subjectPrefix, event.Namespace)
 
-	// Publish with message ID for deduplication
-	msgID := string(event.UID)
-	if eventType == "MODIFIED" {
-		// For updates, include resource version to allow updates through
-		msgID = fmt.Sprintf("%s-%s", event.UID, event.ResourceVersion)
-	}
-
 	_, err = e.js.Publish(subject, data,
-		nats.MsgId(msgID),
+		nats.MsgId(e.qualifiedMsgID(event, eventType)),
 		nats.Context(ctx),
 	)
 	if err != nil {

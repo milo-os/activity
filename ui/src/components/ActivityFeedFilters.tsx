@@ -1,6 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { formatISO, subDays } from "date-fns";
-import { Search, X } from "lucide-react";
+import { Search, X, SlidersHorizontal } from "lucide-react";
+import { cn } from "../lib/utils";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@datum-cloud/datum-ui/popover";
 
 import type { ActivityFeedFilters as FilterState } from "../hooks/useActivityFeed";
 import type { TimeRange } from "../hooks/useActivityFeed";
@@ -45,6 +51,14 @@ export interface ActivityFeedFiltersProps {
    * row as the library's controls.
    */
   extraFilters?: React.ReactNode;
+  /**
+   * `'inline'` (default) renders every control in one row, as today.
+   * `'compact'` keeps Search inline but moves Change Source, filter chips,
+   * Add Filters, and the time range picker into a single "Filters" button
+   * that opens a popover — for surfaces that want the content to lead over
+   * the filter chrome (e.g. the digest variant).
+   */
+  layout?: "inline" | "compact";
 }
 
 /**
@@ -149,6 +163,7 @@ export function ActivityFeedFilters({
   hiddenFilters = [],
   className = "",
   extraFilters,
+  layout = "inline",
 }: ActivityFeedFiltersProps) {
   const {
     resourceKinds,
@@ -423,6 +438,139 @@ export function ActivityFeedFilters({
     onFiltersChangeRef.current({ ...filtersRef.current, search: undefined });
   }, []);
 
+  const searchInput = (
+    <div className="relative min-w-[200px] flex-1 max-w-xs">
+      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <Input
+        type="text"
+        placeholder="Search activities..."
+        value={searchInputValue}
+        onChange={handleSearchChange}
+        className="pl-8 h-7 text-xs pr-6"
+      />
+      {searchInputValue && (
+        <button
+          onClick={handleSearchClear}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Clear search"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+
+  const changeSourceControl = !hiddenFilters.includes("changeSource") && (
+    <ChangeSourceToggle
+      value={filters.changeSource || "all"}
+      onChange={handleChangeSourceChange}
+      disabled={disabled}
+    />
+  );
+
+  const filterChips = activeFilterIds.map((filterId) => {
+    const config = FILTER_CONFIGS[filterId];
+    return (
+      <FilterChip
+        key={filterId}
+        label={config.label}
+        values={getFilterValues(filterId)}
+        options={
+          config.inputMode === "typeahead"
+            ? getFilterOptions(filterId)
+            : undefined
+        }
+        onValuesChange={(values) => handleFilterChange(filterId, values)}
+        onClear={() => handleFilterClear(filterId)}
+        onPopoverClose={() => handlePopoverClose(filterId)}
+        inputMode={config.inputMode}
+        placeholder={config.placeholder}
+        searchPlaceholder={config.searchPlaceholder}
+        autoOpen={pendingFilter === filterId}
+        disabled={disabled}
+      />
+    );
+  });
+
+  const addFilterControl = (
+    <AddFilterDropdown
+      availableFilters={availableFilters}
+      activeFilterIds={activeFilterIds}
+      onAddFilter={handleAddFilter}
+      hasActiveFilters={activeFilterIds.length > 0}
+      disabled={disabled}
+    />
+  );
+
+  const timeRangeControl = (
+    <TimeRangeDropdown
+      presets={TIME_PRESETS}
+      selectedPreset={selectedPreset}
+      onPresetSelect={handleTimePresetSelect}
+      onCustomRangeApply={handleCustomRangeApply}
+      customStart={customStart}
+      customEnd={customEnd}
+      disabled={disabled}
+      displayLabel={getTimeRangeLabel()}
+    />
+  );
+
+  if (layout === "compact") {
+    const activeFilterCount =
+      activeFilterIds.length +
+      (!hiddenFilters.includes("changeSource") &&
+      filters.changeSource &&
+      filters.changeSource !== "all"
+        ? 1
+        : 0);
+
+    return (
+      <div className={`border-b border-border py-4 ${className}`}>
+        <div className="flex flex-wrap gap-2 items-center">
+          {searchInput}
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                disabled={disabled}
+                className={cn(
+                  "flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs",
+                  "text-muted-foreground hover:text-foreground hover:border-foreground/50 transition-colors",
+                  "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                  "disabled:cursor-not-allowed disabled:opacity-50"
+                )}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <span className="font-medium">Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="ml-0.5 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold leading-none px-1.5 py-0.5">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-[320px] p-3"
+              sideOffset={4}
+              align="start"
+            >
+              <div className="flex flex-col gap-3">
+                {changeSourceControl}
+                <div className="flex flex-wrap gap-2 items-center">
+                  {filterChips}
+                  {addFilterControl}
+                </div>
+                {extraFilters}
+                {timeRangeControl}
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`border-b border-border py-4 ${className}`}>
       <div className="flex flex-wrap gap-2 items-center">
@@ -496,17 +644,7 @@ export function ActivityFeedFilters({
         {/* Spacer */}
         <div className="flex-1 min-w-[20px]" />
 
-        {/* Time Range Dropdown */}
-        <TimeRangeDropdown
-          presets={TIME_PRESETS}
-          selectedPreset={selectedPreset}
-          onPresetSelect={handleTimePresetSelect}
-          onCustomRangeApply={handleCustomRangeApply}
-          customStart={customStart}
-          customEnd={customEnd}
-          disabled={disabled}
-          displayLabel={getTimeRangeLabel()}
-        />
+        {timeRangeControl}
       </div>
     </div>
   );

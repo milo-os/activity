@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Plus } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@datum-cloud/datum-ui/popover';
+import { Button } from '@datum-cloud/datum-ui/button';
 import { cn } from '../../lib/utils';
 
 export interface FilterOption {
@@ -55,20 +56,17 @@ export function AddFilterDropdown({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
+        <Button
+          htmlType="button"
+          type="quaternary"
+          theme="outline"
+          size="small"
           disabled={disabled}
-          className={cn(
-            'flex h-7 items-center gap-2 rounded-md border border-dashed border-border bg-background px-2 text-xs',
-            'text-muted-foreground hover:text-foreground hover:border-foreground/50 transition-colors',
-            'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-            'disabled:cursor-not-allowed disabled:opacity-50',
-            className
-          )}
+          className={cn('gap-1.5 border-dashed text-muted-foreground hover:text-foreground', className)}
         >
           <Plus className="h-4 w-4" />
           <span className="font-medium">{buttonLabel}</span>
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto min-w-[180px] p-0" sideOffset={4} align="start">
           <div className="p-1">

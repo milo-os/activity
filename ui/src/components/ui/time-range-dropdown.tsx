@@ -99,6 +99,7 @@ export function TimeRangeDropdown({
   return (
     <DateTimeRangePicker
       className={className}
+      triggerClassName="h-9 rounded-lg px-3 text-xs"
       value={value}
       onChange={handleChange}
       presets={pickerPresets}

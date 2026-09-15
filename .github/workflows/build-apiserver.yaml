@@ -2,19 +2,25 @@ name: Build and Publish Docker Image
 
 on:
   push:
+    # Every branch, plus the API server's own v* tags. activity-ui releases
+    # push activity-ui/v* tags, which ship an npm package rather than a new
+    # image, so they are deliberately outside this filter.
+    branches: ["**"]
+    tags: ["v*"]
   release:
     types: ["published"]
 
 jobs:
   validate-kustomize:
+    # A manually published activity-ui/v* release is the one remaining way an
+    # activity-ui release can reach this workflow. Gate it here: every other
+    # job needs this one, so skipping it skips the whole run.
+    if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'activity-ui/')) }}
     uses: datum-cloud/actions/.github/workflows/validate-kustomize.yaml@v1.12.1
 
   publish-container-image:
     # No point in trying to build the container image if the deployment
     # manifests are invalid.
-    # activity-ui releases (tags activity-ui/v*) ship an npm package, not a
-    # new API server, so skip the image build for them.
-    if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'activity-ui/')) }}
     needs:
       - validate-kustomize
     permissions:
@@ -49,9 +55,6 @@ jobs:
     # Ensure the kustomize manifests are valid and the container is published
     # before we publish the kustomize manifests. We expect publishing the
     # kustomize manifests to result in new deployments going out.
-    # activity-ui releases (tags activity-ui/v*) ship an npm package, not a
-    # new API server, so skip the bundle publish for them.
-    if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'activity-ui/')) }}
     needs:
       - validate-kustomize
       - publish-container-image

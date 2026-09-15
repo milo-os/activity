@@ -13,12 +13,63 @@ on:
         default: patch
 
 jobs:
+  # ── Detect release ───────────────────────────────────────────────────────
+  # Runs on every push to main. Compares the version in ui/package.json with
+  # the version npm serves under the latest tag. A release is due only when
+  # the file carries a strictly newer semver, which is what merging a release
+  # pull request produces. Every other push is a dev build.
+  detect:
+    name: Detect release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      should-release: ${{ steps.compare.outputs.should-release }}
+      version: ${{ steps.compare.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Compare with npm latest
+        id: compare
+        env:
+          PACKAGE_NAME: "@datum-cloud/activity-ui"
+        run: |
+          FILE_VERSION=$(node -p "require('./ui/package.json').version")
+          NPM_VERSION=$(npm view "$PACKAGE_NAME" version)
+          SHOULD_RELEASE=$(node - "$FILE_VERSION" "$NPM_VERSION" <<'EOF'
+          const parse = (raw) => {
+            const m = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(raw);
+            if (!m) throw new Error(`not a semver version: ${raw}`);
+            return { core: m.slice(1, 4).map(Number), pre: m[4] };
+          };
+          const [file, npm] = process.argv.slice(2).map(parse);
+          let cmp = 0;
+          for (let i = 0; i < 3 && cmp === 0; i++) cmp = file.core[i] - npm.core[i];
+          // Same core version: a final release outranks a pre-release, and a
+          // pre-release never outranks anything with the same core.
+          if (cmp === 0 && !file.pre && npm.pre) cmp = 1;
+          process.stdout.write(cmp > 0 ? "true" : "false");
+          EOF
+          )
+          echo "ui/package.json is ${FILE_VERSION}, npm latest is ${NPM_VERSION}, release: ${SHOULD_RELEASE}"
+          echo "version=${FILE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "should-release=${SHOULD_RELEASE}" >> "$GITHUB_OUTPUT"
+
   # ── Dev publish ──────────────────────────────────────────────────────────
-  # Every push to main publishes a pre-release dev build. Releases are
-  # triggered manually via workflow_dispatch when the team is ready to ship.
+  # Every push to main that is not a release publishes a pre-release dev
+  # build. Releases are driven by merging the pull request that
+  # open-release-pr creates.
   publish-dev:
     name: Publish dev build
-    if: github.event_name == 'push'
+    needs: detect
+    if: github.event_name == 'push' && needs.detect.outputs.should-release != 'true'
     permissions:
       contents: read
       id-token: write
@@ -28,6 +79,62 @@ jobs:
       package-path: ui
       release-mode: dev
     secrets: inherit
+
+  # ── Publish release to npm ───────────────────────────────────────────────
+  # Runs when a push to main carries a newer version than npm's latest tag.
+  # Publishes the version already present in ui/package.json to latest.
+  publish-release:
+    name: Publish release
+    needs: detect
+    if: needs.detect.outputs.should-release == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.14.0
+    with:
+      package-name: "@datum-cloud/activity-ui"
+      package-path: ui
+      release-mode: release
+    secrets: inherit
+
+  # ── Tag and create GitHub Release ────────────────────────────────────────
+  # Runs after publish-release. Tags the pushed commit as activity-ui/v<version>
+  # and creates the matching GitHub release. The activity-ui/ prefix keeps the
+  # UI out of the v* tag namespace used by the Go API server.
+  tag-and-release:
+    name: Tag and create GitHub Release
+    needs: [detect, publish-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.detect.outputs.version }}
+      TAG: activity-ui/v${{ needs.detect.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Create and push tag
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::tag ${TAG} already exists; refusing to move it"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "@datum-cloud/activity-ui v${VERSION}" "${{ github.sha }}"
+          git push origin "refs/tags/${TAG}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "@datum-cloud/activity-ui v${VERSION}" \
+            --generate-notes
 
   # ── Open release pull request ────────────────────────────────────────────
   # Runs only on manual dispatch. Bumps ui/package.json on a release branch

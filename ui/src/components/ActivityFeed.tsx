@@ -20,6 +20,9 @@ import {
 import { ActivityFeedItemSkeleton } from "./ActivityFeedItemSkeleton";
 import { Skeleton } from "@datum-cloud/datum-ui/skeleton";
 import { ActivityFeedFilters } from "./ActivityFeedFilters";
+import { ActivityFeedGroupItem } from "./ActivityFeedGroupItem";
+import { ActivityDigestSummary } from "./ActivityDigestSummary";
+import { groupActivitiesByDay } from "../lib/groupActivities";
 import { ActivityApiClient } from "../api/client";
 import { Button } from "@datum-cloud/datum-ui/button";
 import { Card } from "@datum-cloud/datum-ui/card";
@@ -61,8 +64,17 @@ export interface ActivityFeedProps {
   onActivityClick?: (activity: Activity) => void;
   /** Whether to show in compact mode (for resource detail tabs) */
   compact?: boolean;
-  /** Layout variant for activity items: 'feed' (default) or 'timeline' */
-  variant?: "feed" | "timeline";
+  /**
+   * Layout variant for activity items:
+   * - `'feed'` (default) — flat table
+   * - `'timeline'` — flat vertical list, for compact tab panels
+   * - `'digest'` — day-sectioned timeline with consecutive same
+   *   verb/kind/actor activities collapsed into a single expandable row,
+   *   a lightweight summary strip, and a compact filter bar (Search plus
+   *   a single "Filters" button). Opt-in only — existing consumers are
+   *   unaffected.
+   */
+  variant?: "feed" | "timeline" | "digest";
   /** Filter to a specific resource UID */
   resourceUid?: string;
   /** Whether to show filters */
@@ -404,7 +416,13 @@ export function ActivityFeed({
             onTimeRangeChange={handleTimeRangeChange}
             disabled={isLoading}
             hiddenFilters={hiddenFilters}
+            layout={variant === "digest" ? "compact" : "inline"}
           />
+        )}
+
+        {/* Digest summary strip */}
+        {variant === "digest" && !isLoading && activities.length > 0 && (
+          <ActivityDigestSummary activities={activities} />
         )}
 
         {/* Query Error Display */}
@@ -471,7 +489,7 @@ export function ActivityFeed({
           {!isLoading &&
             activities.length === 0 &&
             hasPolicies !== false &&
-            variant === "timeline" && (
+            (variant === "timeline" || variant === "digest") && (
               <div className="py-12 text-center text-muted-foreground">
                 <p className="m-0">No activities found</p>
                 <p className="text-sm text-muted-foreground mt-2 m-0">
@@ -480,7 +498,36 @@ export function ActivityFeed({
               </div>
             )}
 
-          {variant === "timeline" ? (
+          {variant === "digest" ? (
+            <>
+              {isLoading && activities.length === 0 && (
+                <>
+                  {Array.from({ length: 8 }).map((_, index) => (
+                    <ActivityFeedItemSkeleton key={index} compact={compact} />
+                  ))}
+                </>
+              )}
+              {groupActivitiesByDay(activities).map((section) => (
+                <div key={section.label} className="flex flex-col">
+                  <div className="sticky top-0 z-10 bg-card pt-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {section.label}
+                  </div>
+                  {section.groups.map((group, index) => (
+                    <ActivityFeedGroupItem
+                      key={`${section.label}-${group.key}-${index}`}
+                      group={group}
+                      resourceLinkResolver={resourceLinkResolver}
+                      tenantLinkResolver={tenantLinkResolver}
+                      tenantRenderer={tenantRenderer}
+                      onActorClick={handleActorClick}
+                      onActivityClick={onActivityClick}
+                      isLast={index === section.groups.length - 1}
+                    />
+                  ))}
+                </div>
+              ))}
+            </>
+          ) : variant === "timeline" ? (
             <>
               {isLoading && activities.length === 0 && (
                 <>

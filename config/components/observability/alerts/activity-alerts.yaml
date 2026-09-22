@@ -117,7 +117,7 @@ spec:
         # component_id="clickhouse" which does not match any Vector component name.
         - alert: ActivityDataPipelineStalled
           expr: |
-            sum(rate(vector_events_out_total{component_type="clickhouse"}[5m])) == 0
+            sum(rate(vector_component_sent_events_total{component_type="clickhouse",namespace="activity-system"}[5m])) == 0
           for: 15m
           labels:
             severity: critical
@@ -131,7 +131,7 @@ spec:
         # NATS Consumer Lag - Early warning before backlog becomes critical
         - alert: NATSConsumerLagHigh
           expr: |
-            nats_jetstream_consumer_num_pending{stream="AUDIT_EVENTS",consumer=~"clickhouse-ingest.*"} > 5000
+            max by (consumer_name) (nats_consumer_num_pending{stream_name="AUDIT_EVENTS",consumer_name=~"clickhouse-ingest.*"}) > 5000
           for: 5m
           labels:
             severity: warning
@@ -142,10 +142,15 @@ spec:
             description: "{{ $value }} messages pending in AUDIT_EVENTS stream. Events not reaching ClickHouse."
             impact: "Audit log queries may return incomplete results"
 
-        # NATS Consumer Lag - Leading indicator of pipeline issues
+        # NATS Consumer Lag - Leading indicator of pipeline issues.
+        # 50k is ~8 minutes of a fully stopped consumer at this stream's ~100
+        # events/s. The previous 500k was ~83 minutes, set against a metric that
+        # never existed and so never calibrated against real throughput. Sits a
+        # decade above the observed 30-day maximum of 2 pending, and one order
+        # above the 5k warning.
         - alert: ActivityPipelineBacklogCritical
           expr: |
-            nats_jetstream_consumer_num_pending{stream="AUDIT_EVENTS"} > 500000
+            max by (consumer_name) (nats_consumer_num_pending{stream_name="AUDIT_EVENTS"}) > 50000
           for: 10m
           labels:
             severity: critical
@@ -156,12 +161,14 @@ spec:
             description: "{{ $value }} audit events pending. Risk of data loss if retention exceeded."
             impact: "Large delay in audit event availability - potential data loss"
 
-        # Vector write pipeline stopped while still receiving from NATS
+        # Vector write pipeline stopped while still receiving from NATS.
+        # Evaluated per pod so a single stalled aggregator replica is caught while
+        # its siblings keep the aggregate non-zero.
         - alert: VectorClickHouseWritesStopped
           expr: |
-            sum(rate(vector_component_sent_events_total{component_type="clickhouse",namespace="activity-system"}[15m])) == 0
+            sum by (pod) (rate(vector_component_sent_events_total{component_type="clickhouse",namespace="activity-system"}[15m])) == 0
             AND
-            sum(rate(vector_component_received_events_total{component_type="nats",namespace="activity-system"}[15m])) > 0
+            sum by (pod) (rate(vector_component_received_events_total{component_type="nats",namespace="activity-system"}[15m])) > 0
           for: 15m
           labels:
             severity: warning
@@ -169,7 +176,7 @@ spec:
             sli: data_freshness
           annotations:
             summary: "Vector receiving events but not writing to ClickHouse"
-            description: "Vector NATS sources are receiving data but ClickHouse sinks have zero output for 15+ minutes."
+            description: "{{ $labels.pod }} is receiving from NATS but its ClickHouse sinks have zero output for 15+ minutes."
             impact: "Audit events not being stored — queries returning stale data"
 
         # Event Exporter Availability
@@ -227,22 +234,23 @@ spec:
             impact: "Activity generation stopped - events not being processed"
 
         # Activity Generation Stalled
-        # Window widened to 1h: the system generates ~10 activities/hour so a 5m window
-        # produces constant false positives during the normal multi-hour gaps between events.
-        # Using a 1h window with 30m for: duration ensures the alert only fires when the
-        # processor is genuinely stuck despite a sustained flow of incoming audit events.
+        # Measured on events evaluated, not activities generated: generation is
+        # policy-driven and legitimately zero for hours at a time, whereas every
+        # received audit event is evaluated. Both sides are aggregated so their
+        # label sets match — the metrics carry different labels (kind/policy vs
+        # resource/source) and would never join otherwise.
         - alert: ActivityGenerationStalled
           expr: |
-            rate(activity_processor_activities_generated_total[1h]) == 0
+            sum(rate(activity_processor_events_evaluated_total[15m])) == 0
             AND
-            rate(activity_processor_events_received_total{source="audit_log"}[1h]) > 0
-          for: 30m
+            sum(rate(activity_processor_events_received_total{source="audit_log"}[15m])) > 0
+          for: 15m
           labels:
             severity: warning
             component: activity-processor
           annotations:
             summary: "Activity generation has stalled"
-            description: "Processor receiving events but not generating activities for 1h+ (sustained over 30m). CEL evaluation or policy lookup may be broken."
+            description: "Processor receiving audit events but evaluating none against policies for 15m+. CEL evaluation or policy lookup may be broken."
             impact: "Activity timeline not updating - users see stale data"
 
         # Error Rate Threshold

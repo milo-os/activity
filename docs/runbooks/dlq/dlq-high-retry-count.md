@@ -37,12 +37,18 @@ kubectl get activitypolicy <policy-name> -o yaml
 kubectl get activitypolicy <policy-name> -o jsonpath='{.status.conditions}'
 ```
 
-### 3. Examine processor logs
+### 3. Examine processor logs (Loki)
 
-```bash
-# Look for repeated errors for this policy
-kubectl logs -n activity-system -l app=activity-processor --tail=500 | grep "<policy-name>"
+Query Loki — see [querying-logs-with-loki.md](./querying-logs-with-loki.md).
+High retry counts usually mean one policy is broken and a small set of events is
+looping. Confirm by checking how many *distinct* `auditID`s are re-failing:
+
+```logql
+{namespace="activity-system", container="processor"} | json | policy="<policy-name>" | line_format "{{.auditID}}"
 ```
+
+A few IDs across many lines ⇒ those events are stuck on an unfixed policy;
+read `err` on a sample line for the exact failing rule/field.
 
 ### 4. Common causes
 

@@ -27,12 +27,17 @@ kubectl exec -n nats-system deploy/nats-box -- nats stream info ACTIVITY_DEAD_LE
 kubectl logs -n nats-system -l app.kubernetes.io/name=nats --tail=100 | grep -i error
 ```
 
-### 2. Check processor logs
+### 2. Check processor logs (Loki)
 
-```bash
-# Look for DLQ publish errors
-kubectl logs -n activity-system -l app=activity-processor --tail=200 | grep -i "failed to publish to DLQ"
+Query Loki — see [querying-logs-with-loki.md](./querying-logs-with-loki.md):
+
+```logql
+{namespace="activity-system", container="processor"} |~ "(?i)failed to publish.*dlq|NAK"
 ```
+
+These lines mean the processor could not even write to the DLQ — events are
+being lost. This is almost always a NATS/JetStream problem (see below), not a
+policy problem.
 
 ### 3. Check NATS connectivity
 

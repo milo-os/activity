@@ -23,8 +23,12 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	"go.miloapis.com/activity/internal/natsconn"
+	"go.miloapis.com/activity/internal/types"
 )
 
 var (
@@ -69,6 +73,38 @@ var (
 			Buckets:   prometheus.DefBuckets,
 		},
 	)
+
+	unscopedEvents = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "event_exporter",
+			Name:      "unscoped_events_total",
+			Help:      "Total number of edge events published without a recovered tenant scope",
+		},
+	)
+
+	noCityEvents = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "event_exporter",
+			Name:      "no_city_events_total",
+			Help:      "Total number of edge events published before this cell's city resolved",
+		},
+	)
+
+	droppedEvents = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "event_exporter",
+			Name:      "dropped_events_total",
+			Help:      "Total number of events dropped because the publish queue was full. The newest event is dropped, not an already-queued one.",
+		},
+	)
+
+	queueDepth = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "event_exporter",
+			Name:      "queue_depth",
+			Help:      "Current number of events buffered in the publish queue awaiting NATS publish.",
+		},
+	)
 )
 
 func init() {
@@ -79,13 +115,58 @@ func init() {
 		informerSynced,
 		natsConnectionStatus,
 		publishLatency,
+		unscopedEvents,
+		noCityEvents,
+		droppedEvents,
+		queueDepth,
 	)
+}
+
+// planeTypeEdge is the Config.PlaneType value for an edge deployment: one
+// running in a workload cluster rather than the management plane.
+const planeTypeEdge = "edge"
+
+// publishQueueSize bounds the publish queue between the informer callback
+// and the NATS publish call.
+const publishQueueSize = 1000
+
+// natsClientName identifies this exporter to the NATS server.
+const natsClientName = "k8s-event-exporter"
+
+// natsOptions returns the connection options natsconn.Endpoint leaves to the
+// caller: reconnect behaviour, the handlers driving natsConnectionStatus, and
+// the federated inbox prefix.
+func natsOptions(cfg Config) []nats.Option {
+	opts := []nats.Option{
+		nats.ReconnectWait(2 * time.Second),
+		nats.MaxReconnects(-1), // Unlimited reconnects
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			klog.ErrorS(err, "NATS disconnected")
+			natsConnectionStatus.Set(0)
+		}),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			klog.InfoS("NATS reconnected")
+			natsConnectionStatus.Set(1)
+		}),
+	}
+	// A federated source's PubAcks must land under the per-cluster inbox its
+	// hub leaf grant allows; see types.EventInboxPrefix.
+	if cluster := FederatedCluster(cfg.PlaneType, cfg.ClusterName); cluster != "" {
+		opts = append(opts, nats.CustomInboxPrefix(types.EventInboxPrefix(cluster)))
+	}
+	return opts
+}
+
+// eventJob is a queued event awaiting publish.
+type eventJob struct {
+	event     *eventsv1.Event
+	eventType string
 }
 
 // Config holds the exporter configuration.
 type Config struct {
-	// NATS connection URL
-	NATSUrl string
+	// NATS is the broker this exporter publishes to, with its TLS material
+	NATS natsconn.Endpoint
 
 	// NATS subject prefix for events (subject will be {prefix}.{namespace})
 	SubjectPrefix string
@@ -102,39 +183,57 @@ type Config struct {
 
 	// Health probe server bind address
 	HealthProbeAddr string
+
+	// PlaneType is this deployment's plane: "management" or "edge". Empty
+	// means this exporter does not tag events with source metadata.
+	PlaneType string
+
+	// ClusterName identifies the Kubernetes cluster this exporter runs in,
+	// e.g. "us-central-1-alice".
+	ClusterName string
+
+	// ClusterRegion is this cluster's region, e.g. "us-central-1".
+	ClusterRegion string
+
+	// LocationName is a fallback Location name for city resolution, used
+	// only until a ServingLocation is delivered to this cell.
+	LocationName string
 }
 
 // Run starts the event exporter and blocks until the context is cancelled.
 func Run(ctx context.Context, cfg Config) error {
 	klog.InfoS("Starting k8s-event-exporter",
-		"natsUrl", cfg.NATSUrl,
+		"natsUrl", cfg.NATS.URL,
 		"subjectPrefix", cfg.SubjectPrefix,
 		"scopeType", cfg.ScopeType,
 		"scopeName", cfg.ScopeName,
 		"healthProbeAddr", cfg.HealthProbeAddr,
 	)
 
+	restConfig, err := buildRestConfig(cfg.Kubeconfig)
+	if err != nil {
+		return fmt.Errorf("failed to build Kubernetes client config: %w", err)
+	}
+
 	// Create Kubernetes client
-	k8sClient, err := createK8sClient(cfg.Kubeconfig)
+	k8sClient, err := createK8sClient(restConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
+	var city *cityResolver
+	if cfg.PlaneType == planeTypeEdge {
+		locationsClient, err := client.New(restConfig, client.Options{Scheme: locationsScheme})
+		if err != nil {
+			return fmt.Errorf("failed to create locations client: %w", err)
+		}
+		city = newCityResolver(locationsClient, cfg.LocationName)
+		go city.Run(ctx)
+	}
+
 	// Connect to NATS with metrics tracking
 	natsConnectionStatus.Set(0)
-	nc, err := nats.Connect(cfg.NATSUrl,
-		nats.Name("k8s-event-exporter"),
-		nats.ReconnectWait(2*time.Second),
-		nats.MaxReconnects(-1), // Unlimited reconnects
-		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			klog.ErrorS(err, "NATS disconnected")
-			natsConnectionStatus.Set(0)
-		}),
-		nats.ReconnectHandler(func(_ *nats.Conn) {
-			klog.InfoS("NATS reconnected")
-			natsConnectionStatus.Set(1)
-		}),
-	)
+	nc, err := cfg.NATS.Connect(natsClientName, natsOptions(cfg)...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS: %w", err)
 	}
@@ -147,7 +246,19 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("failed to get JetStream context: %w", err)
 	}
 
-	klog.InfoS("Connected to NATS", "url", cfg.NATSUrl)
+	klog.InfoS("Connected to NATS", "url", cfg.NATS.URL)
+
+	// Create informer factory for all namespaces
+	factory := informers.NewSharedInformerFactory(k8sClient, cfg.ResyncPeriod)
+	eventInformer := factory.Events().V1().Events().Informer()
+
+	var scopeResolver *namespaceScopeResolver
+	cacheSyncs := []cache.InformerSynced{eventInformer.HasSynced}
+	if cfg.PlaneType == planeTypeEdge {
+		namespaceInformer := factory.Core().V1().Namespaces()
+		scopeResolver = newNamespaceScopeResolver(namespaceInformer.Lister())
+		cacheSyncs = append(cacheSyncs, namespaceInformer.Informer().HasSynced)
+	}
 
 	// Create the event exporter
 	exporter := &Exporter{
@@ -156,11 +267,14 @@ func Run(ctx context.Context, cfg Config) error {
 		subjectPrefix: cfg.SubjectPrefix,
 		scopeType:     cfg.ScopeType,
 		scopeName:     cfg.ScopeName,
+		planeType:     cfg.PlaneType,
+		clusterName:   cfg.ClusterName,
+		clusterRegion: cfg.ClusterRegion,
+		scope:         scopeResolver,
+		city:          city,
+		queue:         make(chan eventJob, publishQueueSize),
 	}
-
-	// Create informer factory for all namespaces
-	factory := informers.NewSharedInformerFactory(k8sClient, cfg.ResyncPeriod)
-	eventInformer := factory.Events().V1().Events().Informer()
+	go exporter.drainQueue(ctx)
 
 	// Register event handlers
 	eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -169,24 +283,14 @@ func Run(ctx context.Context, cfg Config) error {
 			if !ok {
 				return
 			}
-			if err := exporter.publishEvent(ctx, event, "ADDED"); err != nil {
-				klog.ErrorS(err, "Failed to publish event",
-					"namespace", event.Namespace,
-					"name", event.Name,
-				)
-			}
+			exporter.enqueue(event, "ADDED")
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			event, ok := newObj.(*eventsv1.Event)
 			if !ok {
 				return
 			}
-			if err := exporter.publishEvent(ctx, event, "MODIFIED"); err != nil {
-				klog.ErrorS(err, "Failed to publish event",
-					"namespace", event.Namespace,
-					"name", event.Name,
-				)
-			}
+			exporter.enqueue(event, "MODIFIED")
 		},
 		// We don't need to handle deletes - events are ephemeral and TTL'd
 	})
@@ -207,7 +311,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// Wait for cache sync
 	klog.InfoS("Waiting for informer cache to sync")
 	informerSynced.Set(0)
-	if !cache.WaitForCacheSync(ctx.Done(), eventInformer.HasSynced) {
+	if !cache.WaitForCacheSync(ctx.Done(), cacheSyncs...) {
 		return fmt.Errorf("failed to sync informer cache")
 	}
 	informerSynced.Set(1)
@@ -226,6 +330,115 @@ type Exporter struct {
 	subjectPrefix string
 	scopeType     string
 	scopeName     string
+	planeType     string
+	clusterName   string
+	clusterRegion string
+	scope         *namespaceScopeResolver
+	city          *cityResolver
+	queue         chan eventJob
+}
+
+// resolveScope returns the tenant scope to stamp on an event from the given
+// namespace. A management deployment always uses its static, per-deployment
+// scope flags. An edge deployment serves many projects, so its static flags
+// don't name a real tenant; it recovers the tenant per event instead, and
+// emits unscoped - rather than misattributing to whatever the flags happen
+// to hold - when recovery fails.
+func (e *Exporter) resolveScope(namespace string) (scopeType, scopeName string) {
+	if e.planeType != planeTypeEdge || e.scope == nil {
+		return e.scopeType, e.scopeName
+	}
+
+	if scopeType, scopeName, ok := e.scope.Resolve(namespace); ok {
+		return scopeType, scopeName
+	}
+
+	unscopedEvents.Inc()
+	return "", ""
+}
+
+// sourceAnnotations returns this cell's plane type, cluster, region, and
+// city for stamping onto a published event. City is empty until this cell's
+// cityResolver first resolves; an edge deployment still publishes in that
+// window rather than waiting, so noCityEvents counts how often that happens.
+func (e *Exporter) sourceAnnotations() (planeType, cluster, region, city string) {
+	if e.city != nil {
+		city = e.city.City()
+		if e.planeType == planeTypeEdge && city == "" {
+			noCityEvents.Inc()
+		}
+	}
+	return e.planeType, e.clusterName, e.clusterRegion, city
+}
+
+// qualifiedMsgID returns the NATS message ID for event, qualified with this
+// cell's plane and cluster so the same UID from a different cluster can't
+// collide. It must stay in sync with the Activity origin ID the processor
+// derives from this event's source annotations.
+func (e *Exporter) qualifiedMsgID(event *eventsv1.Event, eventType string) string {
+	msgID := string(event.UID)
+	if eventType == "MODIFIED" {
+		// For updates, include resource version to allow updates through
+		msgID = fmt.Sprintf("%s-%s", event.UID, event.ResourceVersion)
+	}
+	return types.PrefixWithSource(e.planeType, e.clusterName, msgID)
+}
+
+// subject builds the NATS publish subject. A federated source's subject carries
+// a cluster token so per-PoP NATS permissions can scope publish access to it.
+func (e *Exporter) subject(namespace string) string {
+	return types.EventSubject(e.subjectPrefix, FederatedCluster(e.planeType, e.clusterName), namespace)
+}
+
+// FederatedCluster is the single gate for both the publish subject's cluster
+// token and the reply inbox prefix, so the two cannot be scoped differently.
+// Exported so option validation gates on the same notion of "federated".
+func FederatedCluster(planeType, clusterName string) string {
+	if planeType == "" || clusterName == "" {
+		return ""
+	}
+	return clusterName
+}
+
+// enqueue copies event and queues it for publish. If the queue is full, the
+// incoming event is dropped rather than blocking the informer callback.
+func (e *Exporter) enqueue(event *eventsv1.Event, eventType string) {
+	job := eventJob{event: event.DeepCopy(), eventType: eventType}
+
+	select {
+	case e.queue <- job:
+	default:
+		droppedEvents.Inc()
+		klog.ErrorS(fmt.Errorf("publish queue full (size %d)", cap(e.queue)), "Dropped event",
+			"namespace", event.Namespace,
+			"name", event.Name,
+		)
+	}
+	queueDepth.Set(float64(len(e.queue)))
+}
+
+// drainQueue publishes queued events until ctx is cancelled. A job already
+// pulled off the queue when ctx is cancelled is dropped rather than
+// published, since publishEvent would otherwise run with an already-dead
+// ctx and fail.
+func (e *Exporter) drainQueue(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job := <-e.queue:
+			if ctx.Err() != nil {
+				return
+			}
+			if err := e.publishEvent(ctx, job.event, job.eventType); err != nil {
+				klog.ErrorS(err, "Failed to publish event",
+					"namespace", job.event.Namespace,
+					"name", job.event.Name,
+				)
+			}
+			queueDepth.Set(float64(len(e.queue)))
+		}
+	}
 }
 
 // publishEvent publishes a Kubernetes event to NATS JetStream.
@@ -239,8 +452,16 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 	if eventCopy.Annotations == nil {
 		eventCopy.Annotations = make(map[string]string)
 	}
-	eventCopy.Annotations["platform.miloapis.com/scope.type"] = e.scopeType
-	eventCopy.Annotations["platform.miloapis.com/scope.name"] = e.scopeName
+
+	scopeType, scopeName := e.resolveScope(event.Namespace)
+	eventCopy.Annotations[types.ScopeTypeAnnotation] = scopeType
+	eventCopy.Annotations[types.ScopeNameAnnotation] = scopeName
+
+	planeType, cluster, region, city := e.sourceAnnotations()
+	eventCopy.Annotations[types.SourcePlaneTypeAnnotation] = planeType
+	eventCopy.Annotations[types.SourceClusterAnnotation] = cluster
+	eventCopy.Annotations[types.SourceRegionAnnotation] = region
+	eventCopy.Annotations[types.SourceCityAnnotation] = city
 
 	// TypeMeta should be correctly populated by eventsv1.Event marshaling
 	// but we'll set it explicitly to ensure consistency
@@ -256,18 +477,10 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	// Build subject: events.k8s.{namespace}
-	subject := fmt.Sprintf("%s.%s", e.subjectPrefix, event.Namespace)
-
-	// Publish with message ID for deduplication
-	msgID := string(event.UID)
-	if eventType == "MODIFIED" {
-		// For updates, include resource version to allow updates through
-		msgID = fmt.Sprintf("%s-%s", event.UID, event.ResourceVersion)
-	}
+	subject := e.subject(event.Namespace)
 
 	_, err = e.js.Publish(subject, data,
-		nats.MsgId(msgID),
+		nats.MsgId(e.qualifiedMsgID(event, eventType)),
 		nats.Context(ctx),
 	)
 	if err != nil {
@@ -290,26 +503,23 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 	return nil
 }
 
-// createK8sClient creates a Kubernetes client.
-func createK8sClient(kubeconfig string) (*kubernetes.Clientset, error) {
-	var config *rest.Config
-	var err error
-
+// buildRestConfig loads the Kubernetes client configuration, from a
+// kubeconfig file if given, or in-cluster config otherwise.
+func buildRestConfig(kubeconfig string) (*rest.Config, error) {
 	if kubeconfig != "" {
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		config, err = rest.InClusterConfig()
+		return clientcmd.BuildConfigFromFlags("", kubeconfig)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to build config: %w", err)
-	}
+	return rest.InClusterConfig()
+}
 
-	client, err := kubernetes.NewForConfig(config)
+// createK8sClient creates a Kubernetes client.
+func createK8sClient(config *rest.Config) (*kubernetes.Clientset, error) {
+	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
 
-	return client, nil
+	return clientset, nil
 }
 
 // startHealthServer starts the HTTP health probe server.
@@ -327,8 +537,8 @@ func startHealthServer(addr string, exporter *Exporter, informer cache.SharedInd
 	// Readiness probe - checks if the exporter is ready to process events
 	mux.Handle("/readyz", http.StripPrefix("/readyz", &healthz.Handler{
 		Checks: map[string]healthz.Checker{
-			"ping":           healthz.Ping,
-			"nats":           natsHealthChecker(exporter),
+			"ping":            healthz.Ping,
+			"nats":            natsHealthChecker(exporter),
 			"informer-synced": informerSyncedChecker(informer),
 		},
 	}))

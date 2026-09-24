@@ -3,6 +3,7 @@ package processor
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
 
@@ -44,6 +45,18 @@ func GetNestedString(m map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// resolveKindAndAPIGroup extracts kind and apiGroup from an event's involved/
+// regarding/related object, falling back to parsing apiVersion when apiGroup
+// is absent.
+func resolveKindAndAPIGroup(obj map[string]interface{}) (kind, apiGroup string) {
+	kind = GetNestedString(obj, "kind")
+	apiGroup = GetNestedString(obj, "apiGroup")
+	if apiGroup == "" {
+		apiGroup = parseAPIGroup(GetNestedString(obj, "apiVersion"))
+	}
+	return kind, apiGroup
 }
 
 // ExtractTenant extracts tenant information from user extra fields.
@@ -171,13 +184,6 @@ func getStringFromMap(m map[string]any, key string) string {
 	return ""
 }
 
-const (
-	// scopeTypeAnnotation is the annotation key carrying the tenant scope type.
-	scopeTypeAnnotation = "platform.miloapis.com/scope.type"
-	// scopeNameAnnotation is the annotation key carrying the tenant scope name.
-	scopeNameAnnotation = "platform.miloapis.com/scope.name"
-)
-
 // ExtractTenantFromAnnotations reads scope annotations from event metadata and
 // returns the corresponding ActivityTenant. Falls back to platform scope when
 // the type annotation is absent or empty.
@@ -201,8 +207,8 @@ func ExtractTenantFromAnnotations(eventMap map[string]any) v1alpha1.ActivityTena
 		return tenant
 	}
 
-	scopeType := getStringFromMap(annotations, scopeTypeAnnotation)
-	scopeName := getStringFromMap(annotations, scopeNameAnnotation)
+	scopeType := getStringFromMap(annotations, types.ScopeTypeAnnotation)
+	scopeName := getStringFromMap(annotations, types.ScopeNameAnnotation)
 
 	if scopeType != "" {
 		tenant.Type = scopeType
@@ -210,4 +216,129 @@ func ExtractTenantFromAnnotations(eventMap map[string]any) v1alpha1.ActivityTena
 	}
 
 	return tenant
+}
+
+// ExtractSourceFromAnnotations reads source-* annotations from event metadata
+// and returns the corresponding ActivitySource, defaulting to an empty struct
+// when absent.
+func ExtractSourceFromAnnotations(eventMap map[string]any) v1alpha1.ActivitySource {
+	var source v1alpha1.ActivitySource
+
+	if eventMap == nil {
+		return source
+	}
+
+	metadata, ok := eventMap["metadata"].(map[string]any)
+	if !ok {
+		return source
+	}
+
+	annotations, ok := metadata["annotations"].(map[string]any)
+	if !ok {
+		return source
+	}
+
+	source.PlaneType = getStringFromMap(annotations, types.SourcePlaneTypeAnnotation)
+	source.Cluster = getStringFromMap(annotations, types.SourceClusterAnnotation)
+	source.Region = getStringFromMap(annotations, types.SourceRegionAnnotation)
+	source.City = getStringFromMap(annotations, types.SourceCityAnnotation)
+
+	return source
+}
+
+// ResolveInvolvedObject extracts an event's subject object, preferring the
+// modern "regarding" field (events.k8s.io/v1) over the legacy "involvedObject"
+// field (core/v1). Shared by every Event-to-Activity code path to prevent
+// divergence.
+func ResolveInvolvedObject(event map[string]interface{}) map[string]interface{} {
+	if regarding, ok := event["regarding"].(map[string]interface{}); ok {
+		return regarding
+	}
+	if involvedObject, ok := event["involvedObject"].(map[string]interface{}); ok {
+		return involvedObject
+	}
+	return nil
+}
+
+// isFederatedSource reports whether source carries enough information to
+// treat its event as federated. Both fields are required together: a
+// Cluster with no PlaneType can't be composed into a well-formed qualified
+// origin ID, so partial annotations must be treated as absent everywhere
+// federation status is checked.
+func isFederatedSource(source v1alpha1.ActivitySource) bool {
+	return source.PlaneType != "" && source.Cluster != ""
+}
+
+// qualifiedOriginID prefixes originID with the source plane and cluster for
+// a federated source, so same-UID events from different clusters don't
+// collide; otherwise it returns originID unchanged. Callers must pass the
+// same value to both Spec.Origin.ID and activityName for a given event:
+// Spec.Origin.ID is the column ReplacingMergeTree dedups on, and
+// activityName hashes it into metadata.name, so the two must never disagree.
+func qualifiedOriginID(source v1alpha1.ActivitySource, originID string) string {
+	return types.PrefixWithSource(source.PlaneType, source.Cluster, originID)
+}
+
+// resolveEventTimestamp extracts a timestamp from an event map, trying in
+// order: eventTime, lastTimestamp, firstTimestamp, metadata.creationTimestamp,
+// then now(). A candidate must parse and be non-zero, or it falls through to
+// the next one.
+func resolveEventTimestamp(event map[string]interface{}) time.Time {
+	if ts := getStringFromMap(event, "eventTime"); ts != "" {
+		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && !t.IsZero() {
+			return t
+		}
+	}
+	if ts := getStringFromMap(event, "lastTimestamp"); ts != "" {
+		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && !t.IsZero() {
+			return t
+		}
+	}
+	if ts := getStringFromMap(event, "firstTimestamp"); ts != "" {
+		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && !t.IsZero() {
+			return t
+		}
+	}
+	if metadata, ok := event["metadata"].(map[string]interface{}); ok {
+		if ts := getStringFromMap(metadata, "creationTimestamp"); ts != "" {
+			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && !t.IsZero() {
+				return t
+			}
+		}
+	}
+	return time.Now()
+}
+
+// resolveActorFromEvent resolves an event's acting controller: reportingController,
+// then the legacy source.component, then "unknown". Always attributed as a
+// controller actor.
+func resolveActorFromEvent(event map[string]interface{}) v1alpha1.ActivityActor {
+	reportingController := getStringFromMap(event, "reportingController")
+
+	if reportingController == "" {
+		if source, ok := event["source"].(map[string]interface{}); ok {
+			reportingController = getStringFromMap(source, "component")
+		}
+	}
+
+	if reportingController == "" {
+		reportingController = "unknown"
+	}
+
+	return v1alpha1.ActivityActor{
+		Type: ActorTypeController,
+		Name: reportingController,
+	}
+}
+
+// eventActivityLabels builds the standard label set for an Activity generated
+// from a Kubernetes event, shared across all Event-to-Activity code paths.
+func eventActivityLabels(changeSource, apiGroup, kind, eventReason string) map[string]string {
+	return map[string]string{
+		"activity.miloapis.com/origin-type":   "event",
+		"activity.miloapis.com/change-source": changeSource,
+		"activity.miloapis.com/api-group":     apiGroup,
+		"activity.miloapis.com/resource-kind": kind,
+		"activity.miloapis.com/event-reason":  eventReason,
+	}
 }

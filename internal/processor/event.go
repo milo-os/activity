@@ -20,8 +20,10 @@ import (
 // and generates Activity records via ActivityPolicy event rules.
 type EventProcessor struct {
 	js             nats.JetStreamContext
+	outputJS       nats.JetStreamContext
 	streamName     string
 	consumerName   string
+	filterSubject  string
 	activityPrefix string
 	batchSize      int
 	policyLookup   EventPolicyLookup
@@ -30,16 +32,23 @@ type EventProcessor struct {
 }
 
 // NewEventProcessor creates a new event processor.
-// js is the JetStream context used for both consuming events and publishing activities.
+// js is the JetStream context used to consume events and to publish to the DLQ.
+// outputJS is the JetStream context used to publish generated activities; it may
+// be the same context as js, or one on a different broker.
 // streamName is the NATS stream to consume from (e.g., "EVENTS").
 // consumerName is the durable pull consumer name.
+// filterSubject must be the consumer's own FilterSubject as reported by the
+// server: PullSubscribe rejects any other value, and empty for a consumer
+// configured with multiple filters.
 // activityPrefix is the subject prefix for publishing generated activities.
 // policyLookup is used to evaluate events against ActivityPolicy event rules.
 // dlqPublisher is used to publish failed events to the dead-letter queue.
 func NewEventProcessor(
 	js nats.JetStreamContext,
+	outputJS nats.JetStreamContext,
 	streamName string,
 	consumerName string,
+	filterSubject string,
 	activityPrefix string,
 	policyLookup EventPolicyLookup,
 	workers int,
@@ -48,8 +57,10 @@ func NewEventProcessor(
 ) *EventProcessor {
 	return &EventProcessor{
 		js:             js,
+		outputJS:       outputJS,
 		streamName:     streamName,
 		consumerName:   consumerName,
+		filterSubject:  filterSubject,
 		activityPrefix: activityPrefix,
 		policyLookup:   policyLookup,
 		workers:        workers,
@@ -91,7 +102,7 @@ func (p *EventProcessor) worker(ctx context.Context, id int) {
 	klog.V(4).InfoS("Event worker started", "worker", id)
 
 	sub, err := p.js.PullSubscribe(
-		"events.>",
+		p.filterSubject,
 		p.consumerName,
 		nats.Bind(p.streamName, p.consumerName),
 	)
@@ -152,20 +163,13 @@ func (p *EventProcessor) processMessage(ctx context.Context, msg *nats.Msg) erro
 	// Extract involved object info to find matching policy.
 	// Kubernetes events have either "regarding" (events.k8s.io/v1) or
 	// "involvedObject" (core/v1) to identify the subject resource.
-	involvedObject := p.getInvolvedObject(event)
+	involvedObject := ResolveInvolvedObject(event)
 	if involvedObject == nil {
 		klog.V(4).Info("Event has no involved object, skipping")
 		return nil
 	}
 
-	apiGroup := getStringFromMap(involvedObject, "apiGroup")
-	// For core resources, apiVersion is "v1" with empty apiGroup.
-	if apiGroup == "" {
-		if apiVersion := getStringFromMap(involvedObject, "apiVersion"); apiVersion != "" && apiVersion != "v1" {
-			apiGroup = parseAPIGroup(apiVersion)
-		}
-	}
-	kind := getStringFromMap(involvedObject, "kind")
+	kind, apiGroup := resolveKindAndAPIGroup(involvedObject)
 
 	if kind == "" {
 		klog.V(4).InfoS("Could not determine kind from event, skipping")
@@ -219,7 +223,7 @@ func (p *EventProcessor) processMessage(ctx context.Context, msg *nats.Msg) erro
 		return nil
 	}
 
-	activity := p.buildActivity(event, matched, involvedObject, matched.Summary, matched.Links)
+	activity := p.buildActivity(event, matched, matched.Summary, matched.Links)
 
 	if err := p.publishActivity(ctx, activity); err != nil {
 		return fmt.Errorf("failed to publish activity: %w", err)
@@ -231,20 +235,6 @@ func (p *EventProcessor) processMessage(ctx context.Context, msg *nats.Msg) erro
 		"reason", getStringFromMap(event, "reason"),
 	)
 
-	return nil
-}
-
-// getInvolvedObject extracts the involved object from a Kubernetes event.
-// Handles both v1.Event (regarding) and corev1.Event (involvedObject) formats.
-func (p *EventProcessor) getInvolvedObject(event map[string]interface{}) map[string]interface{} {
-	// Try "regarding" first (events.k8s.io/v1).
-	if regarding, ok := event["regarding"].(map[string]interface{}); ok {
-		return regarding
-	}
-	// Fall back to "involvedObject" (v1).
-	if involvedObject, ok := event["involvedObject"].(map[string]interface{}); ok {
-		return involvedObject
-	}
 	return nil
 }
 
@@ -271,54 +261,30 @@ func (p *EventProcessor) normalizeEvent(event map[string]interface{}, involvedOb
 func (p *EventProcessor) buildActivity(
 	event map[string]interface{},
 	matched *MatchedPolicy,
-	involvedObject map[string]interface{},
 	summary string,
 	links []cel.Link,
 ) *v1alpha1.Activity {
-	// Extract timestamps - try eventTime first (events.k8s.io/v1).
-	var timestamp time.Time
-	if ts := getStringFromMap(event, "eventTime"); ts != "" {
-		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-			timestamp = t
-		}
-	}
-	// Fall back to lastTimestamp or firstTimestamp.
-	if timestamp.IsZero() {
-		if ts := getStringFromMap(event, "lastTimestamp"); ts != "" {
-			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-				timestamp = t
-			}
-		}
-	}
-	if timestamp.IsZero() {
-		if ts := getStringFromMap(event, "firstTimestamp"); ts != "" {
-			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-				timestamp = t
-			}
-		}
-	}
-	// Fall back to metadata.creationTimestamp.
-	if timestamp.IsZero() {
-		if metadata, ok := event["metadata"].(map[string]interface{}); ok {
-			if ts := getStringFromMap(metadata, "creationTimestamp"); ts != "" {
-				if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-					timestamp = t
-				}
-			}
-		}
-	}
-	if timestamp.IsZero() {
-		timestamp = time.Now()
-	}
+	// Extract timestamp using the shared fallback chain: eventTime -> lastTimestamp
+	// -> firstTimestamp -> metadata.creationTimestamp -> now().
+	timestamp := resolveEventTimestamp(event)
 
-	// Extract resource info from involved object.
-	namespace := getStringFromMap(involvedObject, "namespace")
-	resourceName := getStringFromMap(involvedObject, "name")
-	resourceUID := getStringFromMap(involvedObject, "uid")
-	apiVersion := getStringFromMap(involvedObject, "apiVersion")
+	source := ExtractSourceFromAnnotations(event)
+
+	resourceObject := ResolveInvolvedObject(event)
+
+	// Extract resource info from the resolved resource object.
+	namespace := getStringFromMap(resourceObject, "namespace")
+	resourceName := getStringFromMap(resourceObject, "name")
+	resourceUID := getStringFromMap(resourceObject, "uid")
+	apiVersion := getStringFromMap(resourceObject, "apiVersion")
+
+	// Derived from resourceObject, not matched.APIGroup/Kind: pairing
+	// resourceObject's Name/UID with the policy match's Kind would produce an
+	// incoherent Resource if they ever diverge.
+	resourceKind, resourceAPIGroup := resolveKindAndAPIGroup(resourceObject)
 
 	// Resolve actor from reporting controller or source component.
-	actor := p.resolveEventActor(event)
+	actor := resolveActorFromEvent(event)
 
 	// Events from controllers are always system-initiated.
 	changeSource := ChangeSourceSystem
@@ -329,8 +295,11 @@ func (p *EventProcessor) buildActivity(
 		eventUID = getStringFromMap(metadata, "uid")
 	}
 
+	// originID feeds both Spec.Origin.ID and the name hash below; they must match.
+	originID := qualifiedOriginID(source, eventUID)
+
 	// Generate activity name.
-	name := activityName("event", eventUID, matched.APIGroup, matched.Kind)
+	name := activityName("event", originID, matched.APIGroup, matched.Kind)
 
 	// Convert links.
 	var activityLinks []v1alpha1.ActivityLink
@@ -347,7 +316,7 @@ func (p *EventProcessor) buildActivity(
 		})
 	}
 
-	return &v1alpha1.Activity{
+	activity := &v1alpha1.Activity{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: v1alpha1.SchemeGroupVersion.String(),
 			Kind:       "Activity",
@@ -356,22 +325,16 @@ func (p *EventProcessor) buildActivity(
 			Name:              name,
 			Namespace:         namespace,
 			CreationTimestamp: metav1.NewTime(timestamp),
-			Labels: map[string]string{
-				"activity.miloapis.com/origin-type":   "event",
-				"activity.miloapis.com/change-source": changeSource,
-				"activity.miloapis.com/api-group":     matched.APIGroup,
-				"activity.miloapis.com/resource-kind": matched.Kind,
-				"activity.miloapis.com/event-reason":  getStringFromMap(event, "reason"),
-			},
+			Labels:            eventActivityLabels(changeSource, matched.APIGroup, matched.Kind, getStringFromMap(event, "reason")),
 		},
 		Spec: v1alpha1.ActivitySpec{
 			Summary:      summary,
 			ChangeSource: changeSource,
 			Actor:        actor,
 			Resource: v1alpha1.ActivityResource{
-				APIGroup:   matched.APIGroup,
+				APIGroup:   resourceAPIGroup,
 				APIVersion: apiVersion,
-				Kind:       matched.Kind,
+				Kind:       resourceKind,
 				Name:       resourceName,
 				Namespace:  namespace,
 				UID:        resourceUID,
@@ -381,34 +344,18 @@ func (p *EventProcessor) buildActivity(
 			Tenant: ExtractTenantFromAnnotations(event),
 			Origin: v1alpha1.ActivityOrigin{
 				Type: "event",
-				ID:   eventUID,
+				ID:   originID,
 			},
 		},
 	}
-}
 
-// resolveEventActor extracts actor information from a Kubernetes event.
-// Events are generated by controllers, so we extract the reporting controller or source component.
-func (p *EventProcessor) resolveEventActor(event map[string]interface{}) v1alpha1.ActivityActor {
-	// Try reportingController first (events.k8s.io/v1).
-	reportingController := getStringFromMap(event, "reportingController")
-
-	// Fall back to source.component (v1).
-	if reportingController == "" {
-		if source, ok := event["source"].(map[string]interface{}); ok {
-			reportingController = getStringFromMap(source, "component")
-		}
+	// Only attach Source when at least one field is non-empty, so events
+	// without source annotations keep Spec.Source nil.
+	if source != (v1alpha1.ActivitySource{}) {
+		activity.Spec.Source = &source
 	}
 
-	// Default to unknown if we can't find the controller.
-	if reportingController == "" {
-		reportingController = "unknown"
-	}
-
-	return v1alpha1.ActivityActor{
-		Type: ActorTypeController,
-		Name: reportingController,
-	}
+	return activity
 }
 
 // publishActivity serializes and publishes an Activity to the NATS ACTIVITIES stream.
@@ -421,7 +368,7 @@ func (p *EventProcessor) publishActivity(ctx context.Context, activity *v1alpha1
 	subject := p.buildActivitySubject(activity)
 
 	// Use activity name as MsgID for NATS deduplication.
-	_, err = p.js.Publish(subject, data, nats.MsgId(activity.Name))
+	_, err = p.outputJS.Publish(subject, data, nats.MsgId(activity.Name))
 	if err != nil {
 		return fmt.Errorf("failed to publish activity to NATS: %w", err)
 	}

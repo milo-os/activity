@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      containers:
+        - name: metrics
+          image: natsio/prometheus-nats-exporter:0.20.2
+          args:
+            - -varz
+            - -connz
+            - -subz
+            # The leaf to the hub is this broker's only egress; leafz reports
+            # whether it is up and carrying messages.
+            - -leafz
+            # Match the hub chart's prefix so one query spans edge and hub.
+            # Unset, these arrive as gnatsd_* and no dashboard finds them.
+            - -prefix=nats
+            - -addr=0.0.0.0
+            - -port=7777
+            - http://localhost:8222
+          ports:
+            - name: metrics
+              containerPort: 7777
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+        - name: nats
+          image: nats:2.14.6-alpine
+          command: ["nats-server", "-c", "/etc/nats/nats.conf"]
+          env:
+            # Resolved by Flux postBuild.substituteFrom against the
+            # cluster-config Secret, not by Kustomize.
+            - name: HUB_LEAFNODE_URL
+              value: "${activity_hub_leafnode_url}"
+            - name: EDGE_NKEY_SEED
+              valueFrom:
+                secretKeyRef:
+                  # Produced per edge cluster by the nkey-generator and ESO.
+                  name: activity-leaf-nkey
+                  key: edge.seed
+          ports:
+            - name: client
+              containerPort: 4222
+            - name: monitoring
+              containerPort: 8222
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats
+            - name: nats-server-tls
+              mountPath: /etc/nats-server-tls
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 2
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: nats-config
+        - name: nats-server-tls
+          csi:
+            driver: csi.cert-manager.io
+            readOnly: true
+            volumeAttributes:
+              # This edge cluster's own ClusterIssuer, not the hub's: nothing
+              # off-cluster talks to this listener, so no shared trust bundle.
+              csi.cert-manager.io/issuer-name: activity-system
+              csi.cert-manager.io/issuer-kind: ClusterIssuer
+              csi.cert-manager.io/common-name: edge-nats-server
+              csi.cert-manager.io/dns-names: "nats.activity-system.svc.cluster.local,nats.activity-system.svc,nats"
+              csi.cert-manager.io/duration: "2160h"
+              csi.cert-manager.io/renew-before: "360h"
+              csi.cert-manager.io/key-usages: "server auth"
+              # The client listener's verify: true needs the issuer CA on
+              # disk, and the driver writes it only when named here.
+              csi.cert-manager.io/ca-file: ca.crt

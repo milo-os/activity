@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"go.miloapis.com/activity/internal/natsconn"
 	"go.miloapis.com/activity/internal/types"
 )
 
@@ -129,6 +130,33 @@ const planeTypeEdge = "edge"
 // and the NATS publish call.
 const publishQueueSize = 1000
 
+// natsClientName identifies this exporter to the NATS server.
+const natsClientName = "k8s-event-exporter"
+
+// natsOptions returns the connection options natsconn.Endpoint leaves to the
+// caller: reconnect behaviour, the handlers driving natsConnectionStatus, and
+// the federated inbox prefix.
+func natsOptions(cfg Config) []nats.Option {
+	opts := []nats.Option{
+		nats.ReconnectWait(2 * time.Second),
+		nats.MaxReconnects(-1), // Unlimited reconnects
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			klog.ErrorS(err, "NATS disconnected")
+			natsConnectionStatus.Set(0)
+		}),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			klog.InfoS("NATS reconnected")
+			natsConnectionStatus.Set(1)
+		}),
+	}
+	// A federated source's PubAcks must land under the per-cluster inbox its
+	// hub leaf grant allows; see types.EventInboxPrefix.
+	if cluster := FederatedCluster(cfg.PlaneType, cfg.ClusterName); cluster != "" {
+		opts = append(opts, nats.CustomInboxPrefix(types.EventInboxPrefix(cluster)))
+	}
+	return opts
+}
+
 // eventJob is a queued event awaiting publish.
 type eventJob struct {
 	event     *eventsv1.Event
@@ -137,8 +165,8 @@ type eventJob struct {
 
 // Config holds the exporter configuration.
 type Config struct {
-	// NATS connection URL
-	NATSUrl string
+	// NATS is the broker this exporter publishes to, with its TLS material
+	NATS natsconn.Endpoint
 
 	// NATS subject prefix for events (subject will be {prefix}.{namespace})
 	SubjectPrefix string
@@ -175,7 +203,7 @@ type Config struct {
 // Run starts the event exporter and blocks until the context is cancelled.
 func Run(ctx context.Context, cfg Config) error {
 	klog.InfoS("Starting k8s-event-exporter",
-		"natsUrl", cfg.NATSUrl,
+		"natsUrl", cfg.NATS.URL,
 		"subjectPrefix", cfg.SubjectPrefix,
 		"scopeType", cfg.ScopeType,
 		"scopeName", cfg.ScopeName,
@@ -205,19 +233,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Connect to NATS with metrics tracking
 	natsConnectionStatus.Set(0)
-	nc, err := nats.Connect(cfg.NATSUrl,
-		nats.Name("k8s-event-exporter"),
-		nats.ReconnectWait(2*time.Second),
-		nats.MaxReconnects(-1), // Unlimited reconnects
-		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			klog.ErrorS(err, "NATS disconnected")
-			natsConnectionStatus.Set(0)
-		}),
-		nats.ReconnectHandler(func(_ *nats.Conn) {
-			klog.InfoS("NATS reconnected")
-			natsConnectionStatus.Set(1)
-		}),
-	)
+	nc, err := cfg.NATS.Connect(natsClientName, natsOptions(cfg)...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS: %w", err)
 	}
@@ -230,7 +246,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("failed to get JetStream context: %w", err)
 	}
 
-	klog.InfoS("Connected to NATS", "url", cfg.NATSUrl)
+	klog.InfoS("Connected to NATS", "url", cfg.NATS.URL)
 
 	// Create informer factory for all namespaces
 	factory := informers.NewSharedInformerFactory(k8sClient, cfg.ResyncPeriod)
@@ -368,6 +384,22 @@ func (e *Exporter) qualifiedMsgID(event *eventsv1.Event, eventType string) strin
 	return types.PrefixWithSource(e.planeType, e.clusterName, msgID)
 }
 
+// subject builds the NATS publish subject. A federated source's subject carries
+// a cluster token so per-PoP NATS permissions can scope publish access to it.
+func (e *Exporter) subject(namespace string) string {
+	return types.EventSubject(e.subjectPrefix, FederatedCluster(e.planeType, e.clusterName), namespace)
+}
+
+// FederatedCluster is the single gate for both the publish subject's cluster
+// token and the reply inbox prefix, so the two cannot be scoped differently.
+// Exported so option validation gates on the same notion of "federated".
+func FederatedCluster(planeType, clusterName string) string {
+	if planeType == "" || clusterName == "" {
+		return ""
+	}
+	return clusterName
+}
+
 // enqueue copies event and queues it for publish. If the queue is full, the
 // incoming event is dropped rather than blocking the informer callback.
 func (e *Exporter) enqueue(event *eventsv1.Event, eventType string) {
@@ -445,8 +477,7 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	// Build subject: events.k8s.{namespace}
-	subject := fmt.Sprintf("%s.%s", e.subjectPrefix, event.Namespace)
+	subject := e.subject(event.Namespace)
 
 	_, err = e.js.Publish(subject, data,
 		nats.MsgId(e.qualifiedMsgID(event, eventType)),

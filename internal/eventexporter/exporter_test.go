@@ -2,13 +2,19 @@ package eventexporter
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	eventsv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"go.miloapis.com/activity/internal/natsconn"
+	"go.miloapis.com/activity/internal/types"
 )
 
 func TestExporter_ResolveScope(t *testing.T) {
@@ -206,6 +212,86 @@ func TestExporter_QualifiedMsgID(t *testing.T) {
 	}
 }
 
+func TestExporter_Subject(t *testing.T) {
+	tests := []struct {
+		name      string
+		planeType string
+		cluster   string
+		namespace string
+		want      string
+	}{
+		{
+			name:      "edge deployment: cluster token inserted",
+			planeType: planeTypeEdge,
+			cluster:   "cluster-dfw-1",
+			namespace: "default",
+			want:      "activity.federated.cluster-dfw-1.default",
+		},
+		{
+			name:      "empty plane type: unqualified",
+			namespace: "default",
+			want:      "activity.federated.default",
+		},
+		{
+			name:      "cluster set but plane type empty: unqualified",
+			cluster:   "cluster-dfw-1",
+			namespace: "default",
+			want:      "activity.federated.default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exporter := &Exporter{
+				subjectPrefix: "activity.federated",
+				planeType:     tt.planeType,
+				clusterName:   tt.cluster,
+			}
+			if got := exporter.subject(tt.namespace); got != tt.want {
+				t.Errorf("subject() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFederatedCluster covers the single gate deciding both the subject's
+// cluster token and the connection's inbox prefix. If the two were scoped to
+// different clusters, the hub's grants would reject one of them.
+func TestFederatedCluster(t *testing.T) {
+	tests := []struct {
+		name      string
+		planeType string
+		cluster   string
+		want      string
+	}{
+		{name: "edge deployment", planeType: planeTypeEdge, cluster: "cluster-dfw-1", want: "cluster-dfw-1"},
+		{name: "management plane: no plane type or cluster", want: ""},
+		{name: "cluster set but plane type empty", cluster: "cluster-dfw-1", want: ""},
+		{name: "plane type set but cluster empty", planeType: planeTypeEdge, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FederatedCluster(tt.planeType, tt.cluster)
+			if got != tt.want {
+				t.Fatalf("FederatedCluster() = %q, want %q", got, tt.want)
+			}
+
+			// A non-empty cluster must yield a prefix CustomInboxPrefix accepts.
+			if got == "" {
+				return
+			}
+			prefix := types.EventInboxPrefix(got)
+			if err := nats.CustomInboxPrefix(prefix)(&nats.Options{}); err != nil {
+				t.Fatalf("CustomInboxPrefix(%q) rejected: %v", prefix, err)
+			}
+			if want := "_INBOX_cluster-dfw-1"; prefix != want {
+				t.Fatalf("inbox prefix = %q, want %q", prefix, want)
+			}
+		})
+	}
+}
+
 func TestExporter_Enqueue(t *testing.T) {
 	t.Run("room in queue: job enqueued, depth updated", func(t *testing.T) {
 		exporter := &Exporter{queue: make(chan eventJob, 2)}
@@ -246,4 +332,67 @@ func TestExporter_Enqueue(t *testing.T) {
 			t.Errorf("queue kept %q, want the already-queued sentinel event", queued.event.Name)
 		}
 	})
+}
+
+// applyNATSOptions resolves an option list the way nats.Connect does.
+func applyNATSOptions(t *testing.T, opts []nats.Option) nats.Options {
+	t.Helper()
+	var o nats.Options
+	for _, opt := range opts {
+		if err := opt(&o); err != nil {
+			t.Fatalf("apply option: %v", err)
+		}
+	}
+	return o
+}
+
+func TestNATSOptions(t *testing.T) {
+	t.Run("reconnect settings and handlers are always supplied", func(t *testing.T) {
+		o := applyNATSOptions(t, natsOptions(Config{}))
+
+		if o.MaxReconnect != -1 {
+			t.Errorf("MaxReconnect = %d, want -1", o.MaxReconnect)
+		}
+		if o.ReconnectWait != 2*time.Second {
+			t.Errorf("ReconnectWait = %v, want 2s", o.ReconnectWait)
+		}
+		if o.DisconnectedErrCB == nil {
+			t.Error("DisconnectErrHandler not set")
+		}
+		if o.ReconnectedCB == nil {
+			t.Error("ReconnectHandler not set")
+		}
+	})
+
+	t.Run("non-federated source uses the default inbox prefix", func(t *testing.T) {
+		for _, cfg := range []Config{
+			{},
+			{PlaneType: planeTypeEdge},
+			{ClusterName: "us-central-1-alice"},
+		} {
+			if got := applyNATSOptions(t, natsOptions(cfg)).InboxPrefix; got != "" {
+				t.Errorf("InboxPrefix = %q for %+v, want empty", got, cfg)
+			}
+		}
+	})
+
+	t.Run("federated source pins its per-cluster inbox prefix", func(t *testing.T) {
+		cfg := Config{PlaneType: planeTypeEdge, ClusterName: "us-central-1-alice"}
+
+		got := applyNATSOptions(t, natsOptions(cfg)).InboxPrefix
+		if want := types.EventInboxPrefix("us-central-1-alice"); got != want {
+			t.Errorf("InboxPrefix = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestConnectRejectsUnusableTLSMaterial(t *testing.T) {
+	cfg := Config{NATS: natsconn.Endpoint{
+		URL: "nats://localhost:4222",
+		TLS: natsconn.TLSFiles{Enabled: true, CAFile: filepath.Join(t.TempDir(), "absent.crt")},
+	}}
+
+	if _, err := cfg.NATS.Connect(natsClientName, natsOptions(cfg)...); err == nil {
+		t.Error("expected an error for a missing CA file")
+	}
 }

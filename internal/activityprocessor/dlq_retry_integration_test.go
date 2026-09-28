@@ -95,7 +95,7 @@ func setupDLQ(t *testing.T, js nats.JetStreamContext) {
 func newTestController(js nats.JetStreamContext) *DLQRetryController {
 	cfg := DefaultDLQRetryConfig()
 	cfg.BatchSize = 100
-	return NewDLQRetryController(js, cfg, testAuditStream, "EVENTS", testDLQStream, testDLQPrefix, nil)
+	return NewDLQRetryController(js, cfg, testAuditStream, "EVENTS", testDLQStream, testDLQPrefix, nil, nil)
 }
 
 func publishDLQEvent(t *testing.T, js nats.JetStreamContext, name string, nextRetry *metav1.Time) {

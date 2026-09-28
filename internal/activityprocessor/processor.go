@@ -517,8 +517,8 @@ func (p *Processor) Start(ctx context.Context) error {
 			dlqConfig.StreamName,
 			dlqConfig.SubjectPrefix,
 			p.reEvaluateDeadLetter,
+			p.policyCache.Generation,
 		)
-		p.dlqRetryController.policyGeneration = p.policyCache.Generation
 
 		p.wg.Add(1)
 		go func() {

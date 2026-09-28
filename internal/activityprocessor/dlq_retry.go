@@ -145,7 +145,7 @@ type DLQRetryController struct {
 	// only reports that events were republished.
 	evaluator RetryEvaluator
 
-	// policyGeneration reads the active cache. Set before Start; unlike a
+	// policyGeneration reads the active cache. Unlike a
 	// transient policy-update scan it also survives processor restarts.
 	policyGeneration func(string) int64
 
@@ -173,11 +173,13 @@ func NewDLQRetryController(
 	dlqStreamName string,
 	dlqSubjectPrefix string,
 	evaluator RetryEvaluator,
+	policyGeneration func(string) int64,
 ) *DLQRetryController {
 	return &DLQRetryController{
 		js:               js,
 		config:           config,
 		evaluator:        evaluator,
+		policyGeneration: policyGeneration,
 		auditStreamName:  auditStreamName,
 		eventStreamName:  eventStreamName,
 		dlqStreamName:    dlqStreamName,

@@ -4,6 +4,11 @@ vars:
   ROOT_DIR: "{{.USER_WORKING_DIR}}"
 
 tasks:
+  test-alerts:
+    desc: Validate DLQ alert rules and policy retry alert behavior (requires yq and promtool)
+    cmds:
+      - bash "{{.ROOT_DIR}}/hack/test-alert-rules.sh"
+
   install-jsonnet:
     desc: Install Jsonnet tooling for dashboard generation
     cmds:

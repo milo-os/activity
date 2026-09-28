@@ -151,7 +151,7 @@ func (b *ActivityBuilder) BuildFromEvent(
 	timestamp := resolveEventTimestamp(eventMap)
 
 	// Extract resource info from the resolved resource object.
-	namespace := GetNestedString(resourceObject, "namespace")
+	namespace := resolveActivityNamespace(eventMap, resourceObject)
 	resourceName := GetNestedString(resourceObject, "name")
 	resourceUID := GetNestedString(resourceObject, "uid")
 	apiVersion := GetNestedString(resourceObject, "apiVersion")

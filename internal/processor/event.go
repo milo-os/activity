@@ -273,7 +273,7 @@ func (p *EventProcessor) buildActivity(
 	resourceObject := ResolveInvolvedObject(event)
 
 	// Extract resource info from the resolved resource object.
-	namespace := getStringFromMap(resourceObject, "namespace")
+	namespace := resolveActivityNamespace(event, resourceObject)
 	resourceName := getStringFromMap(resourceObject, "name")
 	resourceUID := getStringFromMap(resourceObject, "uid")
 	apiVersion := getStringFromMap(resourceObject, "apiVersion")

@@ -7,12 +7,9 @@ import (
 )
 
 // TestEventBuildersScenarios asserts EventProcessor.buildActivity (live) and
-// ActivityBuilder.BuildFromEvent (PolicyPreview/reindex) agree on
-// Spec.Source, Spec.Resource, and Spec.Origin/Name across three cases: no
-// source annotations (with a stray "related" field ignored), a non-core
-// apiGroup without source annotations, and the full federated case. Resource
-// always resolves from regarding/involvedObject; "related" is never used
-// for Resource resolution, federated or not.
+// ActivityBuilder.BuildFromEvent (PolicyPreview/reindex) build identical
+// Activities. Resource always resolves from regarding/involvedObject, never
+// from "related".
 func TestEventBuildersScenarios(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -154,6 +151,145 @@ func TestEventBuildersScenarios(t *testing.T) {
 			wantResourceMatchesPolicy: true,
 			wantQualified:             true,
 		},
+		{
+			// An edge cell's ns-<uuid> doesn't exist in the serving control
+			// plane, so the upstream namespace the exporter recorded wins.
+			name: "federated case: upstream namespace annotation wins over the event's own namespace",
+			event: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"uid": "d4e5f6",
+					"annotations": map[string]interface{}{
+						"activity.miloapis.com/source-plane-type": "edge",
+						"activity.miloapis.com/source-cluster":    "cluster-dfw-1",
+						"platform.miloapis.com/scope.namespace":   "default",
+					},
+				},
+				"reason": "InstanceCrashed",
+				"regarding": map[string]interface{}{
+					"kind":      "Pod",
+					"name":      "instance-pod",
+					"namespace": "ns-0f1e2d3c-4b5a",
+					"uid":       "instance-pod-uid",
+				},
+			},
+			matched: &MatchedPolicy{APIGroup: "", Kind: "Pod", Summary: "Instance crashed in dfw"},
+			wantSource: &v1alpha1.ActivitySource{
+				PlaneType: "edge",
+				Cluster:   "cluster-dfw-1",
+			},
+			wantResource: v1alpha1.ActivityResource{
+				APIGroup:  "",
+				Kind:      "Pod",
+				Name:      "instance-pod",
+				Namespace: "default",
+				UID:       "instance-pod-uid",
+			},
+			wantOriginID:              "edge/cluster-dfw-1/d4e5f6",
+			wantResourceMatchesPolicy: true,
+			wantQualified:             true,
+		},
+		{
+			// The hub, and edge cells predating the annotation, send neither.
+			name: "no upstream namespace annotation: falls back to the event's own namespace",
+			event: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"uid": "g7h8i9",
+					"annotations": map[string]interface{}{
+						"activity.miloapis.com/source-plane-type": "edge",
+						"activity.miloapis.com/source-cluster":    "cluster-dfw-1",
+					},
+				},
+				"reason": "InstanceCrashed",
+				"regarding": map[string]interface{}{
+					"kind":      "Pod",
+					"name":      "instance-pod",
+					"namespace": "ns-0f1e2d3c-4b5a",
+					"uid":       "instance-pod-uid",
+				},
+			},
+			matched: &MatchedPolicy{APIGroup: "", Kind: "Pod", Summary: "Instance crashed in dfw"},
+			wantSource: &v1alpha1.ActivitySource{
+				PlaneType: "edge",
+				Cluster:   "cluster-dfw-1",
+			},
+			wantResource: v1alpha1.ActivityResource{
+				APIGroup:  "",
+				Kind:      "Pod",
+				Name:      "instance-pod",
+				Namespace: "ns-0f1e2d3c-4b5a",
+				UID:       "instance-pod-uid",
+			},
+			wantOriginID:              "edge/cluster-dfw-1/g7h8i9",
+			wantResourceMatchesPolicy: true,
+			wantQualified:             true,
+		},
+		{
+			name: "empty upstream namespace annotation: falls back to the event's own namespace",
+			event: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"uid": "j1k2l3",
+					"annotations": map[string]interface{}{
+						"activity.miloapis.com/source-plane-type": "edge",
+						"activity.miloapis.com/source-cluster":    "cluster-dfw-1",
+						"platform.miloapis.com/scope.namespace":   "",
+					},
+				},
+				"reason": "InstanceCrashed",
+				"regarding": map[string]interface{}{
+					"kind":      "Pod",
+					"name":      "instance-pod",
+					"namespace": "ns-0f1e2d3c-4b5a",
+					"uid":       "instance-pod-uid",
+				},
+			},
+			matched: &MatchedPolicy{APIGroup: "", Kind: "Pod", Summary: "Instance crashed in dfw"},
+			wantSource: &v1alpha1.ActivitySource{
+				PlaneType: "edge",
+				Cluster:   "cluster-dfw-1",
+			},
+			wantResource: v1alpha1.ActivityResource{
+				APIGroup:  "",
+				Kind:      "Pod",
+				Name:      "instance-pod",
+				Namespace: "ns-0f1e2d3c-4b5a",
+				UID:       "instance-pod-uid",
+			},
+			wantOriginID:              "edge/cluster-dfw-1/j1k2l3",
+			wantResourceMatchesPolicy: true,
+			wantQualified:             true,
+		},
+		{
+			name: "cluster-scoped resource with no namespace anywhere: cluster-scoped Activity",
+			event: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"uid": "event-uid-cluster-scoped",
+				},
+				"reason": "NodeReady",
+				"regarding": map[string]interface{}{
+					"kind":       "Node",
+					"name":       "node-1",
+					"uid":        "node-uid-1",
+					"apiVersion": "v1",
+				},
+			},
+			matched: &MatchedPolicy{
+				PolicyName: "core-nodes",
+				APIGroup:   "",
+				Kind:       "Node",
+				Summary:    "Node node-1 is ready",
+			},
+			wantSource: nil,
+			wantResource: v1alpha1.ActivityResource{
+				APIGroup:   "",
+				APIVersion: "v1",
+				Kind:       "Node",
+				Name:       "node-1",
+				Namespace:  "",
+				UID:        "node-uid-1",
+			},
+			wantOriginID:              "event-uid-cluster-scoped",
+			wantResourceMatchesPolicy: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -182,6 +318,10 @@ func TestEventBuildersScenarios(t *testing.T) {
 
 					if activity.Spec.Resource != tt.wantResource {
 						t.Errorf("Spec.Resource = %+v, want %+v", activity.Spec.Resource, tt.wantResource)
+					}
+
+					if activity.Namespace != tt.wantResource.Namespace {
+						t.Errorf("ObjectMeta.Namespace = %q, want %q", activity.Namespace, tt.wantResource.Namespace)
 					}
 
 					if activity.Spec.Origin.ID != tt.wantOriginID {

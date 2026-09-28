@@ -403,6 +403,46 @@ func TestExtractTenantFromAnnotations(t *testing.T) {
 			wantName: "",
 		},
 		{
+			// Edge cells spell the scope type in lowercase.
+			name: "lowercase scope.type is normalized to the canonical value",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"platform.miloapis.com/scope.type": "project",
+						"platform.miloapis.com/scope.name": "my-project",
+					},
+				},
+			},
+			wantType: TenantTypeProject,
+			wantName: "my-project",
+		},
+		{
+			name: "lowercase organization scope.type is normalized",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"platform.miloapis.com/scope.type": "organization",
+						"platform.miloapis.com/scope.name": "acme-corp",
+					},
+				},
+			},
+			wantType: TenantTypeOrganization,
+			wantName: "acme-corp",
+		},
+		{
+			name: "unrecognized scope.type passes through unchanged",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"platform.miloapis.com/scope.type": "Tenant",
+						"platform.miloapis.com/scope.name": "acme-corp",
+					},
+				},
+			},
+			wantType: "Tenant",
+			wantName: "acme-corp",
+		},
+		{
 			name: "scope.type present but scope.name absent uses empty name",
 			eventMap: map[string]any{
 				"metadata": map[string]any{

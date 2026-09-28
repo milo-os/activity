@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -94,7 +95,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: "event_exporter",
 			Name:      "dropped_events_total",
-			Help:      "Total number of events dropped because the publish queue was full. The newest event is dropped, not an already-queued one.",
+			Help:      "Total number of events dropped because the publish queue was full. The oldest queued event is evicted to make room for the newest.",
 		},
 	)
 
@@ -126,9 +127,24 @@ func init() {
 // running in a workload cluster rather than the management plane.
 const planeTypeEdge = "edge"
 
-// publishQueueSize bounds the publish queue between the informer callback
-// and the NATS publish call.
-const publishQueueSize = 1000
+const (
+	// publishQueueSize bounds the publish queue between the informer callback
+	// and the NATS publish call.
+	publishQueueSize = 1000
+
+	// publishAsyncMaxPending caps the unacked publishes in flight.
+	publishAsyncMaxPending = 256
+
+	// publishStallWait bounds how long a full in-flight window blocks drainQueue
+	// before the publish is failed, so saturation usually sheds at the queue.
+	publishStallWait = 5 * time.Second
+
+	// publishAckTimeout makes every publish resolve one way or the other;
+	// without it a stranded ack would hang the shutdown drain forever.
+	publishAckTimeout = 30 * time.Second
+
+	ackDrainTimeout = 5 * time.Second
+)
 
 // natsClientName identifies this exporter to the NATS server.
 const natsClientName = "k8s-event-exporter"
@@ -241,7 +257,10 @@ func Run(ctx context.Context, cfg Config) error {
 	natsConnectionStatus.Set(1)
 
 	// Get JetStream context
-	js, err := nc.JetStream()
+	js, err := nc.JetStream(
+		nats.PublishAsyncMaxPending(publishAsyncMaxPending),
+		nats.PublishAsyncTimeout(publishAckTimeout),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to get JetStream context: %w", err)
 	}
@@ -274,7 +293,11 @@ func Run(ctx context.Context, cfg Config) error {
 		city:          city,
 		queue:         make(chan eventJob, publishQueueSize),
 	}
-	go exporter.drainQueue(ctx)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		exporter.drainQueue(ctx)
+	}()
 
 	// Register event handlers
 	eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -320,6 +343,8 @@ func Run(ctx context.Context, cfg Config) error {
 	// Wait for shutdown
 	<-ctx.Done()
 	klog.InfoS("Shutting down")
+	// The deferred nc.Close() must not run until the in-flight acks have drained.
+	<-drained
 	return nil
 }
 
@@ -336,6 +361,9 @@ type Exporter struct {
 	scope         *namespaceScopeResolver
 	city          *cityResolver
 	queue         chan eventJob
+
+	// inFlight tracks the ack waiters so shutdown can drain them.
+	inFlight sync.WaitGroup
 }
 
 // resolveScope returns the tenant scope to stamp on an event from the given
@@ -413,28 +441,58 @@ func FederatedCluster(planeType, clusterName string) string {
 	return clusterName
 }
 
-// enqueue copies event and queues it for publish. If the queue is full, the
-// incoming event is dropped rather than blocking the informer callback.
+// enqueue copies event and queues it for publish, never blocking the informer
+// callback. A full queue sheds its oldest event rather than the incoming one,
+// so a saturated link keeps reporting current state.
 func (e *Exporter) enqueue(event *eventsv1.Event, eventType string) {
 	job := eventJob{event: event.DeepCopy(), eventType: eventType}
-
-	select {
-	case e.queue <- job:
-	default:
-		droppedEvents.Inc()
-		klog.ErrorS(fmt.Errorf("publish queue full (size %d)", cap(e.queue)), "Dropped event",
-			"namespace", event.Namespace,
-			"name", event.Name,
-		)
+	if e.tryEnqueue(job) {
+		return
 	}
-	queueDepth.Set(float64(len(e.queue)))
+
+	// The single producer always wins the slot an eviction frees, so the job is
+	// only shed when there was nothing to evict.
+	e.evictOldest()
+	if !e.tryEnqueue(job) {
+		recordDrop(cap(e.queue), job.event)
+	}
 }
 
-// drainQueue publishes queued events until ctx is cancelled. A job already
-// pulled off the queue when ctx is cancelled is dropped rather than
-// published, since publishEvent would otherwise run with an already-dead
-// ctx and fail.
+// tryEnqueue queues job without blocking, reporting whether it fit.
+func (e *Exporter) tryEnqueue(job eventJob) bool {
+	select {
+	case e.queue <- job:
+		queueDepth.Set(float64(len(e.queue)))
+		return true
+	default:
+		return false
+	}
+}
+
+// evictOldest drops the oldest queued job, unless drainQueue took it first.
+func (e *Exporter) evictOldest() {
+	select {
+	case evicted := <-e.queue:
+		recordDrop(cap(e.queue), evicted.event)
+		queueDepth.Set(float64(len(e.queue)))
+	default:
+	}
+}
+
+func recordDrop(queueSize int, event *eventsv1.Event) {
+	droppedEvents.Inc()
+	klog.ErrorS(fmt.Errorf("publish queue full (size %d)", queueSize), "Dropped event",
+		"namespace", event.Namespace,
+		"name", event.Name,
+	)
+}
+
+// drainQueue publishes queued events until ctx is cancelled, then waits out
+// the acks still in flight. A job already pulled off the queue when ctx is
+// cancelled is dropped rather than published.
 func (e *Exporter) drainQueue(ctx context.Context) {
+	defer e.awaitPendingAcks()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -443,7 +501,7 @@ func (e *Exporter) drainQueue(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			if err := e.publishEvent(ctx, job.event, job.eventType); err != nil {
+			if err := e.publishEvent(job.event, job.eventType); err != nil {
 				klog.ErrorS(err, "Failed to publish event",
 					"namespace", job.event.Namespace,
 					"name", job.event.Name,
@@ -454,8 +512,9 @@ func (e *Exporter) drainQueue(ctx context.Context) {
 	}
 }
 
-// publishEvent publishes a Kubernetes event to NATS JetStream.
-func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, eventType string) error {
+// publishEvent publishes a Kubernetes event to NATS JetStream. It returns once
+// the publish is in flight; awaitAck records the outcome when the PubAck lands.
+func (e *Exporter) publishEvent(event *eventsv1.Event, eventType string) error {
 	start := time.Now()
 
 	// Create a copy to avoid modifying the cached object
@@ -490,28 +549,79 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 
 	subject := e.subject(event.Namespace)
 
-	_, err = e.js.Publish(subject, data,
+	future, err := e.js.PublishAsync(subject, data,
 		nats.MsgId(e.qualifiedMsgID(event, eventType)),
-		nats.Context(ctx),
+		nats.StallWait(publishStallWait),
 	)
 	if err != nil {
 		publishErrors.Inc()
 		return fmt.Errorf("failed to publish to NATS: %w", err)
 	}
 
-	// Record metrics
-	publishLatency.Observe(time.Since(start).Seconds())
-	eventsPublished.WithLabelValues(event.Namespace, event.Reason).Inc()
-
-	klog.V(4).InfoS("Published event",
-		"namespace", event.Namespace,
-		"name", event.Name,
-		"reason", event.Reason,
-		"type", eventType,
-		"subject", subject,
-	)
+	e.inFlight.Add(1)
+	go func() {
+		defer e.inFlight.Done()
+		e.awaitAck(future, pendingAck{
+			start:     start,
+			namespace: event.Namespace,
+			name:      event.Name,
+			reason:    event.Reason,
+			eventType: eventType,
+		})
+	}()
 
 	return nil
+}
+
+type pendingAck struct {
+	start     time.Time
+	namespace string
+	name      string
+	reason    string
+	eventType string
+}
+
+// awaitAck records the outcome of one asynchronous publish. A failed ack has
+// nothing to retry from - the job left the queue when it was published - so it
+// is only counted and logged.
+func (e *Exporter) awaitAck(future nats.PubAckFuture, ack pendingAck) {
+	select {
+	case <-future.Ok():
+		publishLatency.Observe(time.Since(ack.start).Seconds())
+		eventsPublished.WithLabelValues(ack.namespace, ack.reason).Inc()
+
+		klog.V(4).InfoS("Published event",
+			"namespace", ack.namespace,
+			"name", ack.name,
+			"reason", ack.reason,
+			"type", ack.eventType,
+			"subject", future.Msg().Subject,
+		)
+	case err := <-future.Err():
+		publishErrors.Inc()
+		klog.ErrorS(err, "Failed to publish event",
+			"namespace", ack.namespace,
+			"name", ack.name,
+		)
+	}
+}
+
+// awaitPendingAcks waits out the acks outstanding at shutdown. A publish still
+// unresolved at the deadline has not failed, so it is logged rather than
+// counted against publishErrors.
+func (e *Exporter) awaitPendingAcks() {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.inFlight.Wait()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(ackDrainTimeout):
+		klog.ErrorS(fmt.Errorf("ack drain timed out after %s", ackDrainTimeout),
+			"Publishes unresolved at shutdown", "pending", e.js.PublishAsyncPending())
+	}
 }
 
 // buildRestConfig loads the Kubernetes client configuration, from a

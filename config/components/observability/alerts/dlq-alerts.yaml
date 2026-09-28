@@ -9,8 +9,20 @@ metadata:
     monitoring: "true"
 spec:
   groups:
+    # Select one current owner per policy across processor replicas. Newest
+    # scrape wins during metadata propagation; normalize the join value to 1.
+    - name: activity-policy-ownership
+      interval: 30s
+      rules:
+        - record: activity_processor:policy_owner:info
+          expr: |
+            max by (cluster, namespace, policy_name, policy_service, policy_team) (
+              topk by (cluster, namespace, policy_name) (
+                1, timestamp(activity_processor_policy_info)
+              )
+            ) ^ 0
     # =========================================================================
-    # DLQ Health Alerts - SRE Ownership
+    # DLQ Health Alerts
     # =========================================================================
     - name: dlq-health
       interval: 30s
@@ -18,14 +30,28 @@ spec:
         # DLQ Growing - Queue Not Draining
         - alert: ActivityPolicyFailuresHigh
           expr: |
-            rate(activity_processor_dlq_events_published_total[5m]) > 0.1
-            AND
-            increase(activity_processor_dlq_events_published_total[15m]) > 100
+            label_replace(
+              (
+                rate(activity_processor_dlq_events_published_total[5m]) > 0.1
+                AND
+                increase(activity_processor_dlq_events_published_total[15m]) > 100
+              )
+              * on (cluster, namespace, policy_name) group_left (policy_service, policy_team)
+                activity_processor:policy_owner:info
+              or
+              (
+                rate(activity_processor_dlq_events_published_total[5m]) > 0.1
+                AND
+                increase(activity_processor_dlq_events_published_total[15m]) > 100
+              )
+              unless on (cluster, namespace, policy_name) activity_processor:policy_owner:info,
+              "service", "$1", "policy_service", "(.*)"
+            )
           for: 15m
           labels:
             severity: warning
             component: activity-processor
-            team: sre
+            team: '{{ if $labels.policy_team }}{{ $labels.policy_team }}{{ else }}sre{{ end }}'
           annotations:
             summary: "Activity policy{{ if $labels.policy_name }} {{ $labels.policy_name }}{{ end }} is failing to generate activities"
             description: "Activity processing{{ if $labels.cluster }} on {{ $labels.cluster }}{{ end }} is sending {{ $value }} {{ $labels.event_type }} events/sec for {{ $labels.api_group }}/{{ $labels.kind }} to the dead-letter queue after {{ $labels.error_type }} failures. This rate has persisted for 15 minutes. Check the activity policy and processor logs for the failing rule and event payload."
@@ -49,12 +75,24 @@ spec:
         # High Retry Count Events
         - alert: ActivityPolicyHighRetryCount
           expr: |
-            increase(activity_processor_dlq_retry_events_high_retry_total[1h]) > 10
+            label_replace(
+              (
+                increase(activity_processor_dlq_retry_events_high_retry_total[1h]) > 10
+              )
+              * on (cluster, namespace, policy_name) group_left (policy_service, policy_team)
+                activity_processor:policy_owner:info
+              or
+              (
+                increase(activity_processor_dlq_retry_events_high_retry_total[1h]) > 10
+              )
+              unless on (cluster, namespace, policy_name) activity_processor:policy_owner:info,
+              "service", "$1", "policy_service", "(.*)"
+            )
           for: 1h
           labels:
             severity: warning
             component: activity-processor
-            team: sre
+            team: '{{ if $labels.policy_team }}{{ $labels.policy_team }}{{ else }}sre{{ end }}'
           annotations:
             summary: "Activity policy{{ if $labels.policy_name }} {{ $labels.policy_name }}{{ end }} events keep failing retries"
             description: "Activity policy retries{{ if $labels.cluster }} on {{ $labels.cluster }}{{ end }} for {{ $labels.api_group }}/{{ $labels.kind }} recorded {{ $value }} failures at or above the high retry threshold in the last hour. The count can include repeated attempts for the same event. Check the policy and processor logs for persistent evaluation or delivery failures."
@@ -64,12 +102,24 @@ spec:
         # DLQ slow-leak - low-rate but persistent failures
         - alert: ActivityPolicyFailuresRecurring
           expr: |
-            increase(activity_processor_dlq_events_published_total[6h]) > 10
+            label_replace(
+              (
+                increase(activity_processor_dlq_events_published_total[6h]) > 10
+              )
+              * on (cluster, namespace, policy_name) group_left (policy_service, policy_team)
+                activity_processor:policy_owner:info
+              or
+              (
+                increase(activity_processor_dlq_events_published_total[6h]) > 10
+              )
+              unless on (cluster, namespace, policy_name) activity_processor:policy_owner:info,
+              "service", "$1", "policy_service", "(.*)"
+            )
           for: 1h
           labels:
             severity: warning
             component: activity-processor
-            team: sre
+            team: '{{ if $labels.policy_team }}{{ $labels.policy_team }}{{ else }}sre{{ end }}'
           annotations:
             summary: "Activity policy{{ if $labels.policy_name }} {{ $labels.policy_name }}{{ end }} has recurring activity generation failures"
             description: "Activity processing{{ if $labels.cluster }} on {{ $labels.cluster }}{{ end }} sent {{ $value }} {{ $labels.event_type }} events for {{ $labels.api_group }}/{{ $labels.kind }} to the dead-letter queue in the last 6 hours with {{ $labels.error_type }} errors. Inspect the activity policy and failed payloads for event shapes its rules do not handle."
@@ -86,14 +136,28 @@ spec:
         # policy_name label, so it cannot provide a per-policy success ratio.
         - alert: ActivityPolicyRetriesFailing
           expr: |
-            sum by (cluster, namespace, policy_name, api_group, kind, error_type) (
-              increase(activity_processor_dlq_retry_failed_total{policy_name!=""}[1h])
-            ) >= 3
+            label_replace(
+              (
+                sum by (cluster, namespace, policy_name, api_group, kind, error_type) (
+                  increase(activity_processor_dlq_retry_failed_total{policy_name!=""}[1h])
+                ) >= 3
+              )
+              * on (cluster, namespace, policy_name) group_left (policy_service, policy_team)
+                activity_processor:policy_owner:info
+              or
+              (
+                sum by (cluster, namespace, policy_name, api_group, kind, error_type) (
+                  increase(activity_processor_dlq_retry_failed_total{policy_name!=""}[1h])
+                ) >= 3
+              )
+              unless on (cluster, namespace, policy_name) activity_processor:policy_owner:info,
+              "service", "$1", "policy_service", "(.*)"
+            )
           for: 30m
           labels:
             severity: warning
             component: activity-processor
-            team: sre
+            team: '{{ if $labels.policy_team }}{{ $labels.policy_team }}{{ else }}sre{{ end }}'
             subject: "{{ $labels.policy_name }}"
           annotations:
             summary: "Activity policy {{ $labels.policy_name }} keeps failing during retries"
@@ -110,14 +174,28 @@ spec:
         # Policy Sending Events to DLQ
         - alert: ActivityPolicyEventProcessingErrors
           expr: |
-            sum by (policy_name, api_group, kind, error_type) (
-              rate(activity_processor_dlq_events_published_total{policy_name!=""}[10m])
-            ) > 0.1
+            label_replace(
+              (
+                sum by (cluster, namespace, policy_name, api_group, kind, error_type) (
+                  rate(activity_processor_dlq_events_published_total{policy_name!=""}[10m])
+                ) > 0.1
+              )
+              * on (cluster, namespace, policy_name) group_left (policy_service, policy_team)
+                activity_processor:policy_owner:info
+              or
+              (
+                sum by (cluster, namespace, policy_name, api_group, kind, error_type) (
+                  rate(activity_processor_dlq_events_published_total{policy_name!=""}[10m])
+                ) > 0.1
+              )
+              unless on (cluster, namespace, policy_name) activity_processor:policy_owner:info,
+              "service", "$1", "policy_service", "(.*)"
+            )
           for: 15m
           labels:
             severity: warning
             component: activity-processor
-            team: sre
+            team: '{{ if $labels.policy_team }}{{ $labels.policy_team }}{{ else }}sre{{ end }}'
           annotations:
             summary: "Activity policy {{ $labels.policy_name }} is failing to generate activities"
             description: "Activity policy {{ $labels.policy_name }} for {{ $labels.api_group }}/{{ $labels.kind }} is sending {{ $value }} events/sec to the dead-letter queue with {{ $labels.error_type }} errors. Check the policy's rules against failed event payloads in the activity-processor logs."

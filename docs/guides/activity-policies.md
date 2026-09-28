@@ -42,6 +42,9 @@ apiVersion: activity.miloapis.com/v1alpha1
 kind: ActivityPolicy
 metadata:
   name: networking-httpproxy        # Unique name, applies to the whole control plane
+  labels:
+    meta.datumapis.com/service: network-services
+    meta.datumapis.com/team: delivery
 spec:
   resource:
     apiGroup: networking.datumapis.com
@@ -83,6 +86,26 @@ Each rule needs a unique `name` within its list. The name is used to merge
 rules correctly when you update the policy with `kubectl apply` — two rules
 with the same name will silently collide. Choose names that describe the rule's
 intent: `create`, `delete`, `status`, `fallback`.
+
+## Policy ownership and alerts
+
+Set `meta.datumapis.com/service` and `meta.datumapis.com/team` to the service
+and team responsible for maintaining the policy. For example, NSO policies use
+`network-services` and `delivery`. These are policy owners, independent of the
+service running the activity processor.
+
+The processor exports these labels as `policy_service` and `policy_team` on
+`activity_processor_policy_info` for active policies. The policy failure alerts
+join this metadata by cluster, processor namespace, and policy name, then set
+alert `service` and `team` from the policy. The separate metric labels avoid
+collisions with the Kubernetes service label added during scraping.
+
+Ownership updates apply to existing retry failures after the policy cache and
+metrics refresh. Deleted or inactive policies stop exporting ownership. Failures
+without ownership telemetry still alert: their service is unset and their team
+falls back to `sre`. Queue publishing failures have no policy identity and remain
+processor infrastructure alerts. Configure Alertmanager routes for your service
+and team values; resource labels alone do not create routes.
 
 ## CEL match expressions
 

@@ -321,6 +321,10 @@ func New(config Config, restConfig *rest.Config) (*Processor, error) {
 
 // Start begins processing audit events.
 func (p *Processor) Start(ctx context.Context) error {
+	if err := metrics.Registry.Register(p.policyCache); err != nil {
+		return fmt.Errorf("failed to register policy ownership metrics: %w", err)
+	}
+
 	// Start health probe server early so Kubernetes can check liveness
 	if p.config.HealthProbeAddr != "" {
 		p.startHealthServer()
@@ -591,6 +595,7 @@ const drainTimeout = 30 * time.Second
 
 // Stop gracefully shuts down the processor.
 func (p *Processor) Stop() {
+	metrics.Registry.Unregister(p.policyCache)
 	klog.Info("Stopping activity processor")
 
 	// Mark as unhealthy immediately

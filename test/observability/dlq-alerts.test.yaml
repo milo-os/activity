@@ -176,3 +176,160 @@ tests:
               description: Activity policy networking.datumapis.com-httpproxy for networking.datumapis.com/HTTPProxy on production recorded 3 failed re-evaluations in the last hour with cel_summary errors. The count has remained at three or more for 30 minutes. Affected events are not producing activity entries. Check activity-processor logs for this policy's failing rule and payload. This counts retry attempts, which may include the same event more than once.
               impact: Activity timelines remain incomplete for affected events because automatic retries are not recovering them.
               runbook_url: https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-retry-failing.md
+  - name: policy owners survive replica aggregation and remain isolated by cluster
+    interval: 1m
+    input_series:
+    - series: activity_processor_dlq_retry_failed_total{cluster="production",namespace="activity-system",policy_name="networking.datumapis.com-httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",pod="processor-a"}
+      values: 0+1x120
+    - series: activity_processor_dlq_retry_failed_total{cluster="production",namespace="activity-system",policy_name="networking.datumapis.com-httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",pod="processor-b"}
+      values: 0+1x120
+    - series: activity_processor_dlq_retry_failed_total{cluster="production",namespace="activity-system",policy_name="another-policy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",pod="processor-a"}
+      values: 0+1x120
+    - series: activity_processor_dlq_retry_failed_total{cluster="staging",namespace="activity-system",policy_name="networking.datumapis.com-httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",pod="processor-a"}
+      values: 0+1x120
+    - series: activity_processor_dlq_retry_failed_total{cluster="production",namespace="activity-system",policy_name="networking.datumapis.com-httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_match",pod="processor-a"}
+      values: 0+1x120
+    - series: activity_processor_dlq_retry_attempts_total{result="succeeded",api_group="networking.datumapis.com",kind="HTTPProxy"}
+      values: 0+1000x120
+    - series: activity_processor_policy_info{cluster="production",namespace="activity-system",policy_name="networking.datumapis.com-httpproxy",pod="processor-a",policy_service="network-services",policy_team="delivery",service="control-plane"}
+      values: 1+0x120
+    - series: activity_processor_policy_info{cluster="production",namespace="activity-system",policy_name="networking.datumapis.com-httpproxy",pod="processor-b",policy_service="network-services",policy_team="delivery",service="control-plane"}
+      values: 1+0x120
+    alert_rule_test:
+    - eval_time: 29m
+      alertname: ActivityPolicyRetriesFailing
+      exp_alerts: []
+    - eval_time: 60m
+      alertname: ActivityPolicyRetriesFailing
+      exp_alerts:
+      - exp_labels:
+          cluster: production
+          namespace: activity-system
+          policy_name: networking.datumapis.com-httpproxy
+          api_group: networking.datumapis.com
+          kind: HTTPProxy
+          error_type: cel_summary
+          severity: warning
+          component: activity-processor
+          team: delivery
+          subject: networking.datumapis.com-httpproxy
+          service: network-services
+          policy_service: network-services
+          policy_team: delivery
+        exp_annotations:
+          summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries
+          description: Activity policy networking.datumapis.com-httpproxy for networking.datumapis.com/HTTPProxy on production recorded 120 failed re-evaluations in the last hour with cel_summary errors. The count has remained at three or more for 30 minutes. Affected events are not producing activity entries. Check activity-processor logs for this policy's failing rule and payload. This counts retry attempts, which may include the same event more than once.
+          impact: Activity timelines remain incomplete for affected events because automatic retries are not recovering them.
+          runbook_url: https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-retry-failing.md
+      - exp_labels:
+          cluster: production
+          namespace: activity-system
+          policy_name: another-policy
+          api_group: networking.datumapis.com
+          kind: HTTPProxy
+          error_type: cel_summary
+          severity: warning
+          component: activity-processor
+          team: sre
+          subject: another-policy
+        exp_annotations:
+          summary: Activity policy another-policy keeps failing during retries
+          description: Activity policy another-policy for networking.datumapis.com/HTTPProxy on production recorded 60 failed re-evaluations in the last hour with cel_summary errors. The count has remained at three or more for 30 minutes. Affected events are not producing activity entries. Check activity-processor logs for this policy's failing rule and payload. This counts retry attempts, which may include the same event more than once.
+          impact: Activity timelines remain incomplete for affected events because automatic retries are not recovering them.
+          runbook_url: https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-retry-failing.md
+      - exp_labels:
+          cluster: staging
+          namespace: activity-system
+          policy_name: networking.datumapis.com-httpproxy
+          api_group: networking.datumapis.com
+          kind: HTTPProxy
+          error_type: cel_summary
+          severity: warning
+          component: activity-processor
+          team: sre
+          subject: networking.datumapis.com-httpproxy
+        exp_annotations:
+          summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries
+          description: Activity policy networking.datumapis.com-httpproxy for networking.datumapis.com/HTTPProxy on staging recorded 60 failed re-evaluations in the last hour with cel_summary errors. The count has remained at three or more for 30 minutes. Affected events are not producing activity entries. Check activity-processor logs for this policy's failing rule and payload. This counts retry attempts, which may include the same event more than once.
+          impact: Activity timelines remain incomplete for affected events because automatic retries are not recovering them.
+          runbook_url: https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-retry-failing.md
+      - exp_labels:
+          cluster: production
+          namespace: activity-system
+          policy_name: networking.datumapis.com-httpproxy
+          api_group: networking.datumapis.com
+          kind: HTTPProxy
+          error_type: cel_match
+          severity: warning
+          component: activity-processor
+          team: delivery
+          subject: networking.datumapis.com-httpproxy
+          service: network-services
+          policy_service: network-services
+          policy_team: delivery
+        exp_annotations:
+          summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries
+          description: Activity policy networking.datumapis.com-httpproxy for networking.datumapis.com/HTTPProxy on production recorded 60 failed re-evaluations in the last hour with cel_match errors. The count has remained at three or more for 30 minutes. Affected events are not producing activity entries. Check activity-processor logs for this policy's failing rule and payload. This counts retry attempts, which may include the same event more than once.
+          impact: Activity timelines remain incomplete for affected events because automatic retries are not recovering them.
+          runbook_url: https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-retry-failing.md
+  - name: new ownership replaces older replica metadata
+    interval: 1m
+    input_series:
+    - series: activity_processor_policy_info{cluster="production",namespace="activity-system",policy_name="httpproxy",pod="old",policy_service="old-service",policy_team="sre"}
+      values: 1+0x10
+    - series: activity_processor_policy_info{cluster="production",namespace="activity-system",policy_name="httpproxy",pod="new",policy_service="network-services",policy_team="delivery"}
+      values: _ _ _ _ _ _ _ _ _ _ _ 1+0x20
+    promql_expr_test:
+    - expr: activity_processor:policy_owner:info
+      eval_time: 12m
+      exp_samples:
+      - labels: activity_processor:policy_owner:info{cluster="production",namespace="activity-system",policy_name="httpproxy",policy_service="network-services",policy_team="delivery"}
+        value: 1
+  - name: all policy failure alerts inherit policy ownership instead of scrape service
+    interval: 1m
+    input_series:
+    - series: activity_processor_dlq_events_published_total{cluster="production",namespace="activity-system",policy_name="httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",service="activity-processor"}
+      values: 0+60x180
+    - series: activity_processor_dlq_retry_failed_total{cluster="production",namespace="activity-system",policy_name="httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",service="activity-processor"}
+      values: 0+60x180
+    - series: activity_processor_dlq_retry_events_high_retry_total{cluster="production",namespace="activity-system",policy_name="httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",service="activity-processor"}
+      values: 0+60x180
+    - series: activity_processor_policy_info{cluster="production",namespace="activity-system",policy_name="httpproxy",policy_service="network-services",policy_team="delivery",service="activity-processor"}
+      values: 1+0x180
+    promql_expr_test:
+    - expr: count by (alertname, service, team) (ALERTS{alertstate="firing"})
+      eval_time: 130m
+      exp_samples:
+      - labels: '{alertname="ActivityPolicyFailuresHigh",service="network-services",team="delivery"}'
+        value: 1
+      - labels: '{alertname="ActivityPolicyHighRetryCount",service="network-services",team="delivery"}'
+        value: 1
+      - labels: '{alertname="ActivityPolicyFailuresRecurring",service="network-services",team="delivery"}'
+        value: 1
+      - labels: '{alertname="ActivityPolicyRetriesFailing",service="network-services",team="delivery"}'
+        value: 1
+      - labels: '{alertname="ActivityPolicyEventProcessingErrors",service="network-services",team="delivery"}'
+        value: 1
+  - name: missing ownership never suppresses failures or inherits processor service
+    interval: 1m
+    input_series:
+    - series: activity_processor_dlq_events_published_total{cluster="production",namespace="activity-system",policy_name="httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",service="activity-processor"}
+      values: 0+60x180
+    - series: activity_processor_dlq_retry_failed_total{cluster="production",namespace="activity-system",policy_name="httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",service="activity-processor"}
+      values: 0+60x180
+    - series: activity_processor_dlq_retry_events_high_retry_total{cluster="production",namespace="activity-system",policy_name="httpproxy",api_group="networking.datumapis.com",kind="HTTPProxy",error_type="cel_summary",service="activity-processor"}
+      values: 0+60x180
+    promql_expr_test:
+    - expr: count by (alertname, service, team) (ALERTS{alertstate="firing"})
+      eval_time: 130m
+      exp_samples:
+      - labels: '{alertname="ActivityPolicyFailuresHigh",team="sre"}'
+        value: 1
+      - labels: '{alertname="ActivityPolicyHighRetryCount",team="sre"}'
+        value: 1
+      - labels: '{alertname="ActivityPolicyFailuresRecurring",team="sre"}'
+        value: 1
+      - labels: '{alertname="ActivityPolicyRetriesFailing",team="sre"}'
+        value: 1
+      - labels: '{alertname="ActivityPolicyEventProcessingErrors",team="sre"}'
+        value: 1

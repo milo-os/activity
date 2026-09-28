@@ -521,6 +521,7 @@ func (p *Processor) Start(ctx context.Context) error {
 			dlqConfig.StreamName,
 			dlqConfig.SubjectPrefix,
 			p.reEvaluateDeadLetter,
+			p.policyCache.Generation,
 		)
 
 		p.wg.Add(1)

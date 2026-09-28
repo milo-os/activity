@@ -147,7 +147,9 @@ func (r *ActivityPolicyReconciler) updatePolicyStatus(ctx context.Context, polic
 		if c.Type == condition.Type &&
 			c.Status == condition.Status &&
 			c.Reason == condition.Reason &&
-			c.Message == condition.Message {
+			c.Message == condition.Message &&
+			c.ObservedGeneration == condition.ObservedGeneration &&
+			policy.Status.ObservedGeneration == policy.Generation {
 			// Condition already matches, no update needed
 			return nil
 		}
@@ -157,6 +159,10 @@ func (r *ActivityPolicyReconciler) updatePolicyStatus(ctx context.Context, polic
 	found := false
 	for i, c := range policy.Status.Conditions {
 		if c.Type == condition.Type {
+			// Revalidating a new generation is not a readiness transition.
+			if c.Status == condition.Status {
+				condition.LastTransitionTime = c.LastTransitionTime
+			}
 			policy.Status.Conditions[i] = condition
 			found = true
 			break

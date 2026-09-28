@@ -3,6 +3,7 @@ package eventexporter
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -20,8 +21,11 @@ import (
 func TestExporter_ResolveScope(t *testing.T) {
 	scopedNamespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   "scoped-ns",
-			Labels: map[string]string{upstreamClusterNameLabel: "cluster-my-project"},
+			Name: "scoped-ns",
+			Labels: map[string]string{
+				upstreamClusterNameLabel: "cluster-my-project",
+				upstreamNamespaceLabel:   "default",
+			},
 		},
 	}
 	unscopedNamespace := &corev1.Namespace{
@@ -29,39 +33,57 @@ func TestExporter_ResolveScope(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		planeType     string
-		namespace     string
-		wantScopeType string
-		wantScopeName string
-		wantUnscoped  bool
+		name         string
+		planeType    string
+		namespace    string
+		wantScope    eventScope
+		wantUnscoped bool
+		// wantAnnotations is what stampScope writes for the same resolution.
+		wantAnnotations map[string]string
 	}{
 		{
-			name:          "management deployment: always uses static flags",
-			planeType:     "management",
-			namespace:     "unscoped-ns",
-			wantScopeType: "organization",
-			wantScopeName: "dev-org",
+			name:      "management deployment: always uses static flags",
+			planeType: "management",
+			namespace: "unscoped-ns",
+			wantScope: eventScope{Type: "organization", Name: "dev-org"},
+			wantAnnotations: map[string]string{
+				types.ScopeTypeAnnotation: "organization",
+				types.ScopeNameAnnotation: "dev-org",
+			},
 		},
 		{
-			name:          "empty plane type: treated as management",
-			planeType:     "",
-			namespace:     "scoped-ns",
-			wantScopeType: "organization",
-			wantScopeName: "dev-org",
+			name:      "empty plane type: treated as management",
+			planeType: "",
+			namespace: "scoped-ns",
+			wantScope: eventScope{Type: "organization", Name: "dev-org"},
+			// The namespace carries upstream labels, but the management path
+			// never reads them, so no upstream namespace annotation.
+			wantAnnotations: map[string]string{
+				types.ScopeTypeAnnotation: "organization",
+				types.ScopeNameAnnotation: "dev-org",
+			},
 		},
 		{
-			name:          "edge deployment, namespace resolves: uses recovered project scope",
-			planeType:     planeTypeEdge,
-			namespace:     "scoped-ns",
-			wantScopeType: scopeTypeProject,
-			wantScopeName: "my-project",
+			name:      "edge deployment, namespace resolves: uses recovered project scope",
+			planeType: planeTypeEdge,
+			namespace: "scoped-ns",
+			wantScope: eventScope{Type: types.TenantTypeProject, Name: "my-project", Namespace: "default"},
+			wantAnnotations: map[string]string{
+				types.ScopeTypeAnnotation:      types.TenantTypeProject,
+				types.ScopeNameAnnotation:      "my-project",
+				types.ScopeNamespaceAnnotation: "default",
+			},
 		},
 		{
 			name:         "edge deployment, namespace does not resolve: unscoped",
 			planeType:    planeTypeEdge,
 			namespace:    "unscoped-ns",
 			wantUnscoped: true,
+			// Present and empty, not omitted.
+			wantAnnotations: map[string]string{
+				types.ScopeTypeAnnotation: "",
+				types.ScopeNameAnnotation: "",
+			},
 		},
 	}
 
@@ -75,24 +97,31 @@ func TestExporter_ResolveScope(t *testing.T) {
 			}
 
 			before := testutil.ToFloat64(unscopedEvents)
-			gotType, gotName := exporter.resolveScope(tt.namespace)
+			got := exporter.resolveScope(tt.namespace)
 			after := testutil.ToFloat64(unscopedEvents)
 
 			if tt.wantUnscoped {
-				if gotType != "" || gotName != "" {
-					t.Errorf("resolveScope() = (%q, %q), want unscoped (\"\", \"\")", gotType, gotName)
+				if got != (eventScope{}) {
+					t.Errorf("resolveScope() = %+v, want the zero eventScope", got)
 				}
 				if after != before+1 {
 					t.Errorf("unscopedEvents counter did not increment: before=%v after=%v", before, after)
 				}
-				return
+			} else {
+				if got != tt.wantScope {
+					t.Errorf("resolveScope() = %+v, want %+v", got, tt.wantScope)
+				}
+				if after != before {
+					t.Errorf("unscopedEvents counter incremented unexpectedly: before=%v after=%v", before, after)
+				}
 			}
 
-			if gotType != tt.wantScopeType || gotName != tt.wantScopeName {
-				t.Errorf("resolveScope() = (%q, %q), want (%q, %q)", gotType, gotName, tt.wantScopeType, tt.wantScopeName)
-			}
-			if after != before {
-				t.Errorf("unscopedEvents counter incremented unexpectedly: before=%v after=%v", before, after)
+			// stampScope resolves again, so it must follow every counter check.
+			annotations := map[string]string{}
+			exporter.stampScope(annotations, tt.namespace)
+
+			if !reflect.DeepEqual(annotations, tt.wantAnnotations) {
+				t.Errorf("stampScope() wrote %v, want %v", annotations, tt.wantAnnotations)
 			}
 		})
 	}

@@ -7,6 +7,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+
+	"go.miloapis.com/activity/internal/types"
 )
 
 func TestUpstreamClusterNameFromLabel(t *testing.T) {
@@ -56,12 +58,11 @@ func newNamespaceLister(namespaces ...*corev1.Namespace) corelisters.NamespaceLi
 
 func TestNamespaceScopeResolver(t *testing.T) {
 	tests := []struct {
-		name          string
-		lookupName    string
-		namespaces    []*corev1.Namespace
-		wantScopeType string
-		wantScopeName string
-		wantOK        bool
+		name       string
+		lookupName string
+		namespaces []*corev1.Namespace
+		wantScope  eventScope
+		wantOK     bool
 	}{
 		{
 			name:       "namespace not found: unscoped",
@@ -70,35 +71,70 @@ func TestNamespaceScopeResolver(t *testing.T) {
 		},
 		{
 			name:       "namespace with no labels: unscoped",
-			lookupName: "default",
+			lookupName: "ns-abc",
 			namespaces: []*corev1.Namespace{
-				{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "ns-abc"}},
 			},
 			wantOK: false,
 		},
 		{
-			name:       "namespace with empty upstream label: unscoped",
-			lookupName: "default",
+			name:       "namespace with empty upstream cluster label: unscoped",
+			lookupName: "ns-abc",
 			namespaces: []*corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{
-					Name:   "default",
-					Labels: map[string]string{upstreamClusterNameLabel: ""},
+					Name: "ns-abc",
+					Labels: map[string]string{
+						upstreamClusterNameLabel: "",
+						upstreamNamespaceLabel:   "default",
+					},
 				}},
 			},
 			wantOK: false,
 		},
 		{
-			name:       "namespace with upstream label: resolves project scope",
-			lookupName: "default",
+			name:       "namespace without upstream namespace label: unscoped",
+			lookupName: "ns-abc",
 			namespaces: []*corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{
-					Name:   "default",
+					Name:   "ns-abc",
 					Labels: map[string]string{upstreamClusterNameLabel: "cluster-my-project"},
 				}},
 			},
-			wantScopeType: scopeTypeProject,
-			wantScopeName: "my-project",
-			wantOK:        true,
+			wantOK: false,
+		},
+		{
+			name:       "namespace with empty upstream namespace label: unscoped",
+			lookupName: "ns-abc",
+			namespaces: []*corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{
+					Name: "ns-abc",
+					Labels: map[string]string{
+						upstreamClusterNameLabel: "cluster-my-project",
+						upstreamNamespaceLabel:   "",
+					},
+				}},
+			},
+			wantOK: false,
+		},
+		{
+			name:       "namespace with both upstream labels: resolves project scope and upstream namespace",
+			lookupName: "ns-abc",
+			namespaces: []*corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{
+					Name: "ns-abc",
+					Labels: map[string]string{
+						upstreamClusterNameLabel: "cluster-my-project",
+						upstreamNamespaceLabel:   "default",
+					},
+				}},
+			},
+			wantScope: eventScope{
+				// Canonical, matching what the audit path emits.
+				Type:      types.TenantTypeProject,
+				Name:      "my-project",
+				Namespace: "default",
+			},
+			wantOK: true,
 		},
 	}
 
@@ -106,15 +142,18 @@ func TestNamespaceScopeResolver(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := newNamespaceScopeResolver(newNamespaceLister(tt.namespaces...))
 
-			gotType, gotName, gotOK := resolver.Resolve(tt.lookupName)
+			got, gotOK := resolver.Resolve(tt.lookupName)
 			if gotOK != tt.wantOK {
 				t.Fatalf("Resolve() ok = %v, want %v", gotOK, tt.wantOK)
 			}
 			if !gotOK {
+				if got != (eventScope{}) {
+					t.Errorf("Resolve() = %+v on failure, want the zero eventScope", got)
+				}
 				return
 			}
-			if gotType != tt.wantScopeType || gotName != tt.wantScopeName {
-				t.Errorf("Resolve() = (%q, %q), want (%q, %q)", gotType, gotName, tt.wantScopeType, tt.wantScopeName)
+			if got != tt.wantScope {
+				t.Errorf("Resolve() = %+v, want %+v", got, tt.wantScope)
 			}
 		})
 	}

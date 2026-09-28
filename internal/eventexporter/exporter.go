@@ -344,17 +344,30 @@ type Exporter struct {
 // don't name a real tenant; it recovers the tenant per event instead, and
 // emits unscoped - rather than misattributing to whatever the flags happen
 // to hold - when recovery fails.
-func (e *Exporter) resolveScope(namespace string) (scopeType, scopeName string) {
+func (e *Exporter) resolveScope(namespace string) eventScope {
 	if e.planeType != planeTypeEdge || e.scope == nil {
-		return e.scopeType, e.scopeName
+		return eventScope{Type: e.scopeType, Name: e.scopeName}
 	}
 
-	if scopeType, scopeName, ok := e.scope.Resolve(namespace); ok {
-		return scopeType, scopeName
+	if scope, ok := e.scope.Resolve(namespace); ok {
+		return scope
 	}
 
 	unscopedEvents.Inc()
-	return "", ""
+	return eventScope{}
+}
+
+// stampScope writes the tenant scope annotations for an event published from
+// namespace. The upstream namespace is stamped only when recovered, leaving
+// management-plane events unchanged.
+func (e *Exporter) stampScope(annotations map[string]string, namespace string) {
+	scope := e.resolveScope(namespace)
+
+	annotations[types.ScopeTypeAnnotation] = scope.Type
+	annotations[types.ScopeNameAnnotation] = scope.Name
+	if scope.Namespace != "" {
+		annotations[types.ScopeNamespaceAnnotation] = scope.Namespace
+	}
 }
 
 // sourceAnnotations returns this cell's plane type, cluster, region, and
@@ -453,9 +466,7 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 		eventCopy.Annotations = make(map[string]string)
 	}
 
-	scopeType, scopeName := e.resolveScope(event.Namespace)
-	eventCopy.Annotations[types.ScopeTypeAnnotation] = scopeType
-	eventCopy.Annotations[types.ScopeNameAnnotation] = scopeName
+	e.stampScope(eventCopy.Annotations, event.Namespace)
 
 	planeType, cluster, region, city := e.sourceAnnotations()
 	eventCopy.Annotations[types.SourcePlaneTypeAnnotation] = planeType

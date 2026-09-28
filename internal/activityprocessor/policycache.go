@@ -560,3 +560,17 @@ func (c *PolicyCache) MatchEvent(apiGroup, kind string, eventMap map[string]any)
 
 	return nil, nil
 }
+
+// Generation returns the current active policy generation, or zero if absent.
+func (c *PolicyCache) Generation(name string) int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, policies := range c.policies {
+		for _, policy := range policies {
+			if policy.Name == name {
+				return policy.OriginalPolicy.Generation
+			}
+		}
+	}
+	return 0
+}

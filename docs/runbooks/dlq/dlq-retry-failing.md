@@ -76,3 +76,23 @@ the same payload against an unchanged policy.
 Escalate policy evaluation errors to the policy owner. Escalate unexpected
 processor behavior to the Activity maintainers. A processor or NATS delivery
 failure requires separate investigation; this alert does not measure it.
+
+## Recovery after a policy fix
+
+Policy spec changes increment `metadata.generation`. The retry worker compares
+that generation with the version recorded in each failed event and bypasses
+its old backoff when a newer active policy is available. An event that fails
+again records the attempted generation and resumes normal exponential backoff;
+metadata and status updates do not count as policy fixes.
+
+Broker redelivery delays are capped at the retry polling interval (five minutes
+by default), so the periodic worker can notice a policy fix even if the
+immediate policy-update scan missed a delayed message or the processor restarted.
+Allow the next polling cycles for recovery, and verify actual retry outcomes.
+
+Roll out both the API server (generation tracking) and processor (retry changes).
+Messages already delayed by the previous processor keep their existing NATS
+redelivery deadline. Those need to reach that deadline or undergo a targeted
+replay; changing the polling interval or restarting the processor does not
+clear an existing broker timer. Preserve any failed events until recovery is
+verified, and retain events that still fail evaluation.

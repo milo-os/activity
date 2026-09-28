@@ -145,6 +145,10 @@ type DLQRetryController struct {
 	// only reports that events were republished.
 	evaluator RetryEvaluator
 
+	// policyGeneration reads the active cache. Set before Start; unlike a
+	// transient policy-update scan it also survives processor restarts.
+	policyGeneration func(string) int64
+
 	auditStreamName  string
 	eventStreamName  string
 	dlqStreamName    string
@@ -238,7 +242,11 @@ func (c *DLQRetryController) periodicRetry(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	runDeadline := time.Now().Add(maxPeriodicRunDuration)
+	runDuration := maxPeriodicRunDuration
+	if c.config.Interval < runDuration {
+		runDuration = c.config.Interval
+	}
+	runDeadline := time.Now().Add(runDuration)
 
 	var totalProcessed, totalSucceeded, totalFailed int
 	runStart := time.Now()
@@ -492,10 +500,23 @@ func (c *DLQRetryController) processRetryBatch(ctx context.Context, trigger stri
 						delay = d
 					}
 				}
+				// Revisit the cached policy on a later poll even when event
+				// backoff is long. Broker delays must not hide policy fixes.
+				if delay > c.config.Interval {
+					delay = c.config.Interval
+				}
 				if nakErr := msg.NakWithDelay(delay); nakErr != nil {
 					klog.ErrorS(nakErr, "Failed to NAK DLQ message")
 				}
 				continue
+			}
+		}
+
+		// Record the version used for this attempt, including failed retries.
+		// Otherwise a failure under the new policy bypasses backoff forever.
+		if c.policyGeneration != nil {
+			if generation := c.policyGeneration(dlEvent.PolicyName); generation > dlEvent.PolicyVersion {
+				dlEvent.PolicyVersion = generation
 			}
 		}
 
@@ -607,6 +628,9 @@ func (c *DLQRetryController) handleReEvaluationFailure(
 
 // isEligibleForRetry checks if an event's backoff has expired.
 func (c *DLQRetryController) isEligibleForRetry(event *processor.DeadLetterEvent, now time.Time) bool {
+	if c.policyGeneration != nil && c.policyGeneration(event.PolicyName) > event.PolicyVersion {
+		return true
+	}
 	// First retry is always eligible
 	if event.NextRetryAfter == nil {
 		return true

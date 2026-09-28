@@ -518,6 +518,7 @@ func (p *Processor) Start(ctx context.Context) error {
 			dlqConfig.SubjectPrefix,
 			p.reEvaluateDeadLetter,
 		)
+		p.dlqRetryController.policyGeneration = p.policyCache.Generation
 
 		p.wg.Add(1)
 		go func() {

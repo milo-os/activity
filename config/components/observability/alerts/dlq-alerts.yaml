@@ -16,7 +16,7 @@ spec:
       interval: 30s
       rules:
         # DLQ Growing - Queue Not Draining
-        - alert: DLQQueueGrowing
+        - alert: ActivityPolicyFailuresHigh
           expr: |
             rate(activity_processor_dlq_events_published_total[5m]) > 0.1
             AND
@@ -27,13 +27,13 @@ spec:
             component: activity-processor
             team: sre
           annotations:
-            summary: "DLQ is growing - messages not being processed"
-            description: "DLQ is receiving {{ $value }} events/sec for 15+ minutes. Events are failing processing faster than retry can handle."
-            impact: "Failed events accumulating - may indicate systematic policy issue or processor problem"
+            summary: "Activity policy{{ if $labels.policy_name }} {{ $labels.policy_name }}{{ end }} is failing to generate activities"
+            description: "Activity processing{{ if $labels.cluster }} on {{ $labels.cluster }}{{ end }} is sending {{ $value }} {{ $labels.event_type }} events/sec for {{ $labels.api_group }}/{{ $labels.kind }} to the dead-letter queue after {{ $labels.error_type }} failures. This rate has persisted for 15 minutes. Check the activity policy and processor logs for the failing rule and event payload."
+            impact: "Affected events are not producing activity entries; timelines may be incomplete until the failures are resolved and events recover."
             runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-growth.md"
 
         # DLQ Publish Errors
-        - alert: DLQPublishErrors
+        - alert: ActivityPolicyFailedEventsNotRetained
           expr: rate(activity_processor_dlq_publish_errors_total[5m]) > 0.1
           for: 10m
           labels:
@@ -41,13 +41,13 @@ spec:
             component: activity-processor
             team: sre
           annotations:
-            summary: "Failed to publish events to DLQ"
-            description: "{{ $value }} DLQ publish errors/sec. Events may be lost entirely."
-            impact: "Failed events not being captured - complete data loss for affected events"
+            summary: "Events that failed activity processing cannot be saved for retry"
+            description: "The activity processor{{ if $labels.cluster }} on {{ $labels.cluster }}{{ end }} reports {{ $value }} errors/sec while saving failed {{ $labels.event_type }} events to the dead-letter queue (phase: {{ $labels.error_phase }}). Check processor logs and queue connectivity so events that failed activity policy processing can be retained for retry."
+            impact: "Affected events may be unavailable for automatic retry, leaving gaps in activity timelines."
             runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-publish-errors.md"
 
         # High Retry Count Events
-        - alert: DLQHighRetryCount
+        - alert: ActivityPolicyHighRetryCount
           expr: |
             increase(activity_processor_dlq_retry_events_high_retry_total[1h]) > 10
           for: 1h
@@ -56,13 +56,13 @@ spec:
             component: activity-processor
             team: sre
           annotations:
-            summary: "DLQ events with excessive retry attempts"
-            description: "{{ $value }} events have exceeded the high retry threshold for {{ $labels.api_group }}/{{ $labels.kind }}."
-            impact: "Events failing persistently - policy or cluster issue preventing recovery"
+            summary: "Activity policy{{ if $labels.policy_name }} {{ $labels.policy_name }}{{ end }} events keep failing retries"
+            description: "Activity policy retries{{ if $labels.cluster }} on {{ $labels.cluster }}{{ end }} for {{ $labels.api_group }}/{{ $labels.kind }} recorded {{ $value }} failures at or above the high retry threshold in the last hour. The count can include repeated attempts for the same event. Check the policy and processor logs for persistent evaluation or delivery failures."
+            impact: "Affected events remain without activity entries despite repeated retries."
             runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-high-retry-count.md"
 
         # DLQ slow-leak - low-rate but persistent failures
-        - alert: DLQSlowLeak
+        - alert: ActivityPolicyFailuresRecurring
           expr: |
             increase(activity_processor_dlq_events_published_total[6h]) > 10
           for: 1h
@@ -71,9 +71,9 @@ spec:
             component: activity-processor
             team: sre
           annotations:
-            summary: "DLQ receiving events at a slow but steady rate"
-            description: "{{ $value }} events sent to DLQ in the last 6 hours. A policy may be failing for specific event shapes."
-            impact: "Some activities silently not being generated"
+            summary: "Activity policy{{ if $labels.policy_name }} {{ $labels.policy_name }}{{ end }} has recurring activity generation failures"
+            description: "Activity processing{{ if $labels.cluster }} on {{ $labels.cluster }}{{ end }} sent {{ $value }} {{ $labels.event_type }} events for {{ $labels.api_group }}/{{ $labels.kind }} to the dead-letter queue in the last 6 hours with {{ $labels.error_type }} errors. Inspect the activity policy and failed payloads for event shapes its rules do not handle."
+            impact: "Some events are not producing activity entries, leaving gaps in activity timelines."
             runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-growth.md"
 
     # =========================================================================
@@ -82,23 +82,23 @@ spec:
     - name: dlq-retry
       interval: 60s
       rules:
-        # Retry Not Succeeding
-        - alert: DLQRetryIneffective
+        # Repeated policy re-evaluation failures. The attempts counter has no
+        # policy_name label, so it cannot provide a per-policy success ratio.
+        - alert: ActivityPolicyRetriesFailing
           expr: |
-            (
-              sum(rate(activity_processor_dlq_retry_attempts_total{result="failed"}[15m]))
-              /
-              sum(rate(activity_processor_dlq_retry_attempts_total[15m]))
-            ) > 0.8
+            sum by (cluster, namespace, policy_name, api_group, kind, error_type) (
+              increase(activity_processor_dlq_retry_failed_total{policy_name!=""}[1h])
+            ) >= 3
           for: 30m
           labels:
             severity: warning
             component: activity-processor
             team: sre
+            subject: "{{ $labels.policy_name }}"
           annotations:
-            summary: "DLQ retry success rate is low"
-            description: "{{ $value | humanizePercentage }} of retry attempts are failing. Events not recovering after retry."
-            impact: "Automatic retry not effective - manual intervention may be required"
+            summary: "Activity policy {{ $labels.policy_name }} keeps failing during retries"
+            description: "Activity policy {{ $labels.policy_name }} for {{ $labels.api_group }}/{{ $labels.kind }}{{ if $labels.cluster }} on {{ $labels.cluster }}{{ end }} recorded {{ $value | printf \"%.0f\" }} failed re-evaluations in the last hour with {{ $labels.error_type }} errors. The count has remained at three or more for 30 minutes. Affected events are not producing activity entries. Check activity-processor logs for this policy's failing rule and payload. This counts retry attempts, which may include the same event more than once."
+            impact: "Activity timelines remain incomplete for affected events because automatic retries are not recovering them."
             runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/dlq-retry-failing.md"
 
     # =========================================================================
@@ -108,7 +108,7 @@ spec:
       interval: 60s
       rules:
         # Policy Sending Events to DLQ
-        - alert: ActivityPolicyDLQErrors
+        - alert: ActivityPolicyEventProcessingErrors
           expr: |
             sum by (policy_name, api_group, kind, error_type) (
               rate(activity_processor_dlq_events_published_total{policy_name!=""}[10m])
@@ -117,8 +117,9 @@ spec:
           labels:
             severity: warning
             component: activity-processor
+            team: sre
           annotations:
-            summary: "ActivityPolicy {{ $labels.policy_name }} sending events to DLQ"
-            description: "Policy {{ $labels.policy_name }} for {{ $labels.api_group }}/{{ $labels.kind }} has {{ $value }} events/sec failing with {{ $labels.error_type }}."
-            impact: "Activities not being generated for this resource type - users see incomplete timeline"
+            summary: "Activity policy {{ $labels.policy_name }} is failing to generate activities"
+            description: "Activity policy {{ $labels.policy_name }} for {{ $labels.api_group }}/{{ $labels.kind }} is sending {{ $value }} events/sec to the dead-letter queue with {{ $labels.error_type }} errors. Check the policy's rules against failed event payloads in the activity-processor logs."
+            impact: "Affected events are not producing activity entries, leaving gaps in activity timelines."
             runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/dlq/policy-dlq-errors.md"

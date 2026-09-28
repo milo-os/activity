@@ -60,7 +60,7 @@ spec:
       targetMatch:
         - name: alertname
           matchType: "=~"
-          value: "ActivityGenerationStalled|ActivityProcessorHighErrorRate|ActivityProcessorNoPolicies|DLQPublishErrors|DLQRetryIneffective|DLQQueueGrowing|DLQSlowLeak"
+          value: "ActivityGenerationStalled|ActivityProcessorHighErrorRate|ActivityProcessorNoPolicies|ActivityPolicyFailedEventsNotRetained|ActivityPolicyRetriesFailing|ActivityPolicyFailuresHigh|ActivityPolicyFailuresRecurring"
 
     # NATS disconnected suppresses generation stalled
     - sourceMatch:

@@ -36,9 +36,21 @@ func TestDLQPolicyUpdateWakesDelayedEvent(t *testing.T) {
 	if time.Since(started) > 4*time.Second {
 		t.Fatal("policy fix remained hidden by broker backoff")
 	}
+	// ACK is asynchronous; observe the eventual broker state rather than
+	// assuming the message disappears before the retry method returns.
 	info, err := js.StreamInfo(testDLQStream)
-	if err != nil || info.State.Msgs != 0 {
-		t.Fatalf("DLQ did not drain: %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(2 * time.Second); info.State.Msgs != 0 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+		info, err = js.StreamInfo(testDLQStream)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if info.State.Msgs != 0 {
+		t.Fatalf("DLQ did not drain: %d messages remain", info.State.Msgs)
 	}
 }
 

@@ -1,6 +1,6 @@
-# DLQ Queue Growing
+# Activity Policy Processing Failures
 
-**Alert**: `DLQQueueGrowing`
+**Alerts**: `ActivityPolicyFailuresHigh`, `ActivityPolicyFailuresRecurring`
 **Severity**: Warning
 **Team**: Platform SRE
 

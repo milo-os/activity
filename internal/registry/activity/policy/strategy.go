@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -56,6 +57,7 @@ func (s activityPolicyStrategy) PrepareForCreate(ctx context.Context, obj runtim
 	policy := obj.(*activity.ActivityPolicy)
 	// Clear status on creation - it will be set by the controller
 	policy.Status = activity.ActivityPolicyStatus{}
+	policy.Generation = 1
 }
 
 // PrepareForUpdate preserves status when spec is updated.
@@ -64,6 +66,10 @@ func (s activityPolicyStrategy) PrepareForUpdate(ctx context.Context, obj, old r
 	oldPolicy := old.(*activity.ActivityPolicy)
 	// Preserve status - only the status subresource can update it
 	newPolicy.Status = oldPolicy.Status
+	newPolicy.Generation = oldPolicy.Generation
+	if !equality.Semantic.DeepEqual(newPolicy.Spec, oldPolicy.Spec) {
+		newPolicy.Generation++
+	}
 }
 
 // Validate validates a new ActivityPolicy.
@@ -261,6 +267,7 @@ func (s activityPolicyStatusStrategy) PrepareForUpdate(ctx context.Context, obj,
 	oldPolicy := old.(*activity.ActivityPolicy)
 	// Preserve spec, only allow status changes
 	newPolicy.Spec = oldPolicy.Spec
+	newPolicy.Generation = oldPolicy.Generation
 	newPolicy.ObjectMeta.Labels = oldPolicy.ObjectMeta.Labels
 	newPolicy.ObjectMeta.Annotations = oldPolicy.ObjectMeta.Annotations
 }

@@ -1,6 +1,6 @@
-# DLQ High Retry Count
+# Activity Policy Events Repeatedly Fail Retries
 
-**Alert**: `DLQHighRetryCount`
+**Alert**: `ActivityPolicyHighRetryCount`
 **Severity**: Warning
 **Team**: Platform SRE
 
@@ -104,6 +104,6 @@ After fixing the policy:
 
 ## Prevention
 
-- Set up alerts for policy CEL errors (ActivityPolicyDLQErrors)
+- Set up alerts for policy CEL errors (ActivityPolicyEventProcessingErrors)
 - Review high-retry events periodically to identify patterns
 - Ensure policies handle edge cases (DELETE, partial objects, etc.)

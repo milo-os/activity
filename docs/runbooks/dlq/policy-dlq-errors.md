@@ -1,6 +1,6 @@
-# ActivityPolicy DLQ Errors
+# Activity Policy Event Processing Errors
 
-**Alert**: `ActivityPolicyDLQErrors`
+**Alert**: `ActivityPolicyEventProcessingErrors`
 **Severity**: Warning
 **Team**: Policy owner (from policy annotation)
 

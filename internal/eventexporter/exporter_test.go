@@ -2,8 +2,11 @@ package eventexporter
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -339,28 +342,278 @@ func TestExporter_Enqueue(t *testing.T) {
 		}
 	})
 
-	t.Run("queue full: incoming event dropped, queued job kept", func(t *testing.T) {
-		exporter := &Exporter{queue: make(chan eventJob, 1)}
-		exporter.queue <- eventJob{event: &eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "sentinel"}}, eventType: "ADDED"}
+	t.Run("queue full: oldest event evicted, incoming event queued", func(t *testing.T) {
+		exporter := &Exporter{queue: make(chan eventJob, 2)}
+		exporter.queue <- eventJob{event: &eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "oldest"}}, eventType: "ADDED"}
+		exporter.queue <- eventJob{event: &eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "newer"}}, eventType: "ADDED"}
 
 		beforeDropped := testutil.ToFloat64(droppedEvents)
 		exporter.enqueue(&eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "incoming"}}, "ADDED")
 
 		if got := testutil.ToFloat64(droppedEvents); got != beforeDropped+1 {
-			t.Errorf("droppedEvents did not increment: before=%v after=%v", beforeDropped, got)
+			t.Errorf("droppedEvents delta = %v, want 1", got-beforeDropped)
 		}
-		if got := testutil.ToFloat64(queueDepth); got != 1 {
-			t.Errorf("queueDepth = %v, want 1", got)
-		}
-		if got := len(exporter.queue); got != 1 {
-			t.Errorf("len(queue) = %d, want 1", got)
+		if got := testutil.ToFloat64(queueDepth); got != 2 {
+			t.Errorf("queueDepth = %v, want 2", got)
 		}
 
-		queued := <-exporter.queue
-		if queued.event.Name != "sentinel" {
-			t.Errorf("queue kept %q, want the already-queued sentinel event", queued.event.Name)
+		var queued []string
+		for len(exporter.queue) > 0 {
+			queued = append(queued, (<-exporter.queue).event.Name)
+		}
+		if want := []string{"newer", "incoming"}; !reflect.DeepEqual(queued, want) {
+			t.Errorf("queue holds %v, want %v", queued, want)
 		}
 	})
+
+	// A queue with no capacity stands in for drainQueue emptying the queue
+	// between the failed send and the eviction: there is nothing to evict.
+	t.Run("nothing to evict: incoming event dropped without spinning", func(t *testing.T) {
+		exporter := &Exporter{queue: make(chan eventJob)}
+
+		beforeDropped := testutil.ToFloat64(droppedEvents)
+		exporter.enqueue(&eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "incoming"}}, "ADDED")
+
+		if got := testutil.ToFloat64(droppedEvents); got != beforeDropped+1 {
+			t.Errorf("droppedEvents delta = %v, want 1", got-beforeDropped)
+		}
+		if got := len(exporter.queue); got != 0 {
+			t.Errorf("len(queue) = %d, want 0", got)
+		}
+	})
+}
+
+// fakeFuture is a nats.PubAckFuture whose outcome is already decided.
+type fakeFuture struct {
+	ok  chan *nats.PubAck
+	err chan error
+	msg *nats.Msg
+}
+
+func newFakeFuture(subject string) *fakeFuture {
+	return &fakeFuture{
+		ok:  make(chan *nats.PubAck, 1),
+		err: make(chan error, 1),
+		msg: &nats.Msg{Subject: subject},
+	}
+}
+
+func ackedFuture(subject string) *fakeFuture {
+	f := newFakeFuture(subject)
+	f.ok <- &nats.PubAck{Stream: "ACTIVITY_EVENTS"}
+	return f
+}
+
+func failedFuture(subject string, err error) *fakeFuture {
+	f := newFakeFuture(subject)
+	f.err <- err
+	return f
+}
+
+func (f *fakeFuture) Ok() <-chan *nats.PubAck { return f.ok }
+func (f *fakeFuture) Err() <-chan error       { return f.err }
+func (f *fakeFuture) Msg() *nats.Msg          { return f.msg }
+
+// fakeJetStream records asynchronous publishes. The embedded interface is nil,
+// so any method the exporter does not use panics instead of quietly passing.
+type fakeJetStream struct {
+	nats.JetStreamContext
+
+	mu        sync.Mutex
+	published []fakePublish
+	err       error
+	// future decides each publish's outcome; nil means an immediate ack.
+	future func(subject string) nats.PubAckFuture
+}
+
+type fakePublish struct {
+	subject string
+	data    []byte
+	opts    int
+}
+
+func (f *fakeJetStream) PublishAsync(subject string, data []byte, opts ...nats.PubOpt) (nats.PubAckFuture, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.published = append(f.published, fakePublish{subject: subject, data: data, opts: len(opts)})
+	if f.future != nil {
+		return f.future(subject), nil
+	}
+	return ackedFuture(subject), nil
+}
+
+func (f *fakeJetStream) publishes() []fakePublish {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakePublish(nil), f.published...)
+}
+
+// TestExporter_PublishEvent covers the publish seam and the ack that resolves
+// it. The PubOpts carrying nats.MsgId are opaque outside package nats, so the
+// dedup ID they carry is covered by TestExporter_QualifiedMsgID instead.
+// Subtests bracket shared counters, so they must not run in parallel.
+func TestExporter_PublishEvent(t *testing.T) {
+	newExporter := func(js nats.JetStreamContext) *Exporter {
+		return &Exporter{
+			js:            js,
+			subjectPrefix: "activity.federated",
+			scopeType:     "organization",
+			scopeName:     "dev-org",
+			clusterName:   "cluster-dfw-1",
+			clusterRegion: "us-central-1",
+			queue:         make(chan eventJob, 1),
+		}
+	}
+	event := &eventsv1.Event{
+		ObjectMeta: metav1.ObjectMeta{Name: "event-a", Namespace: "default", UID: "a1b2c3"},
+		Reason:     "Created",
+	}
+
+	t.Run("returns before the ack arrives", func(t *testing.T) {
+		pending := newFakeFuture("activity.federated.default")
+		js := &fakeJetStream{future: func(string) nats.PubAckFuture { return pending }}
+		exporter := newExporter(js)
+
+		if err := exporter.publishEvent(event, "ADDED"); err != nil {
+			t.Fatalf("publishEvent() = %v, want nil", err)
+		}
+
+		published := js.publishes()
+		if len(published) != 1 {
+			t.Fatalf("got %d publishes, want 1", len(published))
+		}
+		if want := "activity.federated.default"; published[0].subject != want {
+			t.Errorf("subject = %q, want %q", published[0].subject, want)
+		}
+		// nats.MsgId for dedup and nats.StallWait for the in-flight window.
+		if published[0].opts != 2 {
+			t.Errorf("passed %d PubOpts, want 2", published[0].opts)
+		}
+
+		var decoded eventsv1.Event
+		if err := json.Unmarshal(published[0].data, &decoded); err != nil {
+			t.Fatalf("unmarshal published event: %v", err)
+		}
+		if got := decoded.Annotations[types.ScopeNameAnnotation]; got != "dev-org" {
+			t.Errorf("published scope name = %q, want %q", got, "dev-org")
+		}
+
+		pending.ok <- &nats.PubAck{Stream: "ACTIVITY_EVENTS"}
+		exporter.inFlight.Wait()
+	})
+
+	t.Run("publish call fails: counted, nothing left in flight", func(t *testing.T) {
+		exporter := newExporter(&fakeJetStream{err: errors.New("too many stalled messages")})
+
+		before := testutil.ToFloat64(publishErrors)
+		if err := exporter.publishEvent(event, "ADDED"); err == nil {
+			t.Fatal("publishEvent() = nil, want an error")
+		}
+		if got := testutil.ToFloat64(publishErrors); got != before+1 {
+			t.Errorf("publishErrors delta = %v, want 1", got-before)
+		}
+	})
+
+	// awaitAck resolves a publish whose job has already left the queue, so a
+	// failed ack is counted and dropped, never re-enqueued. Each row uses its
+	// own reason label to keep the eventsPublished brackets independent.
+	ackTests := []struct {
+		name      string
+		future    nats.PubAckFuture
+		reason    string
+		wantAcked bool
+	}{
+		{
+			name:      "ack arrives: publish counted",
+			future:    ackedFuture("activity.federated.default"),
+			reason:    "AckOK",
+			wantAcked: true,
+		},
+		{
+			name:   "ack reports a failure: publish error counted",
+			future: failedFuture("activity.federated.default", errors.New("wrong last sequence")),
+			reason: "AckFailed",
+		},
+	}
+
+	for _, tt := range ackTests {
+		t.Run(tt.name, func(t *testing.T) {
+			exporter := &Exporter{queue: make(chan eventJob, 1)}
+			published := eventsPublished.WithLabelValues("default", tt.reason)
+
+			beforePublished := testutil.ToFloat64(published)
+			beforeErrors := testutil.ToFloat64(publishErrors)
+
+			exporter.awaitAck(tt.future, pendingAck{
+				start:     time.Now(),
+				namespace: "default",
+				name:      "event-a",
+				reason:    tt.reason,
+				eventType: "ADDED",
+			})
+
+			wantPublished, wantErrors := 0.0, 1.0
+			if tt.wantAcked {
+				wantPublished, wantErrors = 1, 0
+			}
+			if got := testutil.ToFloat64(published) - beforePublished; got != wantPublished {
+				t.Errorf("eventsPublished delta = %v, want %v", got, wantPublished)
+			}
+			if got := testutil.ToFloat64(publishErrors) - beforeErrors; got != wantErrors {
+				t.Errorf("publishErrors delta = %v, want %v", got, wantErrors)
+			}
+			if got := len(exporter.queue); got != 0 {
+				t.Errorf("len(queue) = %d, want 0: a failed ack must not be re-enqueued", got)
+			}
+		})
+	}
+}
+
+// TestExporter_DrainQueueAwaitsAcks covers shutdown: drainQueue must not return
+// while a publish is still waiting for its ack.
+func TestExporter_DrainQueueAwaitsAcks(t *testing.T) {
+	pending := newFakeFuture("activity.federated.default")
+	published := make(chan struct{})
+	exporter := &Exporter{
+		js: &fakeJetStream{future: func(string) nats.PubAckFuture {
+			close(published)
+			return pending
+		}},
+		subjectPrefix: "activity.federated",
+		queue:         make(chan eventJob, 1),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	exporter.enqueue(&eventsv1.Event{
+		ObjectMeta: metav1.ObjectMeta{Name: "event-a", Namespace: "default", UID: "a1b2c3"},
+	}, "ADDED")
+
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		exporter.drainQueue(ctx)
+	}()
+
+	// Let the publish start, then shut down with its ack still outstanding.
+	<-published
+	cancel()
+
+	select {
+	case <-returned:
+		t.Fatal("drainQueue() returned while an ack was still outstanding")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	pending.ok <- &nats.PubAck{Stream: "ACTIVITY_EVENTS"}
+	select {
+	case <-returned:
+	case <-time.After(ackDrainTimeout):
+		t.Fatal("drainQueue() did not return after the ack arrived")
+	}
 }
 
 // applyNATSOptions resolves an option list the way nats.Connect does.

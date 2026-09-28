@@ -475,24 +475,7 @@ func (p *Processor) Start(ctx context.Context) error {
 			p.config.OutputStreamName, err)
 	}
 
-	// Initialize dead-letter queue publisher
-	dlqConfig := processor.DLQConfig{
-		Enabled:       p.config.DLQEnabled,
-		StreamName:    p.config.DLQStreamName,
-		SubjectPrefix: p.config.DLQSubjectPrefix,
-	}
-	if dlqConfig.Enabled {
-		// Verify DLQ stream exists
-		_, err = js.StreamInfo(dlqConfig.StreamName)
-		if err != nil {
-			klog.V(1).InfoS("DLQ stream not found, dead-letter queue will be disabled",
-				"stream", dlqConfig.StreamName,
-				"error", err,
-			)
-			dlqConfig.Enabled = false
-		}
-	}
-	p.dlqPublisher = processor.NewDLQPublisher(js, dlqConfig)
+	dlqConfig := p.initDLQPublisher()
 	if dlqConfig.Enabled {
 		klog.InfoS("Dead-letter queue enabled",
 			"stream", dlqConfig.StreamName,
@@ -500,8 +483,9 @@ func (p *Processor) Start(ctx context.Context) error {
 		)
 	}
 
-	// Initialize DLQ retry controller
-	if p.config.DLQRetryEnabled && dlqConfig.Enabled {
+	// Initialize DLQ retry controller. It republishes to input-side subjects,
+	// so it cannot run when the dead-letter stream lives on the output broker.
+	if p.config.DLQRetryEnabled && dlqConfig.Enabled && !p.config.usesSeparateOutputBroker() {
 		retryConfig := DLQRetryConfig{
 			Enabled:           p.config.DLQRetryEnabled,
 			Interval:          p.config.DLQRetryInterval,
@@ -598,6 +582,30 @@ func (p *Processor) Start(ctx context.Context) error {
 // empty stream name opts a deployment out of audit consumption entirely.
 func (p *Processor) auditConsumptionEnabled() bool {
 	return p.config.NATSStreamName != ""
+}
+
+// initDLQPublisher preflights the dead-letter stream and builds its publisher,
+// both on the output connection: the dead-letter stream lives on the broker
+// activities are published to.
+func (p *Processor) initDLQPublisher() processor.DLQConfig {
+	dlqConfig := processor.DLQConfig{
+		Enabled:       p.config.DLQEnabled,
+		StreamName:    p.config.DLQStreamName,
+		SubjectPrefix: p.config.DLQSubjectPrefix,
+	}
+
+	if dlqConfig.Enabled {
+		if _, err := p.outputJS.StreamInfo(dlqConfig.StreamName); err != nil {
+			klog.V(1).InfoS("DLQ stream not found, dead-letter queue will be disabled",
+				"stream", dlqConfig.StreamName,
+				"error", err,
+			)
+			dlqConfig.Enabled = false
+		}
+	}
+
+	p.dlqPublisher = processor.NewDLQPublisher(p.outputJS, dlqConfig)
+	return dlqConfig
 }
 
 // usesSeparateOutputBroker reports whether activities are published on their

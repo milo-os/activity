@@ -131,6 +131,7 @@ See the [API Reference](../api.md) for complete documentation.
 Dive deeper into specific areas of the system:
 
 - [Audit Pipeline](./audit-pipeline.md) — Audit log collection and storage
+- [Edge Audit Ingest](./edge-audit-ingest.md) — Audit logs from edge control planes
 - [Event Pipeline](./event-pipeline.md) — Event storage replacement
 - [Activity Pipeline](./activity-pipeline.md) — Activity translation and streaming
 - [Live Streaming](./live-streaming.md) — Real-time Watch API via NATS consumers

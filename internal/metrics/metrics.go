@@ -158,6 +158,81 @@ var (
 			Buckets:        metrics.DefBuckets,
 		},
 	)
+
+	// EdgeAuditEventsReceived counts audit events received from edge control planes
+	EdgeAuditEventsReceived = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Namespace:      namespace,
+			Name:           "edge_audit_events_received_total",
+			Help:           "Total audit events received from edge control planes",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"cluster"},
+	)
+
+	// EdgeAuditEventsEmitted counts audit events republished to NATS
+	EdgeAuditEventsEmitted = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Namespace:      namespace,
+			Name:           "edge_audit_events_emitted_total",
+			Help:           "Total edge audit events republished to the audit stream",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"cluster"},
+	)
+
+	// EdgeAuditEventsDropped counts audit events dropped without being emitted
+	EdgeAuditEventsDropped = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Namespace:      namespace,
+			Name:           "edge_audit_events_dropped_total",
+			Help:           "Total edge audit events dropped without being emitted, by reason",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"cluster", "reason"},
+	)
+
+	// EdgeAuditEventsRetried counts audit events the shipper was asked to resend
+	EdgeAuditEventsRetried = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Namespace:      namespace,
+			Name:           "edge_audit_events_retry_requested_total",
+			Help:           "Total edge audit events the shipper was asked to resend because namespace caches were cold",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"cluster"},
+	)
+
+	// EdgeAuditUnauthenticatedRequests counts rejected edge ingest requests
+	EdgeAuditUnauthenticatedRequests = metrics.NewCounter(
+		&metrics.CounterOpts{
+			Namespace:      namespace,
+			Name:           "edge_audit_unidentified_requests_total",
+			Help:           "Total edge audit ingest requests rejected because no cluster is registered for the client identity",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	// EdgeAuditNamespaceIndexSize tracks the retained downstream namespace index
+	EdgeAuditNamespaceIndexSize = metrics.NewGauge(
+		&metrics.GaugeOpts{
+			Namespace:      namespace,
+			Name:           "edge_audit_namespace_index_entries",
+			Help:           "Number of downstream namespaces the reverse lookup index retains",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
+
+	// EdgeAuditEmitLatencySeconds tracks NATS publish latency for edge audit events
+	EdgeAuditEmitLatencySeconds = metrics.NewHistogram(
+		&metrics.HistogramOpts{
+			Namespace:      namespace,
+			Name:           "edge_audit_emit_latency_seconds",
+			Help:           "Latency of NATS publish operations for edge audit events",
+			StabilityLevel: metrics.ALPHA,
+			Buckets:        metrics.DefBuckets,
+		},
+	)
 )
 
 // init registers all custom metrics with the legacy registry
@@ -177,5 +252,12 @@ func init() {
 		EventsPublishErrorsTotal,
 		EventsNATSConnectionStatus,
 		EventsPublishLatencySeconds,
+		EdgeAuditEventsReceived,
+		EdgeAuditEventsEmitted,
+		EdgeAuditEventsDropped,
+		EdgeAuditEventsRetried,
+		EdgeAuditUnauthenticatedRequests,
+		EdgeAuditNamespaceIndexSize,
+		EdgeAuditEmitLatencySeconds,
 	)
 }

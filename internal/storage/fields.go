@@ -18,6 +18,7 @@ var AuditLogFacetFields = map[string]string{
 	"objectRef.namespace": "The namespace of the target object",
 	"objectRef.resource":  "The resource type",
 	"objectRef.apiGroup":  "The API group of the target resource",
+	"location":            "The location the request was served from, for records originating outside the core control plane",
 }
 
 // IsValidAuditLogFacetField checks if a field is supported for audit log faceting.
@@ -57,6 +58,7 @@ var auditLogFacetColumnMapping = map[string]string{
 	"objectRef.namespace": "namespace",
 	"objectRef.resource":  "resource",
 	"objectRef.apiGroup":  "api_group",
+	"location":            "location",
 }
 
 // GetAuditLogFacetColumn returns the ClickHouse column name for an audit log facet field.

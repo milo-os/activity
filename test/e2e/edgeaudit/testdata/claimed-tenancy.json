@@ -1,0 +1,51 @@
+{
+  "kind": "EventList",
+  "apiVersion": "audit.k8s.io/v1",
+  "items": [
+    {
+      "kind": "Event",
+      "apiVersion": "audit.k8s.io/v1",
+      "level": "RequestResponse",
+      "auditID": "3f2504e0-4f89-11d3-9a0c-0305e82c3306",
+      "stage": "ResponseComplete",
+      "requestURI": "/api/v1/nodes/edge-worker-3",
+      "verb": "get",
+      "user": {
+        "username": "system:serviceaccount:compute-system:instance-controller",
+        "uid": "c0ffee00-0000-0000-0000-000000000001",
+        "groups": [
+          "system:serviceaccounts"
+        ],
+        "extra": {
+          "iam.miloapis.com/parent-type": [
+            "Project"
+          ],
+          "iam.miloapis.com/parent-name": [
+            "acme-prod"
+          ]
+        }
+      },
+      "sourceIPs": [
+        "10.42.0.11"
+      ],
+      "userAgent": "compute-controller/v1.4.2",
+      "responseStatus": {
+        "metadata": {},
+        "code": 200
+      },
+      "requestReceivedTimestamp": "2026-08-27T10:20:00.000000Z",
+      "stageTimestamp": "2026-08-27T10:20:00.000000Z",
+      "annotations": {
+        "authorization.k8s.io/decision": "allow",
+        "platform.miloapis.com/scope.type": "Project",
+        "platform.miloapis.com/scope.name": "acme-prod",
+        "locations.miloapis.com/location": "somewhere-else"
+      },
+      "objectRef": {
+        "resource": "nodes",
+        "name": "edge-worker-3",
+        "apiVersion": "v1"
+      }
+    }
+  ]
+}

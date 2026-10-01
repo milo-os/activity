@@ -50,7 +50,7 @@ func formatFilterError(err error) string {
 		msg.WriteString(fmt.Sprintf("Invalid filter: %s", errMsg))
 	}
 
-	msg.WriteString(". Available fields: auditID, verb, requestReceivedTimestamp, objectRef.namespace, objectRef.resource, objectRef.name, user.username, user.groups, responseStatus.code")
+	msg.WriteString(". Available fields: auditID, verb, requestReceivedTimestamp, objectRef.namespace, objectRef.resource, objectRef.name, user.username, user.groups, responseStatus.code, location")
 	msg.WriteString(". See https://cel.dev for CEL syntax")
 
 	return msg.String()

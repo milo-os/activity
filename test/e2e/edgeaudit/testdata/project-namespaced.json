@@ -1,0 +1,70 @@
+{
+  "kind": "EventList",
+  "apiVersion": "audit.k8s.io/v1",
+  "items": [
+    {
+      "kind": "Event",
+      "apiVersion": "audit.k8s.io/v1",
+      "level": "RequestResponse",
+      "auditID": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+      "stage": "ResponseComplete",
+      "requestURI": "/apis/compute.datumapis.com/v1alpha1/namespaces/ns-9f3c8a21-4c1b-4d0e-9a3f-2b1c7e5d8a90/instances/web-0/status",
+      "verb": "update",
+      "user": {
+        "username": "system:serviceaccount:compute-system:instance-controller",
+        "uid": "c0ffee00-0000-0000-0000-000000000001",
+        "groups": [
+          "system:serviceaccounts"
+        ]
+      },
+      "sourceIPs": [
+        "10.42.0.11"
+      ],
+      "userAgent": "compute-controller/v1.4.2",
+      "responseStatus": {
+        "metadata": {},
+        "code": 200
+      },
+      "requestReceivedTimestamp": "2026-08-27T10:15:00.123456Z",
+      "stageTimestamp": "2026-08-27T10:15:00.123456Z",
+      "annotations": {
+        "authorization.k8s.io/decision": "allow"
+      },
+      "objectRef": {
+        "resource": "instances",
+        "namespace": "ns-9f3c8a21-4c1b-4d0e-9a3f-2b1c7e5d8a90",
+        "name": "web-0",
+        "apiGroup": "compute.datumapis.com",
+        "apiVersion": "v1alpha1",
+        "subresource": "status"
+      },
+      "requestObject": {
+        "apiVersion": "compute.datumapis.com/v1alpha1",
+        "kind": "Instance",
+        "metadata": {
+          "name": "web-0",
+          "namespace": "ns-9f3c8a21-4c1b-4d0e-9a3f-2b1c7e5d8a90",
+          "labels": {
+            "compute.datumapis.com/workload-name": "web"
+          }
+        },
+        "status": {
+          "phase": "Running"
+        }
+      },
+      "responseObject": {
+        "apiVersion": "compute.datumapis.com/v1alpha1",
+        "kind": "Instance",
+        "metadata": {
+          "name": "web-0",
+          "namespace": "ns-9f3c8a21-4c1b-4d0e-9a3f-2b1c7e5d8a90",
+          "uid": "5c0ffee1-0000-4000-8000-000000000001",
+          "selfLink": "/apis/compute.datumapis.com/v1alpha1/namespaces/ns-9f3c8a21-4c1b-4d0e-9a3f-2b1c7e5d8a90/instances/web-0"
+        },
+        "status": {
+          "phase": "Running"
+        }
+      }
+    }
+  ]
+}

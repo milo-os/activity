@@ -61,6 +61,7 @@ AuditLogQuery resources accessible through kubectl or any Kubernetes client.`,
 	cmd.AddCommand(NewEventExporterCommand())
 	cmd.AddCommand(NewReindexWorkerCommand())
 	cmd.AddCommand(NewVersionCommand())
+	cmd.AddCommand(NewIngestCommand())
 	cmd.AddCommand(NewMCPCommand())
 
 	return cmd

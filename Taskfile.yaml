@@ -663,6 +663,12 @@ tasks:
       - chainsaw test test/e2e/ --config test/e2e/chainsaw-test.yaml
     silent: false
 
+  e2e:edge-audit:
+    desc: Run the edge audit ingest e2e suite (needs a container runtime for ClickHouse and NATS)
+    cmds:
+      - go test ./test/e2e/edgeaudit/ -count=1 -v
+    silent: false
+
   e2e:named-rules:
     desc: Run named rules e2e tests only
     cmds:

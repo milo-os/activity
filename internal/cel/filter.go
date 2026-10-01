@@ -61,6 +61,8 @@ func (m *AuditLogFieldMapper) MapIdentExpr(ident *expr.Expr_Ident) (string, erro
 		return "verb", nil
 	case "requestReceivedTimestamp":
 		return "timestamp", nil
+	case "location":
+		return "location", nil
 
 	case "objectRef", "user", "responseStatus":
 		return "", fmt.Errorf("field '%s' must be accessed with dot notation (e.g., objectRef.namespace, user.username, responseStatus.code)", ident.Name)
@@ -110,7 +112,7 @@ func (m *AuditLogFieldMapper) MapSelectExpr(sel *expr.Expr_Select) (string, erro
 
 // Environment creates a CEL environment for audit event filtering.
 //
-// Available fields: auditID, verb, requestReceivedTimestamp,
+// Available fields: auditID, verb, requestReceivedTimestamp, location,
 // objectRef.{namespace,resource,name,apiGroup}, user.{username,uid}, responseStatus.code
 //
 // Note: stageTimestamp is intentionally NOT available for filtering as it should
@@ -127,6 +129,7 @@ func Environment() (*cel.Env, error) {
 		cel.Variable("auditID", cel.StringType),
 		cel.Variable("verb", cel.StringType),
 		cel.Variable("requestReceivedTimestamp", cel.TimestampType),
+		cel.Variable("location", cel.StringType),
 
 		cel.Variable("objectRef", objectRefType),
 		cel.Variable("user", userType),

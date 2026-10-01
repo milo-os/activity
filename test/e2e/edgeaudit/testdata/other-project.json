@@ -1,0 +1,42 @@
+{
+  "kind": "EventList",
+  "apiVersion": "audit.k8s.io/v1",
+  "items": [
+    {
+      "kind": "Event",
+      "apiVersion": "audit.k8s.io/v1",
+      "level": "RequestResponse",
+      "auditID": "3f2504e0-4f89-11d3-9a0c-0305e82c3305",
+      "stage": "ResponseComplete",
+      "requestURI": "/apis/compute.datumapis.com/v1alpha1/namespaces/ns-aa11bb22-cc33-dd44-ee55-ff6677889900/instances",
+      "verb": "create",
+      "user": {
+        "username": "system:serviceaccount:compute-system:instance-controller",
+        "uid": "c0ffee00-0000-0000-0000-000000000001",
+        "groups": [
+          "system:serviceaccounts"
+        ]
+      },
+      "sourceIPs": [
+        "10.42.0.11"
+      ],
+      "userAgent": "compute-controller/v1.4.2",
+      "responseStatus": {
+        "metadata": {},
+        "code": 200
+      },
+      "requestReceivedTimestamp": "2026-08-27T10:19:00.000000Z",
+      "stageTimestamp": "2026-08-27T10:19:00.000000Z",
+      "annotations": {
+        "authorization.k8s.io/decision": "allow"
+      },
+      "objectRef": {
+        "resource": "instances",
+        "namespace": "ns-aa11bb22-cc33-dd44-ee55-ff6677889900",
+        "name": "api-0",
+        "apiGroup": "compute.datumapis.com",
+        "apiVersion": "v1alpha1"
+      }
+    }
+  ]
+}

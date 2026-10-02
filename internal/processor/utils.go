@@ -184,13 +184,6 @@ func getStringFromMap(m map[string]any, key string) string {
 	return ""
 }
 
-const (
-	// scopeTypeAnnotation is the annotation key carrying the tenant scope type.
-	scopeTypeAnnotation = "platform.miloapis.com/scope.type"
-	// scopeNameAnnotation is the annotation key carrying the tenant scope name.
-	scopeNameAnnotation = "platform.miloapis.com/scope.name"
-)
-
 // ExtractTenantFromAnnotations reads scope annotations from event metadata and
 // returns the corresponding ActivityTenant. Falls back to platform scope when
 // the type annotation is absent or empty.
@@ -200,29 +193,39 @@ func ExtractTenantFromAnnotations(eventMap map[string]any) v1alpha1.ActivityTena
 		Name: "",
 	}
 
-	if eventMap == nil {
-		return tenant
-	}
+	annotations := eventAnnotations(eventMap)
 
-	metadata, ok := eventMap["metadata"].(map[string]any)
-	if !ok {
-		return tenant
-	}
-
-	annotations, ok := metadata["annotations"].(map[string]any)
-	if !ok {
-		return tenant
-	}
-
-	scopeType := getStringFromMap(annotations, scopeTypeAnnotation)
-	scopeName := getStringFromMap(annotations, scopeNameAnnotation)
+	scopeType := getStringFromMap(annotations, types.ScopeTypeAnnotation)
+	scopeName := getStringFromMap(annotations, types.ScopeNameAnnotation)
 
 	if scopeType != "" {
-		tenant.Type = scopeType
+		// An edge cell's spelling of the scope type isn't guaranteed canonical.
+		tenant.Type = types.NormalizeTenantType(scopeType)
 		tenant.Name = scopeName
 	}
 
 	return tenant
+}
+
+// eventAnnotations returns an event's metadata annotations, nil when absent.
+func eventAnnotations(eventMap map[string]any) map[string]any {
+	metadata, ok := eventMap["metadata"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	annotations, _ := metadata["annotations"].(map[string]any)
+	return annotations
+}
+
+// resolveActivityNamespace returns the namespace an Activity built from event
+// is filed under, shared so both Event-to-Activity paths agree. A federated
+// event's own namespace is edge-local and doesn't exist in the serving control
+// plane, so the upstream namespace the exporter recorded wins when present.
+func resolveActivityNamespace(eventMap map[string]any, resourceObject map[string]any) string {
+	if upstream := getStringFromMap(eventAnnotations(eventMap), types.ScopeNamespaceAnnotation); upstream != "" {
+		return upstream
+	}
+	return getStringFromMap(resourceObject, "namespace")
 }
 
 // ExtractSourceFromAnnotations reads source-* annotations from event metadata
@@ -231,19 +234,7 @@ func ExtractTenantFromAnnotations(eventMap map[string]any) v1alpha1.ActivityTena
 func ExtractSourceFromAnnotations(eventMap map[string]any) v1alpha1.ActivitySource {
 	var source v1alpha1.ActivitySource
 
-	if eventMap == nil {
-		return source
-	}
-
-	metadata, ok := eventMap["metadata"].(map[string]any)
-	if !ok {
-		return source
-	}
-
-	annotations, ok := metadata["annotations"].(map[string]any)
-	if !ok {
-		return source
-	}
+	annotations := eventAnnotations(eventMap)
 
 	source.PlaneType = getStringFromMap(annotations, types.SourcePlaneTypeAnnotation)
 	source.Cluster = getStringFromMap(annotations, types.SourceClusterAnnotation)
@@ -283,10 +274,7 @@ func isFederatedSource(source v1alpha1.ActivitySource) bool {
 // Spec.Origin.ID is the column ReplacingMergeTree dedups on, and
 // activityName hashes it into metadata.name, so the two must never disagree.
 func qualifiedOriginID(source v1alpha1.ActivitySource, originID string) string {
-	if isFederatedSource(source) {
-		return source.PlaneType + "/" + source.Cluster + "/" + originID
-	}
-	return originID
+	return types.PrefixWithSource(source.PlaneType, source.Cluster, originID)
 }
 
 // resolveEventTimestamp extracts a timestamp from an event map, trying in

@@ -76,7 +76,7 @@ function getActorInitials(name: string): string {
 function getActorAvatarClasses(actorType: string, compact: boolean): string {
   const baseClasses = cn(
     "rounded-full flex items-center justify-center shrink-0 font-semibold",
-    compact ? "w-5 h-5 text-1xs" : "w-6 h-6 text-1xs",
+    compact ? "w-5 h-5 text-2xs" : "w-6 h-6 text-2xs",
   );
   switch (actorType) {
     case "user":

@@ -23,7 +23,9 @@ export function serializeActivityFilters(
     params.set('streaming', 'false');
   }
 
-  if (filters.changeSource && filters.changeSource !== 'human') {
+  // Written even when it matches a default: the default differs between
+  // pages, so an omitted value can't be read back as the one chosen.
+  if (filters.changeSource) {
     params.set('changeSource', filters.changeSource);
   }
 
@@ -110,10 +112,10 @@ export function parseActivityFilters(searchParams: URLSearchParams): Partial<Act
   const filters: Partial<ActivityFeedFilters> = {};
 
   const changeSource = searchParams.get('changeSource');
+  // Left unset when absent so the caller's default applies. Filling in
+  // 'human' here overrode pages that default to 'all'.
   if (changeSource === 'human' || changeSource === 'system' || changeSource === 'all') {
     filters.changeSource = changeSource;
-  } else {
-    filters.changeSource = 'human';
   }
 
   const actorNames = searchParams.get('actorNames');

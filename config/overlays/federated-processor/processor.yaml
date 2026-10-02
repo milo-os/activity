@@ -1,0 +1,195 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: activity-federated-processor
+  namespace: activity-nats-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: activity-federated-processor
+rules:
+# Read ActivityPolicies to know which rules to apply
+- apiGroups:
+  - activity.miloapis.com
+  resources:
+  - activitypolicies
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: activity-federated-processor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: activity-federated-processor
+subjects:
+- kind: ServiceAccount
+  name: activity-federated-processor
+  namespace: activity-nats-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: activity-federated-processor
+  namespace: activity-nats-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: activity-federated-processor
+  template:
+    metadata:
+      labels:
+        app: activity-federated-processor
+    spec:
+      serviceAccountName: activity-federated-processor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: processor
+        image: ghcr.io/milo-os/activity:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        command:
+        - /activity
+        - processor
+        args:
+        - --nats-url=tls://nats.activity-nats-system.svc.cluster.local:4222
+        # Empty opts out of audit consumption: the hub only carries events.
+        - --nats-stream=
+        - --nats-event-stream=activity-federated-events
+        - --nats-event-consumer=activity-federated-processor
+        - --nats-tls-enabled=true
+        - --nats-tls-cert-file=/etc/nats-client-tls/tls.crt
+        - --nats-tls-key-file=/etc/nats-client-tls/tls.key
+        - --nats-tls-ca-file=/etc/nats-client-tls/ca.crt
+        - --output-stream=ACTIVITIES
+        - --output-subject-prefix=activities
+        # ACTIVITIES lives on the shared broker, which has its own CA and
+        # therefore needs a second client certificate.
+        - --output-nats-url=tls://nats.nats-system.svc.cluster.local:4222
+        - --output-nats-tls-enabled=true
+        - --output-nats-tls-cert-file=/etc/nats-output-client-tls/tls.crt
+        - --output-nats-tls-key-file=/etc/nats-output-client-tls/tls.key
+        - --output-nats-tls-ca-file=/etc/nats-output-client-tls/ca.crt
+        # The hub carries no dead-letter stream, and the client cert's NATS
+        # account may not publish the retry subjects.
+        - --dlq-enabled=false
+        - --dlq-retry-enabled=false
+        - --workers=4
+        - --batch-size=100
+        - --health-probe-addr=:8081
+        - -v=2
+        - --logging-format=json
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: nats-client-tls
+          mountPath: /etc/nats-client-tls
+          readOnly: true
+        - name: nats-output-client-tls
+          mountPath: /etc/nats-output-client-tls
+          readOnly: true
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      # The CN is what the hub's ACTIVITY account maps to a user; any other
+      # subject authenticates as nobody.
+      - name: nats-client-tls
+        csi:
+          driver: csi.cert-manager.io
+          readOnly: true
+          volumeAttributes:
+            csi.cert-manager.io/issuer-name: activity-system
+            csi.cert-manager.io/issuer-kind: ClusterIssuer
+            csi.cert-manager.io/common-name: activity-processor-nats-client
+            csi.cert-manager.io/duration: "2160h"
+            csi.cert-manager.io/renew-before: "360h"
+            csi.cert-manager.io/key-usages: "client auth"
+            csi.cert-manager.io/fs-group: "65532"
+            # Needed to verify the hub's server cert.
+            csi.cert-manager.io/ca-file: ca.crt
+      # Mirrors the identity activity-processor already presents to nats-system.
+      - name: nats-output-client-tls
+        csi:
+          driver: csi.cert-manager.io
+          readOnly: true
+          volumeAttributes:
+            csi.cert-manager.io/issuer-name: nats
+            csi.cert-manager.io/issuer-kind: ClusterIssuer
+            csi.cert-manager.io/issuer-group: cert-manager.io
+            csi.cert-manager.io/common-name: activity-processor.nats.client
+            csi.cert-manager.io/subject-organizations: datum
+            csi.cert-manager.io/duration: 720h
+            csi.cert-manager.io/renew-before: 528h
+            csi.cert-manager.io/key-encoding: PKCS1
+            csi.cert-manager.io/key-size: "4096"
+            csi.cert-manager.io/key-usages: digital signature,key encipherment,client auth
+            csi.cert-manager.io/fs-group: "65532"
+            csi.cert-manager.io/ca-file: ca.crt
+---
+# Service for metrics scraping by Prometheus
+apiVersion: v1
+kind: Service
+metadata:
+  name: activity-federated-processor
+  namespace: activity-nats-system
+  labels:
+    app: activity-federated-processor
+    app.kubernetes.io/name: activity-federated-processor
+    app.kubernetes.io/component: processor
+spec:
+  ports:
+  - name: health
+    port: 8081
+    protocol: TCP
+    targetPort: health
+  selector:
+    app: activity-federated-processor
+  type: ClusterIP

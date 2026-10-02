@@ -8,3 +8,13 @@ const (
 	SourceRegionAnnotation    = "activity.miloapis.com/source-region"
 	SourceCityAnnotation      = "activity.miloapis.com/source-city"
 )
+
+// PrefixWithSource prefixes id with planeType and cluster when both are set,
+// so identical ids from different federated clusters don't collide;
+// otherwise it returns id unchanged.
+func PrefixWithSource(planeType, cluster, id string) string {
+	if planeType == "" || cluster == "" {
+		return id
+	}
+	return planeType + "/" + cluster + "/" + id
+}

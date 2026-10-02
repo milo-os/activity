@@ -15,6 +15,14 @@ rules:
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["get", "watch", "list"]
+  # Read this cell's delivered location for city resolution
+  - apiGroups: ["locations.miloapis.com"]
+    resources: ["servinglocations"]
+    verbs: ["get", "list"]
+  # Read namespace labels to recover tenant scope for edge deployments
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "watch", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

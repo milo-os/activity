@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-event-exporter
+  namespace: activity-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: event-exporter
+          env:
+            # Turns on cluster-qualified subjects and source-* annotations so
+            # the hub can tell which cell an event came from.
+            - name: PLANE_TYPE
+              value: "edge"
+            # Resolved by Flux postBuild.substituteFrom against the
+            # cluster-config Secret, not by Kustomize.
+            - name: CLUSTER_NAME
+              value: "${cluster}"
+            - name: CLUSTER_REGION
+              value: "${region}"
+            # Only correct while a cell's topology.datum.net/location label
+            # equals its region.
+            - name: LOCATION_NAME
+              value: "${region}"
+            # The edge-local relay, which leafnodes the events up to the hub.
+            - name: NATS_URL
+              value: "tls://nats.activity-system.svc.cluster.local:4222"
+            # Must not nest under the hub's existing "events.>" EVENTS stream:
+            # JetStream rejects overlapping subjects within an account.
+            - name: SUBJECT_PREFIX
+              value: "activity.federated"
+            # Paths under the nats-client-tls mount below.
+            - name: NATS_TLS_ENABLED
+              value: "true"
+            - name: NATS_TLS_CERT_FILE
+              value: "/etc/nats-client-tls/tls.crt"
+            - name: NATS_TLS_KEY_FILE
+              value: "/etc/nats-client-tls/tls.key"
+            - name: NATS_TLS_CA_FILE
+              value: "/etc/nats-client-tls/ca.crt"
+          volumeMounts:
+            - name: nats-client-tls
+              mountPath: /etc/nats-client-tls
+              readOnly: true
+      volumes:
+        # The relay's client listener runs verify: true, so the exporter must
+        # present a cert from the relay's own ClusterIssuer.
+        - name: nats-client-tls
+          csi:
+            driver: csi.cert-manager.io
+            readOnly: true
+            volumeAttributes:
+              csi.cert-manager.io/issuer-name: activity-system
+              csi.cert-manager.io/issuer-kind: ClusterIssuer
+              csi.cert-manager.io/common-name: k8s-event-exporter.nats.client
+              csi.cert-manager.io/duration: "2160h"
+              csi.cert-manager.io/renew-before: "360h"
+              csi.cert-manager.io/key-usages: "client auth"
+              csi.cert-manager.io/fs-group: "65532"
+              # Needed to verify the relay's server cert.
+              csi.cert-manager.io/ca-file: ca.crt

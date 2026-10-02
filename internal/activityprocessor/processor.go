@@ -2,22 +2,19 @@ package activityprocessor
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	auditv1 "k8s.io/apiserver/pkg/apis/audit/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	auditv1 "k8s.io/apiserver/pkg/apis/audit/v1"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/kubernetes"
@@ -33,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"go.miloapis.com/activity/internal/controller"
+	"go.miloapis.com/activity/internal/natsconn"
 	"go.miloapis.com/activity/internal/processor"
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 )
@@ -164,7 +162,6 @@ var (
 			Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
 		},
 	)
-
 )
 
 func init() {
@@ -191,9 +188,9 @@ func init() {
 // Config contains configuration for the activity processor.
 type Config struct {
 	// NATS configuration
-	NATSURL        string
-	NATSStreamName string // Source stream for audit events (e.g., "AUDIT_EVENTS")
-	ConsumerName   string // Durable consumer name
+	Input          natsconn.Endpoint // Broker events are consumed from
+	NATSStreamName string            // Source stream for audit events (e.g., "AUDIT_EVENTS")
+	ConsumerName   string            // Durable consumer name
 
 	// Event stream configuration
 	NATSEventStream   string // Source stream for Kubernetes events (e.g., "EVENTS")
@@ -203,11 +200,10 @@ type Config struct {
 	OutputStreamName    string // Stream for publishing activities (e.g., "ACTIVITIES")
 	OutputSubjectPrefix string // Subject prefix for activities (e.g., "activities")
 
-	// NATS TLS/mTLS configuration
-	NATSTLSEnabled  bool   // Enable TLS for NATS connection
-	NATSTLSCertFile string // Path to client certificate file (for mTLS)
-	NATSTLSKeyFile  string // Path to client private key file (for mTLS)
-	NATSTLSCAFile   string // Path to CA certificate file for server verification
+	// Output, when its URL is set, publishes activities to a second broker
+	// instead of the one events are consumed from. Unset TLS fields inherit
+	// the input connection's; see outputEndpoint.
+	Output natsconn.Endpoint
 
 	// Dead-letter queue configuration
 	DLQEnabled       bool   // Enable dead-letter queue for failed events
@@ -239,13 +235,13 @@ type Config struct {
 // DefaultConfig returns configuration with default values.
 func DefaultConfig() Config {
 	return Config{
-		NATSURL:             "nats://localhost:4222",
-		NATSStreamName:      "AUDIT_EVENTS",
-		ConsumerName:        "activity-processor@activity.miloapis.com",
-		NATSEventStream:     "EVENTS",
-		NATSEventConsumer:   "activity-event-processor",
-		OutputStreamName:    "ACTIVITIES",
-		OutputSubjectPrefix: "activities",
+		Input:                     natsconn.Endpoint{URL: "nats://localhost:4222"},
+		NATSStreamName:            "AUDIT_EVENTS",
+		ConsumerName:              "activity-processor@activity.miloapis.com",
+		NATSEventStream:           "EVENTS",
+		NATSEventConsumer:         "activity-event-processor",
+		OutputStreamName:          "ACTIVITIES",
+		OutputSubjectPrefix:       "activities",
 		DLQEnabled:                true,
 		DLQStreamName:             "ACTIVITY_DEAD_LETTER",
 		DLQSubjectPrefix:          "activity.dlq",
@@ -257,10 +253,10 @@ func DefaultConfig() Config {
 		DLQRetryBackoffMax:        24 * time.Hour,
 		DLQRetryAlertThreshold:    10,
 		Workers:                   4,
-		BatchSize:           100,
-		AckWait:             30 * time.Second,
-		MaxDeliver:          5,
-		HealthProbeAddr:     ":8081",
+		BatchSize:                 100,
+		AckWait:                   30 * time.Second,
+		MaxDeliver:                5,
+		HealthProbeAddr:           ":8081",
 	}
 }
 
@@ -272,6 +268,11 @@ type Processor struct {
 
 	nc *nats.Conn
 	js nats.JetStreamContext
+
+	// outputNC is nil unless Config.Output selects a second broker;
+	// outputJS always points at the context activities are published on.
+	outputNC *nats.Conn
+	outputJS nats.JetStreamContext
 
 	cache cache.Cache
 
@@ -399,7 +400,6 @@ func (p *Processor) Start(ctx context.Context) error {
 
 	// Build NATS connection options
 	natsOpts := []nats.Option{
-		nats.Name("activity-processor"),
 		nats.RetryOnFailedConnect(true),
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(time.Second),
@@ -435,17 +435,7 @@ func (p *Processor) Start(ctx context.Context) error {
 		}),
 	}
 
-	// Add TLS configuration if enabled
-	if p.config.NATSTLSEnabled {
-		tlsConfig, err := p.buildNATSTLSConfig()
-		if err != nil {
-			return fmt.Errorf("failed to build NATS TLS config: %w", err)
-		}
-		natsOpts = append(natsOpts, nats.Secure(tlsConfig))
-		klog.InfoS("NATS TLS enabled")
-	}
-
-	nc, err := nats.Connect(p.config.NATSURL, natsOpts...)
+	nc, err := p.config.Input.Connect("activity-processor", natsOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS: %w", err)
 	}
@@ -454,45 +444,42 @@ func (p *Processor) Start(ctx context.Context) error {
 
 	js, err := nc.JetStream()
 	if err != nil {
-		nc.Close()
+		p.closeNATS()
 		return fmt.Errorf("failed to create JetStream context: %w", err)
 	}
 	p.js = js
 
-	// Streams and consumers are managed declaratively via NATS JetStream controller.
-	// Fail fast if they don't exist rather than attempting to create them.
-	_, err = js.ConsumerInfo(p.config.NATSStreamName, p.config.ConsumerName)
-	if err != nil {
-		nc.Close()
-		return fmt.Errorf("consumer %q not found on stream %q (ensure NATS JetStream resources are deployed): %w",
-			p.config.ConsumerName, p.config.NATSStreamName, err)
+	// Without a second broker the output context is the input one, so every
+	// publish path below behaves exactly as it did on a single connection.
+	p.outputJS = js
+	if p.config.usesSeparateOutputBroker() {
+		if err := p.connectOutput(); err != nil {
+			p.closeNATS()
+			return err
+		}
 	}
 
-	_, err = js.StreamInfo(p.config.OutputStreamName)
+	// Streams and consumers are managed declaratively via NATS JetStream controller.
+	// Fail fast if they don't exist rather than attempting to create them.
+	if p.auditConsumptionEnabled() {
+		_, err = js.ConsumerInfo(p.config.NATSStreamName, p.config.ConsumerName)
+		if err != nil {
+			p.closeNATS()
+			return fmt.Errorf("consumer %q not found on stream %q (ensure NATS JetStream resources are deployed): %w",
+				p.config.ConsumerName, p.config.NATSStreamName, err)
+		}
+	} else {
+		klog.InfoS("Audit event consumption disabled (no audit stream configured)")
+	}
+
+	_, err = p.outputJS.StreamInfo(p.config.OutputStreamName)
 	if err != nil {
-		nc.Close()
+		p.closeNATS()
 		return fmt.Errorf("output stream %q not found (ensure NATS JetStream resources are deployed): %w",
 			p.config.OutputStreamName, err)
 	}
 
-	// Initialize dead-letter queue publisher
-	dlqConfig := processor.DLQConfig{
-		Enabled:       p.config.DLQEnabled,
-		StreamName:    p.config.DLQStreamName,
-		SubjectPrefix: p.config.DLQSubjectPrefix,
-	}
-	if dlqConfig.Enabled {
-		// Verify DLQ stream exists
-		_, err = js.StreamInfo(dlqConfig.StreamName)
-		if err != nil {
-			klog.V(1).InfoS("DLQ stream not found, dead-letter queue will be disabled",
-				"stream", dlqConfig.StreamName,
-				"error", err,
-			)
-			dlqConfig.Enabled = false
-		}
-	}
-	p.dlqPublisher = processor.NewDLQPublisher(js, dlqConfig)
+	dlqConfig := p.initDLQPublisher()
 	if dlqConfig.Enabled {
 		klog.InfoS("Dead-letter queue enabled",
 			"stream", dlqConfig.StreamName,
@@ -500,8 +487,9 @@ func (p *Processor) Start(ctx context.Context) error {
 		)
 	}
 
-	// Initialize DLQ retry controller
-	if p.config.DLQRetryEnabled && dlqConfig.Enabled {
+	// Initialize DLQ retry controller. It republishes to input-side subjects,
+	// so it cannot run when the dead-letter stream lives on the output broker.
+	if p.config.DLQRetryEnabled && dlqConfig.Enabled && !p.config.usesSeparateOutputBroker() {
 		retryConfig := DLQRetryConfig{
 			Enabled:           p.config.DLQRetryEnabled,
 			Interval:          p.config.DLQRetryInterval,
@@ -545,15 +533,17 @@ func (p *Processor) Start(ctx context.Context) error {
 	)
 
 	// Start audit event workers
-	workerErrors := make(chan error, p.config.Workers)
-	for i := 0; i < p.config.Workers; i++ {
-		p.wg.Add(1)
-		go p.worker(ctx, i, workerErrors)
+	if p.auditConsumptionEnabled() {
+		workerErrors := make(chan error, p.config.Workers)
+		for i := 0; i < p.config.Workers; i++ {
+			p.wg.Add(1)
+			go p.worker(ctx, i, workerErrors)
+		}
+		go p.monitorWorkers(ctx, workerErrors)
 	}
-	go p.monitorWorkers(ctx, workerErrors)
 
 	// Check that event stream consumer exists
-	_, err = js.ConsumerInfo(p.config.NATSEventStream, p.config.NATSEventConsumer)
+	eventConsumer, err := js.ConsumerInfo(p.config.NATSEventStream, p.config.NATSEventConsumer)
 	if err != nil {
 		klog.V(1).InfoS("Event consumer not found, event processing will be disabled",
 			"stream", p.config.NATSEventStream,
@@ -564,8 +554,10 @@ func (p *Processor) Start(ctx context.Context) error {
 		// Start event processor
 		p.eventProcessor = processor.NewEventProcessor(
 			p.js,
+			p.outputJS,
 			p.config.NATSEventStream,
 			p.config.NATSEventConsumer,
+			eventConsumer.Config.FilterSubject,
 			p.config.OutputSubjectPrefix,
 			p.policyCache, // PolicyCache implements EventPolicyLookup
 			p.config.Workers,
@@ -589,6 +581,105 @@ func (p *Processor) Start(ctx context.Context) error {
 	p.setReady(true)
 
 	return nil
+}
+
+// auditConsumptionEnabled reports whether the audit stream is configured. An
+// empty stream name opts a deployment out of audit consumption entirely.
+func (p *Processor) auditConsumptionEnabled() bool {
+	return p.config.NATSStreamName != ""
+}
+
+// initDLQPublisher preflights the dead-letter stream and builds its publisher,
+// both on the output connection: the dead-letter stream lives on the broker
+// activities are published to.
+func (p *Processor) initDLQPublisher() processor.DLQConfig {
+	dlqConfig := processor.DLQConfig{
+		Enabled:       p.config.DLQEnabled,
+		StreamName:    p.config.DLQStreamName,
+		SubjectPrefix: p.config.DLQSubjectPrefix,
+	}
+
+	if dlqConfig.Enabled {
+		if _, err := p.outputJS.StreamInfo(dlqConfig.StreamName); err != nil {
+			klog.V(1).InfoS("DLQ stream not found, dead-letter queue will be disabled",
+				"stream", dlqConfig.StreamName,
+				"error", err,
+			)
+			dlqConfig.Enabled = false
+		}
+	}
+
+	p.dlqPublisher = processor.NewDLQPublisher(p.outputJS, dlqConfig)
+	return dlqConfig
+}
+
+// usesSeparateOutputBroker reports whether activities are published on their
+// own connection. Only an output URL selects one: output TLS settings without
+// a URL still publish on the input connection.
+func (c Config) usesSeparateOutputBroker() bool {
+	return c.Output.IsSet()
+}
+
+// outputEndpoint returns the second broker, with each TLS field the output
+// did not set inherited from the input connection.
+func (c Config) outputEndpoint() natsconn.Endpoint {
+	e := c.Output
+	e.TLS = e.TLS.InheritFrom(c.Input.TLS)
+	return e
+}
+
+// connectOutput dials the second broker that activities are published to.
+func (p *Processor) connectOutput() error {
+	// The NATS gauges track the input connection, so this one only logs;
+	// giving both connections the same unlabelled metrics would blur them.
+	opts := []nats.Option{
+		nats.RetryOnFailedConnect(true),
+		nats.MaxReconnects(-1),
+		nats.ReconnectWait(time.Second),
+		nats.ReconnectJitter(100*time.Millisecond, time.Second),
+		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
+			klog.ErrorS(err, "Output NATS disconnected")
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			klog.InfoS("Output NATS reconnected", "url", nc.ConnectedUrl())
+		}),
+		nats.ClosedHandler(func(nc *nats.Conn) {
+			klog.Info("Output NATS connection closed")
+		}),
+		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
+			klog.ErrorS(err, "Output NATS async error")
+		}),
+		nats.LameDuckModeHandler(func(nc *nats.Conn) {
+			klog.Info("Output NATS server entering lame duck mode, will reconnect to another server")
+		}),
+	}
+
+	endpoint := p.config.outputEndpoint()
+	nc, err := endpoint.Connect("activity-processor-output", opts...)
+	if err != nil {
+		return fmt.Errorf("failed to connect to output NATS: %w", err)
+	}
+
+	js, err := nc.JetStream()
+	if err != nil {
+		nc.Close()
+		return fmt.Errorf("failed to create output JetStream context: %w", err)
+	}
+
+	p.outputNC = nc
+	p.outputJS = js
+	klog.InfoS("Publishing activities to a separate NATS broker", "url", endpoint.URL)
+	return nil
+}
+
+// closeNATS tears down whichever connections have been established.
+func (p *Processor) closeNATS() {
+	if p.outputNC != nil {
+		p.outputNC.Close()
+	}
+	if p.nc != nil {
+		p.nc.Close()
+	}
 }
 
 // drainTimeout is the maximum time to wait for NATS connection to drain.
@@ -632,6 +723,28 @@ func (p *Processor) Stop() {
 		case <-time.After(drainTimeout):
 			klog.Warning("NATS drain timed out, forcing close")
 			p.nc.Close()
+		}
+	}
+
+	// Drained after the input connection so activities produced while it winds
+	// down still have somewhere to go.
+	if p.outputNC != nil && !p.outputNC.IsClosed() {
+		klog.Info("Draining output NATS connection")
+		done := make(chan struct{})
+		go func() {
+			if err := p.outputNC.Drain(); err != nil {
+				klog.ErrorS(err, "Failed to drain output NATS connection, forcing close")
+				p.outputNC.Close()
+			}
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			klog.Info("Output NATS connection drained successfully")
+		case <-time.After(drainTimeout):
+			klog.Warning("Output NATS drain timed out, forcing close")
+			p.outputNC.Close()
 		}
 	}
 	klog.Info("Activity processor stopped")
@@ -1102,7 +1215,7 @@ func (p *Processor) publishActivity(activity *v1alpha1.Activity, policy *Compile
 
 	// Activity name is unique per audit event, enabling NATS deduplication.
 	publishStart := time.Now()
-	_, err = p.js.Publish(subject, data, nats.MsgId(activity.Name))
+	_, err = p.outputJS.Publish(subject, data, nats.MsgId(activity.Name))
 	natsPublishLatency.Observe(time.Since(publishStart).Seconds())
 	if err != nil {
 		return fmt.Errorf("failed to publish to NATS: %w", err)
@@ -1185,9 +1298,9 @@ func (p *Processor) startHealthServer() {
 	// Readiness probe - checks if the processor is ready to receive traffic
 	mux.Handle("/readyz", http.StripPrefix("/readyz", &healthz.Handler{
 		Checks: map[string]healthz.Checker{
-			"ping":          healthz.Ping,
-			"nats":          p.natsHealthChecker(),
-			"cache-synced":  p.cacheSyncedChecker(),
+			"ping":           healthz.Ping,
+			"nats":           p.natsHealthChecker(),
+			"cache-synced":   p.cacheSyncedChecker(),
 			"policies-ready": p.policiesReadyChecker(),
 		},
 	}))
@@ -1219,6 +1332,10 @@ func (p *Processor) natsHealthChecker() healthz.Checker {
 		if !p.nc.IsConnected() {
 			return fmt.Errorf("NATS connection is disconnected")
 		}
+		// nil means no second broker is configured, not an unhealthy one.
+		if p.outputNC != nil && !p.outputNC.IsConnected() {
+			return fmt.Errorf("output NATS connection is disconnected")
+		}
 		return nil
 	}
 }
@@ -1243,40 +1360,4 @@ func (p *Processor) policiesReadyChecker() healthz.Checker {
 		}
 		return nil
 	}
-}
-
-// buildNATSTLSConfig creates a TLS configuration for NATS connections.
-func (p *Processor) buildNATSTLSConfig() (*tls.Config, error) {
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-	}
-
-	// Load client certificate and key if provided (for mTLS)
-	if p.config.NATSTLSCertFile != "" && p.config.NATSTLSKeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(p.config.NATSTLSCertFile, p.config.NATSTLSKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load NATS client certificate: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-		klog.V(2).InfoS("Loaded NATS client certificate",
-			"certFile", p.config.NATSTLSCertFile,
-			"keyFile", p.config.NATSTLSKeyFile,
-		)
-	}
-
-	// Load CA certificate if provided for server verification
-	if p.config.NATSTLSCAFile != "" {
-		caCert, err := os.ReadFile(p.config.NATSTLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read NATS CA certificate: %w", err)
-		}
-		caCertPool := x509.NewCertPool()
-		if !caCertPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse NATS CA certificate")
-		}
-		tlsConfig.RootCAs = caCertPool
-		klog.V(2).InfoS("Loaded NATS CA certificate", "caFile", p.config.NATSTLSCAFile)
-	}
-
-	return tlsConfig, nil
 }

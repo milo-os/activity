@@ -403,6 +403,46 @@ func TestExtractTenantFromAnnotations(t *testing.T) {
 			wantName: "",
 		},
 		{
+			// Edge cells spell the scope type in lowercase.
+			name: "lowercase scope.type is normalized to the canonical value",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"platform.miloapis.com/scope.type": "project",
+						"platform.miloapis.com/scope.name": "my-project",
+					},
+				},
+			},
+			wantType: TenantTypeProject,
+			wantName: "my-project",
+		},
+		{
+			name: "lowercase organization scope.type is normalized",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"platform.miloapis.com/scope.type": "organization",
+						"platform.miloapis.com/scope.name": "acme-corp",
+					},
+				},
+			},
+			wantType: TenantTypeOrganization,
+			wantName: "acme-corp",
+		},
+		{
+			name: "unrecognized scope.type passes through unchanged",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"platform.miloapis.com/scope.type": "Tenant",
+						"platform.miloapis.com/scope.name": "acme-corp",
+					},
+				},
+			},
+			wantType: "Tenant",
+			wantName: "acme-corp",
+		},
+		{
 			name: "scope.type present but scope.name absent uses empty name",
 			eventMap: map[string]any{
 				"metadata": map[string]any{
@@ -425,6 +465,125 @@ func TestExtractTenantFromAnnotations(t *testing.T) {
 			if got.Name != tt.wantName {
 				t.Errorf("ExtractTenantFromAnnotations() Name = %q, want %q", got.Name, tt.wantName)
 			}
+		})
+	}
+}
+
+func TestExtractSourceFromAnnotations(t *testing.T) {
+	tests := []struct {
+		name     string
+		eventMap map[string]any
+		want     v1alpha1.ActivitySource
+	}{
+		{
+			name:     "nil event map returns empty source",
+			eventMap: nil,
+			want:     v1alpha1.ActivitySource{},
+		},
+		{
+			name:     "no metadata returns empty source",
+			eventMap: map[string]any{},
+			want:     v1alpha1.ActivitySource{},
+		},
+		{
+			name: "metadata without annotations returns empty source",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"uid": "event-123",
+				},
+			},
+			want: v1alpha1.ActivitySource{},
+		},
+		{
+			name: "annotations without source keys returns empty source",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"some-other-annotation": "value",
+					},
+				},
+			},
+			want: v1alpha1.ActivitySource{},
+		},
+		{
+			name: "all four source annotations populate ActivitySource",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"activity.miloapis.com/source-plane-type": "edge",
+						"activity.miloapis.com/source-cluster":    "cluster-dfw-1",
+						"activity.miloapis.com/source-region":     "us-central1",
+						"activity.miloapis.com/source-city":       "dfw",
+					},
+				},
+			},
+			want: v1alpha1.ActivitySource{
+				PlaneType: "edge",
+				Cluster:   "cluster-dfw-1",
+				Region:    "us-central1",
+				City:      "dfw",
+			},
+		},
+		{
+			name: "partial source annotations leave the rest empty",
+			eventMap: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"activity.miloapis.com/source-cluster": "cluster-dfw-1",
+					},
+				},
+			},
+			want: v1alpha1.ActivitySource{
+				Cluster: "cluster-dfw-1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractSourceFromAnnotations(tt.eventMap)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestQualifiedOriginID(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   v1alpha1.ActivitySource
+		originID string
+		want     string
+	}{
+		{
+			name:     "no source data returns bare ID",
+			source:   v1alpha1.ActivitySource{},
+			originID: "a1b2c3",
+			want:     "a1b2c3",
+		},
+		{
+			name:     "source without cluster returns bare ID",
+			source:   v1alpha1.ActivitySource{PlaneType: "management"},
+			originID: "a1b2c3",
+			want:     "a1b2c3",
+		},
+		{
+			name:     "source with cluster qualifies ID",
+			source:   v1alpha1.ActivitySource{PlaneType: "edge", Cluster: "cluster-dfw-1"},
+			originID: "a1b2c3",
+			want:     "edge/cluster-dfw-1/a1b2c3",
+		},
+		{
+			name:     "cluster without plane type returns bare ID",
+			source:   v1alpha1.ActivitySource{Cluster: "cluster-dfw-1"},
+			originID: "a1b2c3",
+			want:     "a1b2c3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := qualifiedOriginID(tt.source, tt.originID)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

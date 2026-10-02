@@ -14,6 +14,7 @@ import (
 	"k8s.io/klog/v2"
 
 	activitymetrics "go.miloapis.com/activity/internal/metrics"
+	"go.miloapis.com/activity/internal/types"
 )
 
 // EventsPublisher publishes Kubernetes Events to NATS JetStream.
@@ -140,7 +141,7 @@ func NewEventsPublisher(config EventsPublisherConfig) (*EventsPublisher, error) 
 }
 
 // Publish publishes an event to NATS JetStream.
-// Subject format: events.k8s.{namespace}
+// Subject format: <subjectPrefix>.{namespace}
 // Message ID is derived from event UID and ResourceVersion for deduplication.
 func (p *EventsPublisher) Publish(ctx context.Context, event *eventsv1.Event) error {
 	if p == nil || p.js == nil {
@@ -157,8 +158,7 @@ func (p *EventsPublisher) Publish(ctx context.Context, event *eventsv1.Event) er
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	// Build subject: events.k8s.{namespace}
-	subject := fmt.Sprintf("%s.%s", p.subjectPrefix, event.Namespace)
+	subject := types.EventSubject(p.subjectPrefix, "", event.Namespace)
 
 	// Generate message ID for deduplication
 	// For creates: use UID only

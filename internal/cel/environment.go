@@ -7,6 +7,8 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+
+	activitytypes "go.miloapis.com/activity/internal/types"
 )
 
 // NewAuditEnvironment creates a CEL environment for audit rule expressions.
@@ -64,11 +66,16 @@ func NewEventEnvironment(collector *linkCollector) (*cel.Env, error) {
 	eventType := cel.MapType(cel.StringType, cel.DynType)
 	// The actorRef variable is a map with {type, name} for linking
 	actorRefType := cel.MapType(cel.StringType, cel.DynType)
+	// The source variable is a map with {planeType, cluster, region, city}
+	// describing where the event originated, populated from the exporter's
+	// source-* annotations (see BuildEventSourceVars).
+	sourceType := cel.MapType(cel.StringType, cel.StringType)
 
 	return cel.NewEnv(
 		cel.Variable("event", eventType),
 		cel.Variable("actor", cel.StringType),
 		cel.Variable("actorRef", actorRefType),
+		cel.Variable("source", sourceType),
 
 		// link function declaration with implementation: link(displayText string, resourceRef map) -> string
 		// Returns the display text and optionally captures link info in the collector.
@@ -139,6 +146,26 @@ func BuildEventVars(eventMap map[string]interface{}) map[string]interface{} {
 		"event":    eventMap,
 		"actor":    ExtractEventActor(eventMap),
 		"actorRef": BuildEventActorRef(eventMap),
+		"source":   BuildEventSourceVars(eventMap),
+	}
+}
+
+// BuildEventSourceVars builds the "source" CEL variable map from an event's
+// source-* annotations.
+//
+// It always returns all four keys, defaulting to "" when the annotation (or
+// the annotations map itself) is absent - the source variable must never be
+// omitted from the activation. CEL errors on an undefined variable rather
+// than evaluating false, so a builder that only emitted "source" when
+// annotations were present would break every ActivityPolicy event rule that
+// references source.* the moment this variable was declared.
+func BuildEventSourceVars(eventMap map[string]interface{}) map[string]interface{} {
+	annotations := ExtractMap(eventMap, "metadata", "annotations")
+	return map[string]interface{}{
+		"planeType": ExtractString(annotations, activitytypes.SourcePlaneTypeAnnotation),
+		"cluster":   ExtractString(annotations, activitytypes.SourceClusterAnnotation),
+		"region":    ExtractString(annotations, activitytypes.SourceRegionAnnotation),
+		"city":      ExtractString(annotations, activitytypes.SourceCityAnnotation),
 	}
 }
 

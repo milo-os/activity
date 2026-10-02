@@ -36,6 +36,12 @@ export { ResourceHistoryView } from './components/ResourceHistoryView';
 export type { ResourceHistoryViewProps, ResourceFilter } from './components/ResourceHistoryView';
 export { ActivityExpandedDetails } from './components/ActivityExpandedDetails';
 export type { ActivityExpandedDetailsProps } from './components/ActivityExpandedDetails';
+export { ActivityFeedGroupItem } from './components/ActivityFeedGroupItem';
+export type { ActivityFeedGroupItemProps } from './components/ActivityFeedGroupItem';
+export { ActivityDigestSummary } from './components/ActivityDigestSummary';
+export type { ActivityDigestSummaryProps } from './components/ActivityDigestSummary';
+export { groupActivities, groupActivitiesByDay } from './lib/groupActivities';
+export type { ActivityGroup, ActivityDaySection } from './lib/groupActivities';
 export { TenantBadge } from './components/TenantBadge';
 export type { TenantBadgeProps } from './components/TenantBadge';
 

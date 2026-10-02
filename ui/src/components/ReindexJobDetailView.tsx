@@ -41,11 +41,11 @@ export interface ReindexJobDetailViewProps {
 function getPhaseIcon(phase?: string) {
   switch (phase) {
     case 'Succeeded':
-      return <CheckCircle2 className="h-8 w-8 text-green-500" />;
+      return <CheckCircle2 className="h-8 w-8 text-[var(--success-500)]" />;
     case 'Failed':
-      return <XCircle className="h-8 w-8 text-red-500" />;
+      return <XCircle className="h-8 w-8 text-destructive" />;
     case 'Running':
-      return <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />;
+      return <Loader2 className="h-8 w-8 text-[var(--info-500)] animate-spin" />;
     case 'Pending':
     default:
       return <Clock className="h-8 w-8 text-muted-foreground" />;
@@ -160,7 +160,7 @@ export function ReindexJobDetailView({
                 <p className="text-xs text-muted-foreground m-0">
                   {duration && <>{duration}</>}
                   {isWatching && !isTerminal && (
-                    <Badge variant="outline" className="ml-2 text-xs text-green-600 border-green-300">
+                    <Badge variant="outline" className="ml-2 text-xs text-[var(--success-500)] border-[var(--success-300)]">
                       Live
                     </Badge>
                   )}
@@ -193,7 +193,7 @@ export function ReindexJobDetailView({
         <CardContent className="p-6 space-y-4">
           {/* Error message if failed */}
           {job.status?.phase === 'Failed' && job.status?.message && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive">
               {job.status.message}
             </div>
           )}

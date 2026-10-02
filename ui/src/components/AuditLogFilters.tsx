@@ -506,7 +506,7 @@ export function AuditLogFilters({
           options={actionOptions}
           disabled={disabled}
           isLoading={!verbs.length && !facetsError}
-          className="h-7 text-xs min-w-[180px]"
+          className="min-w-[180px]"
         />
 
         {/* User Select */}

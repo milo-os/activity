@@ -327,7 +327,7 @@ export function PolicyList({
                                 <div className="flex items-center gap-2">
                                   {policyStatus.status === "ready" ? (
                                     <div
-                                      className="w-2 h-2 rounded-full bg-green-500"
+                                      className="w-2 h-2 rounded-full bg-[var(--success-500)]"
                                       title={policyStatus.message}
                                     />
                                   ) : (
@@ -335,10 +335,10 @@ export function PolicyList({
                                       <AlertTriangle
                                         className={`w-4 h-4 ${
                                           policyStatus.status === "error"
-                                            ? "text-red-500 dark:text-red-400"
+                                            ? "text-destructive"
                                             : policyStatus.status === "pending"
-                                              ? "text-amber-600 dark:text-amber-400"
-                                              : "text-gray-400"
+                                              ? "text-[var(--badge-warning)]"
+                                              : "text-muted-foreground"
                                         }`}
                                       />
                                     </div>
@@ -355,7 +355,7 @@ export function PolicyList({
                                   }
                                   className={
                                     rules.audit === 0
-                                      ? "bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500"
+                                      ? "bg-muted text-muted-foreground"
                                       : ""
                                   }
                                 >
@@ -369,7 +369,7 @@ export function PolicyList({
                                   }
                                   className={
                                     rules.event === 0
-                                      ? "bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500"
+                                      ? "bg-muted text-muted-foreground"
                                       : ""
                                   }
                                 >

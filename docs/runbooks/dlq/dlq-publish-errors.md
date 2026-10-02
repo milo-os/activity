@@ -1,6 +1,6 @@
-# DLQ Publish Errors
+# Activity Policy Failed Events Not Retained
 
-**Alert**: `DLQPublishErrors`
+**Alert**: `ActivityPolicyFailedEventsNotRetained`
 **Severity**: Warning
 **Team**: Platform SRE
 

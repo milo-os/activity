@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	eventsv1 "k8s.io/api/events/v1"
@@ -398,7 +399,7 @@ func kubeEventsToRows(events []activityv1alpha1.EventRecord) []metav1.TableRow {
 
 		lastSeen := ""
 		if !ev.EventTime.IsZero() {
-			lastSeen = ev.EventTime.Format("2006-01-02T15:04:05Z")
+			lastSeen = ev.EventTime.UTC().Format(time.RFC3339)
 		}
 
 		eventType := ev.Type

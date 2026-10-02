@@ -1,127 +1,98 @@
-# DLQ Retry Ineffective
+# Activity Policy Retries Failing
 
-**Alert**: `DLQRetryIneffective`
+**Alert**: `ActivityPolicyRetriesFailing`
 **Severity**: Warning
 **Team**: Platform SRE
 
-## Symptoms
+## What this means
 
-More than 80% of DLQ retry attempts are failing. The automatic retry mechanism is not recovering events.
+A named activity policy has at least three failed retry re-evaluations in a
+rolling one-hour window, and that condition has persisted for 30 minutes.
+The alert keeps `cluster`, `namespace`, `policy_name`, `api_group`, `kind`, and
+`error_type`, aggregating processor replicas within those dimensions. Its
+`subject` is the policy name so notifications can identify and group by policy.
 
-## Impact
+Affected events are not producing activity entries. The count is retry attempts,
+not unique events; one event can fail repeatedly. This measures policy
+re-evaluation failures, not a success percentage or current queue depth. A clear
+alert means the recent failure count fell below the threshold, not necessarily
+that every retained event recovered; retries can back off for up to 24 hours.
 
-When retry is ineffective:
-- Events accumulate in DLQ without recovery
-- Activities are not being generated for failed events
-- Manual intervention required to resolve underlying issues
+`activity_processor_dlq_retry_failed_total` includes the policy name and error
+category. The older `activity_processor_dlq_retry_attempts_total` has no policy
+label, so it cannot provide a per-policy success ratio. Failures to republish an
+event to NATS are not counted by the re-evaluation metric; investigate processor
+or queue health alerts separately when delivery fails.
 
 ## Investigation
 
-### 1. Check retry success rate
+1. Use the notification's policy, cluster, resource type, and error category to
+   locate the failing evaluation. Query VictoriaMetrics or Prometheus:
 
-```bash
-# View retry attempt metrics
-kubectl exec -n activity-system deploy/prometheus -- \
-  promtool query instant 'sum by (result) (rate(activity_processor_dlq_retry_attempts_total[15m]))'
-
-# Check which api_group/kind are failing
-kubectl exec -n activity-system deploy/prometheus -- \
-  promtool query instant 'sum by (api_group, kind) (rate(activity_processor_dlq_retry_attempts_total{result="failed"}[15m]))'
-```
-
-### 2. Check processor logs for retry errors
-
-```bash
-# Look for retry failures
-kubectl logs -n activity-system -l app=activity-processor --tail=300 | grep -i "failed to republish\|failed to retry"
-```
-
-### 3. Identify root cause
-
-Retry can fail for several reasons:
-
-**Source stream unavailable**:
-- AUDIT_EVENTS or EVENTS stream not accepting messages
-- Stream full or unavailable
-
-**Policy still broken**:
-- Policy was updated but CEL error still exists
-- Events match old version filter but still fail evaluation
-
-**Republish errors**:
-- Network issues between processor and NATS
-- Stream subject mismatch
-
-### 4. Check source streams
-
-```bash
-# Verify audit stream accepts messages
-kubectl exec -n nats-system deploy/nats-box -- nats stream info AUDIT_EVENTS
-
-# Verify events stream accepts messages
-kubectl exec -n nats-system deploy/nats-box -- nats stream info EVENTS
-```
-
-## Resolution
-
-### If source stream is unavailable
-
-```bash
-# Check stream status
-kubectl get stream -n nats-system
-
-# If stream is in error state, check NATS logs
-kubectl logs -n nats-system -l app.kubernetes.io/name=nats --tail=100
-```
-
-### If policies still have errors
-
-```bash
-# List policies with recent DLQ events
-kubectl exec -n activity-system deploy/prometheus -- \
-  promtool query instant 'topk(10, sum by (policy_name) (rate(activity_processor_dlq_events_published_total[10m])))'
-
-# Fix each problematic policy
-kubectl edit activitypolicy <policy-name>
-```
-
-### If republish subjects don't match stream
-
-The retry controller uses subjects:
-- `audit.k8s.retry` for audit events
-- `events.retry` for Kubernetes events
-
-Verify these match the stream subject filters:
-```bash
-kubectl get stream audit-events -n nats-system -o yaml | grep subjects
-kubectl get stream events -n nats-system -o yaml | grep subjects
-```
-
-If subjects don't match, update the stream configuration or processor subjects.
-
-### Temporary workaround
-
-If retries continue failing, you can:
-
-1. **Disable automatic retry temporarily**:
-   ```bash
-   kubectl set env deployment/activity-processor -n activity-system DLQ_RETRY_ENABLED=false
+   ```promql
+   sum by (cluster, namespace, policy_name, api_group, kind, error_type) (
+     increase(activity_processor_dlq_retry_failed_total{policy_name!=""}[1h])
+   )
    ```
 
-2. **Manually process DLQ events** after fixing underlying issues:
+   Filter to the alert's labels when multiple policies or clusters are present.
+
+2. Read both activity-processor replicas in the affected cluster:
+
    ```bash
-   # Re-enable retry
-   kubectl set env deployment/activity-processor -n activity-system DLQ_RETRY_ENABLED=true
+   kubectl logs -n activity-system -l app=activity-processor \
+     --prefix --since=2h --tail=2000 | grep 'DLQ event re-failed evaluation'
    ```
 
-## Escalation
+   Match the logged `policy`, `errorType`, failing rule, and `retryCount` to the
+   notification. The initial `Failed to evaluate policy` log may also include
+   the audit ID and event payload; payloads can be truncated.
 
-- If NATS streams are unhealthy: Escalate to NATS/Infrastructure team
-- If retry logic appears broken: Escalate to Activity development team
-- If multiple policies failing: Check for cluster-wide configuration issue
+3. Inspect the ActivityPolicy through the Milo API context that owns it:
 
-## Prevention
+   ```bash
+   kubectl --context <milo-context> get activitypolicy <policy-name> -o yaml
+   ```
 
-- Monitor retry success rate metrics
-- Fix policy CEL errors promptly when ActivityPolicyDLQErrors alerts fire
-- Ensure NATS stream configurations match retry subject patterns
+   Reproduce the failure with the captured payload. In particular, audit
+   `requestObject` can be a JSON Patch array rather than an object. Accessing
+   `.spec` on that array can fail with `unsupported index type 'string' in list`.
+   Check match expressions as well as summary expressions; `cel_summary` can
+   accompany a logged match-expression error.
+
+## Resolution and verification
+
+Fix the affected rule in its source repository and add regression coverage for
+the failing payload shape. Deploy the policy through its normal release path.
+Do not discard retained events or disable retries to clear this alert.
+
+Policy updates can trigger retries; periodic retries also use backoff. Verify
+successful re-evaluation and resulting activity entries for the affected events.
+Watch the policy's failure counter stop increasing. The one-hour window can
+retain old failures after a fix, so the alert may take up to an hour to clear.
+If failures continue, inspect the latest error rather than repeatedly replaying
+the same payload against an unchanged policy.
+
+Escalate policy evaluation errors to the policy owner. Escalate unexpected
+processor behavior to the Activity maintainers. A processor or NATS delivery
+failure requires separate investigation; this alert does not measure it.
+
+## Recovery after a policy fix
+
+Policy spec changes increment `metadata.generation`. The retry worker compares
+that generation with the version recorded in each failed event and bypasses
+its old backoff when a newer active policy is available. An event that fails
+again records the attempted generation and resumes normal exponential backoff;
+metadata and status updates do not count as policy fixes.
+
+Broker redelivery delays are capped at the retry polling interval (five minutes
+by default), so the periodic worker can notice a policy fix even if the
+immediate policy-update scan missed a delayed message or the processor restarted.
+Allow the next polling cycles for recovery, and verify actual retry outcomes.
+
+Roll out both the API server (generation tracking) and processor (retry changes).
+Messages already delayed by the previous processor keep their existing NATS
+redelivery deadline. Those need to reach that deadline or undergo a targeted
+replay; changing the polling interval or restarting the processor does not
+clear an existing broker timer. Preserve any failed events until recovery is
+verified, and retain events that still fail evaluation.

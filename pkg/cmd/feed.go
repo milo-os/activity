@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -523,7 +524,7 @@ func activitiesToTable(activities []activityv1alpha1.Activity) *metav1.Table {
 func activitiesToRows(activities []activityv1alpha1.Activity) []metav1.TableRow {
 	rows := make([]metav1.TableRow, 0, len(activities))
 	for i := range activities {
-		timestamp := activities[i].CreationTimestamp.Format("2006-01-02T15:04:05Z")
+		timestamp := activities[i].CreationTimestamp.UTC().Format(time.RFC3339)
 		actor := activities[i].Spec.Actor.Name
 		source := activities[i].Spec.ChangeSource
 		summary := activities[i].Spec.Summary

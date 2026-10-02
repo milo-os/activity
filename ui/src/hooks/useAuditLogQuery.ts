@@ -23,7 +23,6 @@ export interface UseAuditLogQueryResult {
  */
 export function useAuditLogQuery({
   client,
-  autoExecute = false,
 }: UseAuditLogQueryOptions): UseAuditLogQueryResult {
   const [query, setQuery] = useState<AuditLogQuery | null>(null);
   const [events, setEvents] = useState<Event[]>([]);

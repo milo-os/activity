@@ -387,6 +387,29 @@ func TestEventsToRows(t *testing.T) {
 			},
 		},
 		{
+			name: "non-UTC timestamp converted to UTC for output",
+			events: []auditv1.Event{
+				{
+					Verb:           "delete",
+					StageTimestamp: metav1.NewMicroTime(time.Date(2026, 2, 21, 15, 30, 0, 0, time.FixedZone("AEST", 10*60*60))),
+					User: authnv1.UserInfo{
+						Username: "alice@example.com",
+					},
+					ObjectRef: &auditv1.ObjectReference{
+						Namespace: "production",
+						Resource:  "secrets",
+						Name:      "db-password",
+					},
+					ResponseStatus: &metav1.Status{
+						Code: 200,
+					},
+				},
+			},
+			wantCells: [][]interface{}{
+				{"2026-02-21T05:30:00Z", "delete", "alice@example.com", "production/secrets/db-password", "200"},
+			},
+		},
+		{
 			name: "event without response status",
 			events: []auditv1.Event{
 				{

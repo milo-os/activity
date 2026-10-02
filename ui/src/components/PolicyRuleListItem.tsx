@@ -121,7 +121,7 @@ export function PolicyRuleListItem({
           htmlType="button"
           type="quaternary" theme="borderless"
           size="icon"
-          className="h-6 w-6 text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/50"
+          className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
           onClick={onDelete}
           title="Delete rule"
           aria-label="Delete rule"

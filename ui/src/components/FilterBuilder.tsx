@@ -83,9 +83,8 @@ export function FilterBuilder({
                           </code>
                           <Button
                             onClick={() => insertExample(example)}
-                            type="primary" theme="solid"
+                            type="success" theme="solid"
                             size="small"
-                            className="bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
                             htmlType="button"
                           >
                             Insert
@@ -105,10 +104,10 @@ export function FilterBuilder({
                 <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">!=</code> - Not equals</li>
                 <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">&amp;&amp;</code> - And</li>
                 <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">||</code> - Or</li>
-                <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">in</code> - In list (e.g., <code className="px-1 py-0.5 bg-background rounded text-sm font-mono">verb in ["create", "delete"]</code>)</li>
+                <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">in</code> - In list (e.g., <code className="px-1 py-0.5 bg-background rounded text-sm font-mono">verb in [&quot;create&quot;, &quot;delete&quot;]</code>)</li>
                 <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">.startsWith()</code> - String starts with</li>
                 <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">.contains()</code> - String contains</li>
-                <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">timestamp()</code> - Parse timestamp (e.g., <code className="px-1 py-0.5 bg-background rounded text-sm font-mono">timestamp("2024-01-01T00:00:00Z")</code>)</li>
+                <li className="my-1"><code className="px-1 py-0.5 bg-background rounded text-sm font-mono">timestamp()</code> - Parse timestamp (e.g., <code className="px-1 py-0.5 bg-background rounded text-sm font-mono">timestamp(&quot;2024-01-01T00:00:00Z&quot;)</code>)</li>
               </ul>
             </div>
           </div>

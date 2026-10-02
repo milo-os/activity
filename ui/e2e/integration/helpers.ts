@@ -70,7 +70,7 @@ export async function waitForPolicyReady(
       });
 
       // Look for the ready status indicator (green checkmark or "Ready" badge)
-      const readyIndicator = page.locator('.bg-green-500, [data-status="ready"]').first();
+      const readyIndicator = page.locator('[class*="success-500"], [data-status="ready"]').first();
 
       if (await readyIndicator.isVisible({ timeout: 2000 })) {
         return; // Policy is ready

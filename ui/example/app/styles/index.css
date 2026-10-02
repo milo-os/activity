@@ -1,7 +1,10 @@
 @import "tailwindcss";
+@import "@datum-cloud/datum-ui/styles";
 
 /* Scan library components for Tailwind classes */
 @source "../../../src/**/*.{ts,tsx}";
+/* datum-ui ships compiled components; generate the utilities they use */
+@source "../../../node_modules/@datum-cloud/datum-ui/dist/**/*.mjs";
 
 @theme {
   /* Datum Brand Colors - Full Palette */

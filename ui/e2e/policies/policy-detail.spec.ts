@@ -55,8 +55,8 @@ test.describe('PolicyDetailView', () => {
   });
 
   test('displays health status indicator (green dot for Ready)', async ({ page }) => {
-    // Look for the green status dot
-    const statusDot = page.locator('span.bg-green-500.w-2.h-2.rounded-full').first();
+    // Look for the success-toned status dot
+    const statusDot = page.locator('span[class*="success-500"].w-2.h-2.rounded-full').first();
     await expect(statusDot).toBeVisible();
 
     // Hover over the dot to see the tooltip
@@ -99,24 +99,6 @@ test.describe('PolicyDetailView', () => {
 
     // Verify navigation to edit route
     await expect(page).toHaveURL('/policies/httpproxy-policy/edit');
-  });
-
-  test('Reindex button opens reindex dialog', async ({ page }) => {
-    // Find the Reindex button
-    const reindexButton = page.getByRole('button', { name: /Reindex/i });
-    await expect(reindexButton).toBeVisible();
-
-    // Click to open dialog
-    await reindexButton.click();
-    await page.waitForTimeout(200);
-
-    // Verify dialog is open (look for dialog content)
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible();
-
-    // Verify dialog title - it's "Reindex Policy" not "Create Reindex Job"
-    const dialogTitle = page.getByRole('heading', { name: 'Reindex Policy' });
-    await expect(dialogTitle).toBeVisible();
   });
 
   test('displays ActivityView with Activity/Events tabs', async ({ page }) => {

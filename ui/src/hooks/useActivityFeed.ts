@@ -6,6 +6,15 @@ import { StreamError } from '../lib/errors';
 // Debounce delay for filter changes (ms)
 const FILTER_DEBOUNCE_MS = 300;
 
+// Backoff for watch stream reconnects. Without this, a persistently failing
+// upstream gets re-opened on every render with no delay — see
+// https://github.com/datum-cloud/infra/issues/5060, where a single browser
+// tab reconnected roughly 2.5 times a minute against a stream that kept
+// aborting, driving the proxy's memory up until the process was OOMKilled.
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+const MAX_RECONNECT_ATTEMPTS = 8;
+
 /**
  * Filter options for the activity feed
  */
@@ -214,6 +223,12 @@ export function useActivityFeed({
   const resourceVersionRef = useRef<string | undefined>();
   // Track the watch stop function
   const watchStopRef = useRef<(() => void) | null>(null);
+  // Consecutive watch failures since the last successful event, used to back
+  // off reconnect attempts. Reset on any real event (including BOOKMARK) and
+  // on a manual startStreaming() call.
+  const reconnectAttemptsRef = useRef(0);
+  // Pending scheduled reconnect, if any.
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track whether streaming should restart after filter change
   const shouldRestartStreamingRef = useRef(false);
   // Track if we've done the initial load
@@ -307,6 +322,10 @@ export function useActivityFeed({
       return;
     }
 
+    // A real event (including a BOOKMARK keep-alive) means the connection is
+    // healthy — reset backoff so a later failure starts from the base delay.
+    reconnectAttemptsRef.current = 0;
+
     if (event.type === 'BOOKMARK') {
       // Update resource version for resume capability
       if (event.object.metadata?.resourceVersion) {
@@ -385,16 +404,13 @@ export function useActivityFeed({
     }
   }, [filters]);
 
-  // Start watching for real-time updates
-  const startStreaming = useCallback(() => {
+  // Open the watch connection. Does not touch userPaused/backoff state —
+  // callers (startStreaming, scheduleReconnect) own that.
+  const connectWatch = useCallback(() => {
     if (watchStopRef.current) {
       // Already watching
       return;
     }
-
-    // Explicit start clears the user-paused flag so the auto-restart
-    // effects can keep the stream alive after subsequent filter changes.
-    setUserPaused(false);
 
     // Clear any previous watch error when starting a new stream
     setWatchError(null);
@@ -410,6 +426,7 @@ export function useActivityFeed({
         setWatchError(streamError);
         setIsStreaming(false);
         watchStopRef.current = null;
+        reconnectAttemptsRef.current += 1;
       },
       onClose: () => {
         setIsStreaming(false);
@@ -422,11 +439,57 @@ export function useActivityFeed({
     setNewActivitiesCount(0);
   }, [client, buildWatchParams, handleWatchEvent]);
 
+  // Reconnect with exponential backoff. The first attempt (no prior
+  // failures) connects immediately; each subsequent failure doubles the
+  // delay up to RECONNECT_MAX_DELAY_MS. After MAX_RECONNECT_ATTEMPTS
+  // consecutive failures, this stops retrying automatically — the watch
+  // stays stopped (with watchError set) until the user calls
+  // startStreaming() again, which resets the attempt count.
+  const scheduleReconnect = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      // A reconnect is already scheduled.
+      return;
+    }
+    if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+      return;
+    }
+
+    const attempt = reconnectAttemptsRef.current;
+    const delay =
+      attempt === 0 ? 0 : Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1));
+
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      connectWatch();
+    }, delay);
+  }, [connectWatch]);
+
+  // Start watching for real-time updates. This is the user/effect-facing
+  // entry point: it resets backoff and any pending scheduled reconnect
+  // before connecting, so a manual retry always starts from a clean slate.
+  const startStreaming = useCallback(() => {
+    // Explicit start clears the user-paused flag so the auto-restart
+    // effects can keep the stream alive after subsequent filter changes.
+    setUserPaused(false);
+
+    reconnectAttemptsRef.current = 0;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    connectWatch();
+  }, [connectWatch]);
+
   // Stop watching. Marks the user as paused so the auto-start effects
   // below don't immediately re-open the stream this call just closed.
   const stopStreaming = useCallback(() => {
     setUserPaused(true);
     setIsStreaming(false);
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (watchStopRef.current) {
       watchStopRef.current();
       watchStopRef.current = null;
@@ -612,9 +675,10 @@ export function useActivityFeed({
     };
   }, [filters, timeRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-start streaming after initial load when enabled. Skipped when
-  // the user has explicitly paused — otherwise clicking Pause would be
-  // immediately undone by this effect on the next render.
+  // Auto-start streaming after initial load when enabled, and reconnect
+  // (with backoff — see scheduleReconnect) whenever a connection drops.
+  // Skipped when the user has explicitly paused — otherwise clicking Pause
+  // would be immediately undone by this effect on the next render.
   useEffect(() => {
     if (
       enableStreaming &&
@@ -624,9 +688,9 @@ export function useActivityFeed({
       !isStreaming &&
       !isLoading
     ) {
-      startStreaming();
+      scheduleReconnect();
     }
-  }, [enableStreaming, autoStartStreaming, userPaused, activities.length, isStreaming, isLoading, startStreaming]);
+  }, [enableStreaming, autoStartStreaming, userPaused, activities.length, isStreaming, isLoading, scheduleReconnect]);
 
   // Restart streaming after filter change refresh completes. Also skipped
   // when the user has paused — a filter change shouldn't silently resume
@@ -641,15 +705,18 @@ export function useActivityFeed({
       !isLoading
     ) {
       shouldRestartStreamingRef.current = false;
-      startStreaming();
+      scheduleReconnect();
     }
-  }, [enableStreaming, userPaused, activities.length, isStreaming, isLoading, startStreaming]);
+  }, [enableStreaming, userPaused, activities.length, isStreaming, isLoading, scheduleReconnect]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (watchStopRef.current) {
         watchStopRef.current();
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
       }
       if (filterDebounceRef.current) {
         clearTimeout(filterDebounceRef.current);

@@ -332,7 +332,7 @@ export class ActivityApiClient {
         const decoder = new TextDecoder();
         let buffer = '';
 
-        while (true) {
+        for (;;) {
           const { done, value } = await reader.read();
 
           if (done) {
@@ -833,7 +833,7 @@ export class ActivityApiClient {
         const decoder = new TextDecoder();
         let buffer = '';
 
-        while (true) {
+        for (;;) {
           const { done, value } = await reader.read();
 
           if (done) {
@@ -994,7 +994,7 @@ export class ActivityApiClient {
         const decoder = new TextDecoder();
         let buffer = '';
 
-        while (true) {
+        for (;;) {
           const { done, value } = await reader.read();
 
           if (done) {

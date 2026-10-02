@@ -1,5 +1,5 @@
-import { Card } from './ui/card';
-import { Skeleton } from './ui/skeleton';
+import { Card } from '@datum-cloud/datum-ui/card';
+import { Skeleton } from '@datum-cloud/datum-ui/skeleton';
 import { cn } from '../lib/utils';
 
 export interface EventFeedItemSkeletonProps {

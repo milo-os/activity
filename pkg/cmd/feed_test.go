@@ -534,6 +534,26 @@ func TestActivitiesToRows(t *testing.T) {
 			},
 		},
 		{
+			name: "non-UTC timestamp converted to UTC for output",
+			activities: []activityv1alpha1.Activity{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						CreationTimestamp: metav1.NewTime(time.Date(2026, 2, 21, 15, 30, 0, 0, time.FixedZone("AEST", 10*60*60))),
+					},
+					Spec: activityv1alpha1.ActivitySpec{
+						Actor: activityv1alpha1.ActivityActor{
+							Name: "admin",
+						},
+						ChangeSource: "human",
+						Summary:      "created namespace prod",
+					},
+				},
+			},
+			wantCells: [][]interface{}{
+				{"2026-02-21T05:30:00Z", "admin", "human", "created namespace prod"},
+			},
+		},
+		{
 			name: "long summary truncated",
 			activities: []activityv1alpha1.Activity{
 				{

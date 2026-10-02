@@ -8,6 +8,12 @@ spec:
   kind: ActivityPolicy
   plural: activitypolicies
   singular: activitypolicies
+  subresources:
+    - name: status
+      permissions:
+        - get
+        - update
+        - patch
   permissions:
     - create
     - list

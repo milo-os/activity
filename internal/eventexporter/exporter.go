@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"go.miloapis.com/activity/internal/natsconn"
 	"go.miloapis.com/activity/internal/types"
 )
 
@@ -93,7 +95,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: "event_exporter",
 			Name:      "dropped_events_total",
-			Help:      "Total number of events dropped because the publish queue was full. The newest event is dropped, not an already-queued one.",
+			Help:      "Total number of events dropped because the publish queue was full. The oldest queued event is evicted to make room for the newest.",
 		},
 	)
 
@@ -125,9 +127,51 @@ func init() {
 // running in a workload cluster rather than the management plane.
 const planeTypeEdge = "edge"
 
-// publishQueueSize bounds the publish queue between the informer callback
-// and the NATS publish call.
-const publishQueueSize = 1000
+const (
+	// publishQueueSize bounds the publish queue between the informer callback
+	// and the NATS publish call.
+	publishQueueSize = 1000
+
+	// publishAsyncMaxPending caps the unacked publishes in flight.
+	publishAsyncMaxPending = 256
+
+	// publishStallWait bounds how long a full in-flight window blocks drainQueue
+	// before the publish is failed, so saturation usually sheds at the queue.
+	publishStallWait = 5 * time.Second
+
+	// publishAckTimeout makes every publish resolve one way or the other;
+	// without it a stranded ack would hang the shutdown drain forever.
+	publishAckTimeout = 30 * time.Second
+
+	ackDrainTimeout = 5 * time.Second
+)
+
+// natsClientName identifies this exporter to the NATS server.
+const natsClientName = "k8s-event-exporter"
+
+// natsOptions returns the connection options natsconn.Endpoint leaves to the
+// caller: reconnect behaviour, the handlers driving natsConnectionStatus, and
+// the federated inbox prefix.
+func natsOptions(cfg Config) []nats.Option {
+	opts := []nats.Option{
+		nats.ReconnectWait(2 * time.Second),
+		nats.MaxReconnects(-1), // Unlimited reconnects
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			klog.ErrorS(err, "NATS disconnected")
+			natsConnectionStatus.Set(0)
+		}),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			klog.InfoS("NATS reconnected")
+			natsConnectionStatus.Set(1)
+		}),
+	}
+	// A federated source's PubAcks must land under the per-cluster inbox its
+	// hub leaf grant allows; see types.EventInboxPrefix.
+	if cluster := FederatedCluster(cfg.PlaneType, cfg.ClusterName); cluster != "" {
+		opts = append(opts, nats.CustomInboxPrefix(types.EventInboxPrefix(cluster)))
+	}
+	return opts
+}
 
 // eventJob is a queued event awaiting publish.
 type eventJob struct {
@@ -137,8 +181,8 @@ type eventJob struct {
 
 // Config holds the exporter configuration.
 type Config struct {
-	// NATS connection URL
-	NATSUrl string
+	// NATS is the broker this exporter publishes to, with its TLS material
+	NATS natsconn.Endpoint
 
 	// NATS subject prefix for events (subject will be {prefix}.{namespace})
 	SubjectPrefix string
@@ -175,7 +219,7 @@ type Config struct {
 // Run starts the event exporter and blocks until the context is cancelled.
 func Run(ctx context.Context, cfg Config) error {
 	klog.InfoS("Starting k8s-event-exporter",
-		"natsUrl", cfg.NATSUrl,
+		"natsUrl", cfg.NATS.URL,
 		"subjectPrefix", cfg.SubjectPrefix,
 		"scopeType", cfg.ScopeType,
 		"scopeName", cfg.ScopeName,
@@ -205,19 +249,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Connect to NATS with metrics tracking
 	natsConnectionStatus.Set(0)
-	nc, err := nats.Connect(cfg.NATSUrl,
-		nats.Name("k8s-event-exporter"),
-		nats.ReconnectWait(2*time.Second),
-		nats.MaxReconnects(-1), // Unlimited reconnects
-		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			klog.ErrorS(err, "NATS disconnected")
-			natsConnectionStatus.Set(0)
-		}),
-		nats.ReconnectHandler(func(_ *nats.Conn) {
-			klog.InfoS("NATS reconnected")
-			natsConnectionStatus.Set(1)
-		}),
-	)
+	nc, err := cfg.NATS.Connect(natsClientName, natsOptions(cfg)...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS: %w", err)
 	}
@@ -225,12 +257,15 @@ func Run(ctx context.Context, cfg Config) error {
 	natsConnectionStatus.Set(1)
 
 	// Get JetStream context
-	js, err := nc.JetStream()
+	js, err := nc.JetStream(
+		nats.PublishAsyncMaxPending(publishAsyncMaxPending),
+		nats.PublishAsyncTimeout(publishAckTimeout),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to get JetStream context: %w", err)
 	}
 
-	klog.InfoS("Connected to NATS", "url", cfg.NATSUrl)
+	klog.InfoS("Connected to NATS", "url", cfg.NATS.URL)
 
 	// Create informer factory for all namespaces
 	factory := informers.NewSharedInformerFactory(k8sClient, cfg.ResyncPeriod)
@@ -258,7 +293,11 @@ func Run(ctx context.Context, cfg Config) error {
 		city:          city,
 		queue:         make(chan eventJob, publishQueueSize),
 	}
-	go exporter.drainQueue(ctx)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		exporter.drainQueue(ctx)
+	}()
 
 	// Register event handlers
 	eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -304,6 +343,8 @@ func Run(ctx context.Context, cfg Config) error {
 	// Wait for shutdown
 	<-ctx.Done()
 	klog.InfoS("Shutting down")
+	// The deferred nc.Close() must not run until the in-flight acks have drained.
+	<-drained
 	return nil
 }
 
@@ -320,6 +361,9 @@ type Exporter struct {
 	scope         *namespaceScopeResolver
 	city          *cityResolver
 	queue         chan eventJob
+
+	// inFlight tracks the ack waiters so shutdown can drain them.
+	inFlight sync.WaitGroup
 }
 
 // resolveScope returns the tenant scope to stamp on an event from the given
@@ -328,17 +372,30 @@ type Exporter struct {
 // don't name a real tenant; it recovers the tenant per event instead, and
 // emits unscoped - rather than misattributing to whatever the flags happen
 // to hold - when recovery fails.
-func (e *Exporter) resolveScope(namespace string) (scopeType, scopeName string) {
+func (e *Exporter) resolveScope(namespace string) eventScope {
 	if e.planeType != planeTypeEdge || e.scope == nil {
-		return e.scopeType, e.scopeName
+		return eventScope{Type: e.scopeType, Name: e.scopeName}
 	}
 
-	if scopeType, scopeName, ok := e.scope.Resolve(namespace); ok {
-		return scopeType, scopeName
+	if scope, ok := e.scope.Resolve(namespace); ok {
+		return scope
 	}
 
 	unscopedEvents.Inc()
-	return "", ""
+	return eventScope{}
+}
+
+// stampScope writes the tenant scope annotations for an event published from
+// namespace. The upstream namespace is stamped only when recovered, leaving
+// management-plane events unchanged.
+func (e *Exporter) stampScope(annotations map[string]string, namespace string) {
+	scope := e.resolveScope(namespace)
+
+	annotations[types.ScopeTypeAnnotation] = scope.Type
+	annotations[types.ScopeNameAnnotation] = scope.Name
+	if scope.Namespace != "" {
+		annotations[types.ScopeNamespaceAnnotation] = scope.Namespace
+	}
 }
 
 // sourceAnnotations returns this cell's plane type, cluster, region, and
@@ -368,28 +425,74 @@ func (e *Exporter) qualifiedMsgID(event *eventsv1.Event, eventType string) strin
 	return types.PrefixWithSource(e.planeType, e.clusterName, msgID)
 }
 
-// enqueue copies event and queues it for publish. If the queue is full, the
-// incoming event is dropped rather than blocking the informer callback.
-func (e *Exporter) enqueue(event *eventsv1.Event, eventType string) {
-	job := eventJob{event: event.DeepCopy(), eventType: eventType}
-
-	select {
-	case e.queue <- job:
-	default:
-		droppedEvents.Inc()
-		klog.ErrorS(fmt.Errorf("publish queue full (size %d)", cap(e.queue)), "Dropped event",
-			"namespace", event.Namespace,
-			"name", event.Name,
-		)
-	}
-	queueDepth.Set(float64(len(e.queue)))
+// subject builds the NATS publish subject. A federated source's subject carries
+// a cluster token so per-PoP NATS permissions can scope publish access to it.
+func (e *Exporter) subject(namespace string) string {
+	return types.EventSubject(e.subjectPrefix, FederatedCluster(e.planeType, e.clusterName), namespace)
 }
 
-// drainQueue publishes queued events until ctx is cancelled. A job already
-// pulled off the queue when ctx is cancelled is dropped rather than
-// published, since publishEvent would otherwise run with an already-dead
-// ctx and fail.
+// FederatedCluster is the single gate for both the publish subject's cluster
+// token and the reply inbox prefix, so the two cannot be scoped differently.
+// Exported so option validation gates on the same notion of "federated".
+func FederatedCluster(planeType, clusterName string) string {
+	if planeType == "" || clusterName == "" {
+		return ""
+	}
+	return clusterName
+}
+
+// enqueue copies event and queues it for publish, never blocking the informer
+// callback. A full queue sheds its oldest event rather than the incoming one,
+// so a saturated link keeps reporting current state.
+func (e *Exporter) enqueue(event *eventsv1.Event, eventType string) {
+	job := eventJob{event: event.DeepCopy(), eventType: eventType}
+	if e.tryEnqueue(job) {
+		return
+	}
+
+	// The single producer always wins the slot an eviction frees, so the job is
+	// only shed when there was nothing to evict.
+	e.evictOldest()
+	if !e.tryEnqueue(job) {
+		recordDrop(cap(e.queue), job.event)
+	}
+}
+
+// tryEnqueue queues job without blocking, reporting whether it fit.
+func (e *Exporter) tryEnqueue(job eventJob) bool {
+	select {
+	case e.queue <- job:
+		queueDepth.Set(float64(len(e.queue)))
+		return true
+	default:
+		return false
+	}
+}
+
+// evictOldest drops the oldest queued job, unless drainQueue took it first.
+func (e *Exporter) evictOldest() {
+	select {
+	case evicted := <-e.queue:
+		recordDrop(cap(e.queue), evicted.event)
+		queueDepth.Set(float64(len(e.queue)))
+	default:
+	}
+}
+
+func recordDrop(queueSize int, event *eventsv1.Event) {
+	droppedEvents.Inc()
+	klog.ErrorS(fmt.Errorf("publish queue full (size %d)", queueSize), "Dropped event",
+		"namespace", event.Namespace,
+		"name", event.Name,
+	)
+}
+
+// drainQueue publishes queued events until ctx is cancelled, then waits out
+// the acks still in flight. A job already pulled off the queue when ctx is
+// cancelled is dropped rather than published.
 func (e *Exporter) drainQueue(ctx context.Context) {
+	defer e.awaitPendingAcks()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -398,7 +501,7 @@ func (e *Exporter) drainQueue(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			if err := e.publishEvent(ctx, job.event, job.eventType); err != nil {
+			if err := e.publishEvent(job.event, job.eventType); err != nil {
 				klog.ErrorS(err, "Failed to publish event",
 					"namespace", job.event.Namespace,
 					"name", job.event.Name,
@@ -409,8 +512,9 @@ func (e *Exporter) drainQueue(ctx context.Context) {
 	}
 }
 
-// publishEvent publishes a Kubernetes event to NATS JetStream.
-func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, eventType string) error {
+// publishEvent publishes a Kubernetes event to NATS JetStream. It returns once
+// the publish is in flight; awaitAck records the outcome when the PubAck lands.
+func (e *Exporter) publishEvent(event *eventsv1.Event, eventType string) error {
 	start := time.Now()
 
 	// Create a copy to avoid modifying the cached object
@@ -421,9 +525,7 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 		eventCopy.Annotations = make(map[string]string)
 	}
 
-	scopeType, scopeName := e.resolveScope(event.Namespace)
-	eventCopy.Annotations[types.ScopeTypeAnnotation] = scopeType
-	eventCopy.Annotations[types.ScopeNameAnnotation] = scopeName
+	e.stampScope(eventCopy.Annotations, event.Namespace)
 
 	planeType, cluster, region, city := e.sourceAnnotations()
 	eventCopy.Annotations[types.SourcePlaneTypeAnnotation] = planeType
@@ -445,31 +547,81 @@ func (e *Exporter) publishEvent(ctx context.Context, event *eventsv1.Event, even
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	// Build subject: events.k8s.{namespace}
-	subject := fmt.Sprintf("%s.%s", e.subjectPrefix, event.Namespace)
+	subject := e.subject(event.Namespace)
 
-	_, err = e.js.Publish(subject, data,
+	future, err := e.js.PublishAsync(subject, data,
 		nats.MsgId(e.qualifiedMsgID(event, eventType)),
-		nats.Context(ctx),
+		nats.StallWait(publishStallWait),
 	)
 	if err != nil {
 		publishErrors.Inc()
 		return fmt.Errorf("failed to publish to NATS: %w", err)
 	}
 
-	// Record metrics
-	publishLatency.Observe(time.Since(start).Seconds())
-	eventsPublished.WithLabelValues(event.Namespace, event.Reason).Inc()
-
-	klog.V(4).InfoS("Published event",
-		"namespace", event.Namespace,
-		"name", event.Name,
-		"reason", event.Reason,
-		"type", eventType,
-		"subject", subject,
-	)
+	e.inFlight.Add(1)
+	go func() {
+		defer e.inFlight.Done()
+		e.awaitAck(future, pendingAck{
+			start:     start,
+			namespace: event.Namespace,
+			name:      event.Name,
+			reason:    event.Reason,
+			eventType: eventType,
+		})
+	}()
 
 	return nil
+}
+
+type pendingAck struct {
+	start     time.Time
+	namespace string
+	name      string
+	reason    string
+	eventType string
+}
+
+// awaitAck records the outcome of one asynchronous publish. A failed ack has
+// nothing to retry from - the job left the queue when it was published - so it
+// is only counted and logged.
+func (e *Exporter) awaitAck(future nats.PubAckFuture, ack pendingAck) {
+	select {
+	case <-future.Ok():
+		publishLatency.Observe(time.Since(ack.start).Seconds())
+		eventsPublished.WithLabelValues(ack.namespace, ack.reason).Inc()
+
+		klog.V(4).InfoS("Published event",
+			"namespace", ack.namespace,
+			"name", ack.name,
+			"reason", ack.reason,
+			"type", ack.eventType,
+			"subject", future.Msg().Subject,
+		)
+	case err := <-future.Err():
+		publishErrors.Inc()
+		klog.ErrorS(err, "Failed to publish event",
+			"namespace", ack.namespace,
+			"name", ack.name,
+		)
+	}
+}
+
+// awaitPendingAcks waits out the acks outstanding at shutdown. A publish still
+// unresolved at the deadline has not failed, so it is logged rather than
+// counted against publishErrors.
+func (e *Exporter) awaitPendingAcks() {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.inFlight.Wait()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(ackDrainTimeout):
+		klog.ErrorS(fmt.Errorf("ack drain timed out after %s", ackDrainTimeout),
+			"Publishes unresolved at shutdown", "pending", e.js.PublishAsyncPending())
+	}
 }
 
 // buildRestConfig loads the Kubernetes client configuration, from a

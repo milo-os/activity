@@ -14,6 +14,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"go.miloapis.com/activity/internal/activityprocessor"
+	"go.miloapis.com/activity/internal/natsconn"
 )
 
 // ProcessorOptions contains configuration for the activity processor.
@@ -23,7 +24,7 @@ type ProcessorOptions struct {
 	MasterURL  string
 
 	// NATS configuration
-	NATSURL        string
+	Input          natsconn.Endpoint
 	NATSStreamName string
 	ConsumerName   string
 
@@ -35,11 +36,9 @@ type ProcessorOptions struct {
 	OutputStreamName    string
 	OutputSubjectPrefix string
 
-	// NATS TLS/mTLS configuration
-	NATSTLSEnabled  bool
-	NATSTLSCertFile string
-	NATSTLSKeyFile  string
-	NATSTLSCAFile   string
+	// Output NATS broker (empty URL = publish on the input connection, empty
+	// TLS fields = inherit the input values)
+	Output natsconn.Endpoint
 
 	// Dead-letter queue configuration
 	DLQEnabled       bool
@@ -71,14 +70,14 @@ type ProcessorOptions struct {
 // NewProcessorOptions creates options with default values.
 func NewProcessorOptions() *ProcessorOptions {
 	return &ProcessorOptions{
-		Logs:                 logsapi.NewLoggingConfiguration(),
-		NATSURL:              "nats://localhost:4222",
-		NATSStreamName:       "AUDIT_EVENTS",
-		ConsumerName:         "activity-processor@activity.miloapis.com",
-		NATSEventStream:      "EVENTS",
-		NATSEventConsumer:    "activity-event-processor",
-		OutputStreamName:     "ACTIVITIES",
-		OutputSubjectPrefix:  "activities",
+		Logs:                      logsapi.NewLoggingConfiguration(),
+		Input:                     natsconn.Endpoint{URL: "nats://localhost:4222"},
+		NATSStreamName:            "AUDIT_EVENTS",
+		ConsumerName:              "activity-processor@activity.miloapis.com",
+		NATSEventStream:           "EVENTS",
+		NATSEventConsumer:         "activity-event-processor",
+		OutputStreamName:          "ACTIVITIES",
+		OutputSubjectPrefix:       "activities",
 		DLQEnabled:                true,
 		DLQStreamName:             "ACTIVITY_DEAD_LETTER",
 		DLQSubjectPrefix:          "activity.dlq",
@@ -92,9 +91,9 @@ func NewProcessorOptions() *ProcessorOptions {
 		DLQRetryAuditSubject:      "audit.k8s.retry",
 		DLQRetryEventSubject:      "events.retry",
 		Workers:                   4,
-		BatchSize:            100,
-		AckWait:              30 * time.Second,
-		HealthProbeAddr:      ":8081",
+		BatchSize:                 100,
+		AckWait:                   30 * time.Second,
+		HealthProbeAddr:           ":8081",
 	}
 }
 
@@ -107,10 +106,10 @@ func (o *ProcessorOptions) AddFlags(fs *pflag.FlagSet) {
 		"The address of the Kubernetes API server. Overrides any value in kubeconfig.")
 
 	// NATS flags
-	fs.StringVar(&o.NATSURL, "nats-url", o.NATSURL,
+	fs.StringVar(&o.Input.URL, "nats-url", o.Input.URL,
 		"NATS server URL.")
 	fs.StringVar(&o.NATSStreamName, "nats-stream", o.NATSStreamName,
-		"NATS JetStream stream name for audit events.")
+		"NATS JetStream stream name for audit events. Empty disables audit event consumption.")
 	fs.StringVar(&o.ConsumerName, "consumer-name", o.ConsumerName,
 		"Durable consumer name for the audit log processor.")
 	fs.StringVar(&o.NATSEventStream, "nats-event-stream", o.NATSEventStream,
@@ -121,16 +120,28 @@ func (o *ProcessorOptions) AddFlags(fs *pflag.FlagSet) {
 		"NATS JetStream stream name for generated activities.")
 	fs.StringVar(&o.OutputSubjectPrefix, "output-subject-prefix", o.OutputSubjectPrefix,
 		"Subject prefix for published activities.")
+	fs.StringVar(&o.Output.URL, "output-nats-url", o.Output.URL,
+		"NATS server URL to publish activities to. Empty publishes on the --nats-url connection.")
 
 	// NATS TLS/mTLS flags
-	fs.BoolVar(&o.NATSTLSEnabled, "nats-tls-enabled", o.NATSTLSEnabled,
+	fs.BoolVar(&o.Input.TLS.Enabled, "nats-tls-enabled", o.Input.TLS.Enabled,
 		"Enable TLS for NATS connection.")
-	fs.StringVar(&o.NATSTLSCertFile, "nats-tls-cert-file", o.NATSTLSCertFile,
+	fs.StringVar(&o.Input.TLS.CertFile, "nats-tls-cert-file", o.Input.TLS.CertFile,
 		"Path to client certificate file for mTLS authentication.")
-	fs.StringVar(&o.NATSTLSKeyFile, "nats-tls-key-file", o.NATSTLSKeyFile,
+	fs.StringVar(&o.Input.TLS.KeyFile, "nats-tls-key-file", o.Input.TLS.KeyFile,
 		"Path to client private key file for mTLS authentication.")
-	fs.StringVar(&o.NATSTLSCAFile, "nats-tls-ca-file", o.NATSTLSCAFile,
+	fs.StringVar(&o.Input.TLS.CAFile, "nats-tls-ca-file", o.Input.TLS.CAFile,
 		"Path to CA certificate file for server verification.")
+
+	// Output NATS TLS/mTLS flags
+	fs.BoolVar(&o.Output.TLS.Enabled, "output-nats-tls-enabled", o.Output.TLS.Enabled,
+		"Enable TLS for the --output-nats-url connection. Inherits --nats-tls-enabled when no output TLS is set.")
+	fs.StringVar(&o.Output.TLS.CertFile, "output-nats-tls-cert-file", o.Output.TLS.CertFile,
+		"Path to client certificate file for the output connection. Empty inherits --nats-tls-cert-file.")
+	fs.StringVar(&o.Output.TLS.KeyFile, "output-nats-tls-key-file", o.Output.TLS.KeyFile,
+		"Path to client private key file for the output connection. Empty inherits --nats-tls-key-file.")
+	fs.StringVar(&o.Output.TLS.CAFile, "output-nats-tls-ca-file", o.Output.TLS.CAFile,
+		"Path to CA certificate file for the output connection. Empty inherits --nats-tls-ca-file.")
 
 	// Dead-letter queue flags
 	fs.BoolVar(&o.DLQEnabled, "dlq-enabled", o.DLQEnabled,
@@ -224,17 +235,14 @@ func RunProcessor(options *ProcessorOptions) error {
 
 	// Create processor
 	processorConfig := activityprocessor.Config{
-		NATSURL:              options.NATSURL,
-		NATSStreamName:       options.NATSStreamName,
-		ConsumerName:         options.ConsumerName,
-		NATSEventStream:      options.NATSEventStream,
-		NATSEventConsumer:    options.NATSEventConsumer,
-		OutputStreamName:     options.OutputStreamName,
-		OutputSubjectPrefix:  options.OutputSubjectPrefix,
-		NATSTLSEnabled:       options.NATSTLSEnabled,
-		NATSTLSCertFile:      options.NATSTLSCertFile,
-		NATSTLSKeyFile:       options.NATSTLSKeyFile,
-		NATSTLSCAFile:        options.NATSTLSCAFile,
+		Input:                     options.Input,
+		NATSStreamName:            options.NATSStreamName,
+		ConsumerName:              options.ConsumerName,
+		NATSEventStream:           options.NATSEventStream,
+		NATSEventConsumer:         options.NATSEventConsumer,
+		OutputStreamName:          options.OutputStreamName,
+		OutputSubjectPrefix:       options.OutputSubjectPrefix,
+		Output:                    options.Output,
 		DLQEnabled:                options.DLQEnabled,
 		DLQStreamName:             options.DLQStreamName,
 		DLQSubjectPrefix:          options.DLQSubjectPrefix,
@@ -248,10 +256,10 @@ func RunProcessor(options *ProcessorOptions) error {
 		DLQRetryAuditSubject:      options.DLQRetryAuditSubject,
 		DLQRetryEventSubject:      options.DLQRetryEventSubject,
 		Workers:                   options.Workers,
-		BatchSize:            options.BatchSize,
-		AckWait:              options.AckWait,
-		MaxDeliver:           5,
-		HealthProbeAddr:      options.HealthProbeAddr,
+		BatchSize:                 options.BatchSize,
+		AckWait:                   options.AckWait,
+		MaxDeliver:                5,
+		HealthProbeAddr:           options.HealthProbeAddr,
 	}
 
 	proc, err := activityprocessor.New(processorConfig, restConfig)

@@ -1,0 +1,33 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: k8s-event-exporter
+  namespace: activity-system
+  labels:
+    app: k8s-event-exporter
+    app.kubernetes.io/name: k8s-event-exporter
+    app.kubernetes.io/component: event-forwarder
+    monitoring: "true"
+spec:
+  selector:
+    matchLabels:
+      app: k8s-event-exporter
+  endpoints:
+    # The exporter serves /metrics off its health probe listener.
+    - port: health
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      scheme: http
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_service_name]
+          targetLabel: service
+  namespaceSelector:
+    matchNames:
+      - activity-system

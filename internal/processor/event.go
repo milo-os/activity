@@ -20,8 +20,10 @@ import (
 // and generates Activity records via ActivityPolicy event rules.
 type EventProcessor struct {
 	js             nats.JetStreamContext
+	outputJS       nats.JetStreamContext
 	streamName     string
 	consumerName   string
+	filterSubject  string
 	activityPrefix string
 	batchSize      int
 	policyLookup   EventPolicyLookup
@@ -30,16 +32,23 @@ type EventProcessor struct {
 }
 
 // NewEventProcessor creates a new event processor.
-// js is the JetStream context used for both consuming events and publishing activities.
+// js is the JetStream context used to consume events and to publish to the DLQ.
+// outputJS is the JetStream context used to publish generated activities; it may
+// be the same context as js, or one on a different broker.
 // streamName is the NATS stream to consume from (e.g., "EVENTS").
 // consumerName is the durable pull consumer name.
+// filterSubject must be the consumer's own FilterSubject as reported by the
+// server: PullSubscribe rejects any other value, and empty for a consumer
+// configured with multiple filters.
 // activityPrefix is the subject prefix for publishing generated activities.
 // policyLookup is used to evaluate events against ActivityPolicy event rules.
 // dlqPublisher is used to publish failed events to the dead-letter queue.
 func NewEventProcessor(
 	js nats.JetStreamContext,
+	outputJS nats.JetStreamContext,
 	streamName string,
 	consumerName string,
+	filterSubject string,
 	activityPrefix string,
 	policyLookup EventPolicyLookup,
 	workers int,
@@ -48,8 +57,10 @@ func NewEventProcessor(
 ) *EventProcessor {
 	return &EventProcessor{
 		js:             js,
+		outputJS:       outputJS,
 		streamName:     streamName,
 		consumerName:   consumerName,
+		filterSubject:  filterSubject,
 		activityPrefix: activityPrefix,
 		policyLookup:   policyLookup,
 		workers:        workers,
@@ -91,7 +102,7 @@ func (p *EventProcessor) worker(ctx context.Context, id int) {
 	klog.V(4).InfoS("Event worker started", "worker", id)
 
 	sub, err := p.js.PullSubscribe(
-		"events.>",
+		p.filterSubject,
 		p.consumerName,
 		nats.Bind(p.streamName, p.consumerName),
 	)
@@ -262,7 +273,7 @@ func (p *EventProcessor) buildActivity(
 	resourceObject := ResolveInvolvedObject(event)
 
 	// Extract resource info from the resolved resource object.
-	namespace := getStringFromMap(resourceObject, "namespace")
+	namespace := resolveActivityNamespace(event, resourceObject)
 	resourceName := getStringFromMap(resourceObject, "name")
 	resourceUID := getStringFromMap(resourceObject, "uid")
 	apiVersion := getStringFromMap(resourceObject, "apiVersion")
@@ -357,7 +368,7 @@ func (p *EventProcessor) publishActivity(ctx context.Context, activity *v1alpha1
 	subject := p.buildActivitySubject(activity)
 
 	// Use activity name as MsgID for NATS deduplication.
-	_, err = p.js.Publish(subject, data, nats.MsgId(activity.Name))
+	_, err = p.outputJS.Publish(subject, data, nats.MsgId(activity.Name))
 	if err != nil {
 		return fmt.Errorf("failed to publish activity to NATS: %w", err)
 	}

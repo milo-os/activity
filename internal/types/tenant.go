@@ -2,6 +2,8 @@
 // the activity service.
 package types
 
+import "strings"
+
 // TenantType constants define the valid values for tenant/scope type fields.
 // These use Kubernetes Kind naming convention (PascalCase) to match how Milo
 // sets the parent type in authentication extra fields.
@@ -27,3 +29,19 @@ const (
 	// performed by a specific user across all organizations and projects.
 	TenantTypeUser = "User"
 )
+
+// NormalizeTenantType maps a tenant type onto its canonical spelling, matching
+// case-insensitively. Values outside the canonical set pass through unchanged.
+func NormalizeTenantType(tenantType string) string {
+	switch strings.ToLower(tenantType) {
+	case strings.ToLower(TenantTypePlatform):
+		return TenantTypePlatform
+	case strings.ToLower(TenantTypeOrganization):
+		return TenantTypeOrganization
+	case strings.ToLower(TenantTypeProject):
+		return TenantTypeProject
+	case strings.ToLower(TenantTypeUser):
+		return TenantTypeUser
+	}
+	return tenantType
+}

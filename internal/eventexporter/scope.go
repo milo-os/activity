@@ -4,15 +4,24 @@ import (
 	"strings"
 
 	corelisters "k8s.io/client-go/listers/core/v1"
+
+	"go.miloapis.com/activity/internal/types"
 )
 
 // upstreamClusterNameLabel is the label Karmada propagates onto a namespace
 // in edge and member clusters, naming the project it was federated from.
 const upstreamClusterNameLabel = "meta.datumapis.com/upstream-cluster-name"
 
-// scopeTypeProject is the platform.miloapis.com/scope.type value for a
-// project-scoped Activity, recovered from an event's namespace.
-const scopeTypeProject = "project"
+// upstreamNamespaceLabel is the label Karmada propagates onto a namespace in
+// edge and member clusters, naming the upstream namespace it projects.
+const upstreamNamespaceLabel = "meta.datumapis.com/upstream-namespace"
+
+// eventScope is the tenant scope recovered for an event.
+type eventScope struct {
+	Type      string
+	Name      string
+	Namespace string
+}
 
 // upstreamClusterNameFromLabel decodes a project name from
 // upstreamClusterNameLabel's value ("cluster-" prefix, slashes encoded as
@@ -34,25 +43,28 @@ func newNamespaceScopeResolver(namespaces corelisters.NamespaceLister) *namespac
 	return &namespaceScopeResolver{namespaces: namespaces}
 }
 
-// Resolve returns the project scope for namespace, and whether it resolved.
-// It returns false when the namespace can't be read or carries no
-// upstream-cluster-name label - callers should treat the event as unscoped
-// rather than guessing.
-func (r *namespaceScopeResolver) Resolve(namespace string) (scopeType, scopeName string, ok bool) {
+// Resolve returns the project scope and upstream namespace for namespace.
+// It returns false when the namespace can't be read or either upstream label
+// is missing - callers should treat the event as unscoped rather than guessing.
+func (r *namespaceScopeResolver) Resolve(namespace string) (eventScope, bool) {
 	ns, err := r.namespaces.Get(namespace)
 	if err != nil {
-		return "", "", false
+		return eventScope{}, false
 	}
 
-	label, present := ns.Labels[upstreamClusterNameLabel]
-	if !present || label == "" {
-		return "", "", false
-	}
-
-	project := upstreamClusterNameFromLabel(label)
+	project := upstreamClusterNameFromLabel(ns.Labels[upstreamClusterNameLabel])
 	if project == "" {
-		return "", "", false
+		return eventScope{}, false
 	}
 
-	return scopeTypeProject, project, true
+	upstreamNamespace := ns.Labels[upstreamNamespaceLabel]
+	if upstreamNamespace == "" {
+		return eventScope{}, false
+	}
+
+	return eventScope{
+		Type:      types.TenantTypeProject,
+		Name:      project,
+		Namespace: upstreamNamespace,
+	}, true
 }

@@ -142,27 +142,13 @@ func (b *ActivityBuilder) BuildFromEvent(
 	links []cel.Link,
 	resolveKind KindResolver,
 ) (*v1alpha1.Activity, error) {
-	regarding, _ := eventMap["regarding"].(map[string]interface{})
+	// Extract the involved/regarding object using the shared fallback chain:
+	// "regarding" (events.k8s.io/v1) -> "involvedObject" (core/v1).
+	regarding := ResolveInvolvedObject(eventMap)
 
-	// Extract timestamps
-	var timestamp time.Time
-	if ts, ok := eventMap["eventTime"].(string); ok {
-		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-			timestamp = t
-		}
-	}
-	if timestamp.IsZero() {
-		if metadata, ok := eventMap["metadata"].(map[string]interface{}); ok {
-			if ts, ok := metadata["creationTimestamp"].(string); ok {
-				if t, err := time.Parse(time.RFC3339, ts); err == nil {
-					timestamp = t
-				}
-			}
-		}
-	}
-	if timestamp.IsZero() {
-		timestamp = time.Now()
-	}
+	// Extract timestamp using the shared fallback chain: eventTime -> lastTimestamp
+	// -> firstTimestamp -> metadata.creationTimestamp -> now().
+	timestamp := resolveEventTimestamp(eventMap)
 
 	// Extract resource info from regarding
 	namespace := GetNestedString(regarding, "namespace")
@@ -173,15 +159,9 @@ func (b *ActivityBuilder) BuildFromEvent(
 	// Events are typically system-generated
 	changeSource := ChangeSourceSystem
 
-	// For events, actor is usually the reporting component
-	reportingController := GetNestedString(eventMap, "reportingController")
-	actor := v1alpha1.ActivityActor{
-		Type: ActorTypeSystem,
-		Name: reportingController,
-	}
-	if actor.Name == "" {
-		actor.Name = "unknown"
-	}
+	// Resolve actor from reporting controller or source component, using the
+	// fallback chain shared with the live event processor.
+	actor := resolveActorFromEvent(eventMap)
 
 	// Extract tenant from scope annotations; fall back to platform scope when absent.
 	tenant := ExtractTenantFromAnnotations(eventMap)
@@ -211,12 +191,7 @@ func (b *ActivityBuilder) BuildFromEvent(
 			Name:              name,
 			Namespace:         namespace,
 			CreationTimestamp: metav1.NewTime(timestamp),
-			Labels: map[string]string{
-				"activity.miloapis.com/origin-type":   "event",
-				"activity.miloapis.com/change-source": changeSource,
-				"activity.miloapis.com/api-group":     b.APIGroup,
-				"activity.miloapis.com/resource-kind": b.Kind,
-			},
+			Labels:            eventActivityLabels(changeSource, b.APIGroup, b.Kind, getStringFromMap(eventMap, "reason")),
 		},
 		Spec: v1alpha1.ActivitySpec{
 			Summary:      summary,

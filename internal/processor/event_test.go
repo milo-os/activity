@@ -5,8 +5,6 @@ import (
 )
 
 func TestGetInvolvedObject(t *testing.T) {
-	p := &EventProcessor{}
-
 	tests := []struct {
 		name     string
 		event    map[string]any
@@ -61,19 +59,19 @@ func TestGetInvolvedObject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := p.getInvolvedObject(tt.event)
+			got := ResolveInvolvedObject(tt.event)
 			if tt.wantNil {
 				if got != nil {
-					t.Errorf("getInvolvedObject() = %v, want nil", got)
+					t.Errorf("ResolveInvolvedObject() = %v, want nil", got)
 				}
 				return
 			}
 			if got == nil {
-				t.Errorf("getInvolvedObject() = nil, want non-nil")
+				t.Errorf("ResolveInvolvedObject() = nil, want non-nil")
 				return
 			}
 			if kind := getStringFromMap(got, "kind"); kind != tt.wantKind {
-				t.Errorf("getInvolvedObject() kind = %v, want %v", kind, tt.wantKind)
+				t.Errorf("ResolveInvolvedObject() kind = %v, want %v", kind, tt.wantKind)
 			}
 		})
 	}
@@ -102,13 +100,11 @@ func TestParseAPIGroup(t *testing.T) {
 }
 
 func TestResolveEventActor(t *testing.T) {
-	p := &EventProcessor{}
-
 	tests := []struct {
-		name      string
-		event     map[string]any
-		wantType  string
-		wantName  string
+		name     string
+		event    map[string]any
+		wantType string
+		wantName string
 	}{
 		{
 			name: "events.k8s.io/v1 with reportingController",
@@ -149,12 +145,12 @@ func TestResolveEventActor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actor := p.resolveEventActor(tt.event)
+			actor := resolveActorFromEvent(tt.event)
 			if actor.Type != tt.wantType {
-				t.Errorf("resolveEventActor() Type = %v, want %v", actor.Type, tt.wantType)
+				t.Errorf("resolveActorFromEvent() Type = %v, want %v", actor.Type, tt.wantType)
 			}
 			if actor.Name != tt.wantName {
-				t.Errorf("resolveEventActor() Name = %v, want %v", actor.Name, tt.wantName)
+				t.Errorf("resolveActorFromEvent() Name = %v, want %v", actor.Name, tt.wantName)
 			}
 		})
 	}

@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -138,6 +139,117 @@ func TestGetEventFieldValue_RelatedNilDoesNotPanic(t *testing.T) {
 				assert.Equal(t, "", got, "expected empty string for %s when Related is nil", col)
 			})
 		})
+	}
+}
+
+func TestGetEventFieldValue_SourceFields(t *testing.T) {
+	eventWithSource := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				"activity.miloapis.com/source-plane-type": "edge",
+				"activity.miloapis.com/source-cluster":    "cluster-dfw-1",
+				"activity.miloapis.com/source-region":     "us-south",
+				"activity.miloapis.com/source-city":       "dfw",
+			},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		event  *corev1.Event
+		column string
+		want   string
+	}{
+		{name: "source_plane_type with annotation set", event: eventWithSource, column: "source_plane_type", want: "edge"},
+		{name: "source_cluster with annotation set", event: eventWithSource, column: "source_cluster", want: "cluster-dfw-1"},
+		{name: "source_region with annotation set", event: eventWithSource, column: "source_region", want: "us-south"},
+		{name: "source_city with annotation set", event: eventWithSource, column: "source_city", want: "dfw"},
+		// No source-* annotations present (the state of every event today, since
+		// nothing emits them yet) - must return empty string, not panic.
+		{name: "source_plane_type with no annotations", event: &corev1.Event{}, column: "source_plane_type", want: ""},
+		{name: "source_cluster with no annotations", event: &corev1.Event{}, column: "source_cluster", want: ""},
+		{name: "source_region with no annotations", event: &corev1.Event{}, column: "source_region", want: ""},
+		{name: "source_city with no annotations", event: &corev1.Event{}, column: "source_city", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetEventFieldValue(tt.event, tt.column)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestActivityFacetColumnMapping_SourceFields(t *testing.T) {
+	tests := []struct {
+		field          string
+		expectedColumn string
+	}{
+		{"spec.source.planeType", "source_plane_type"},
+		{"spec.source.cluster", "source_cluster"},
+		{"spec.source.region", "source_region"},
+		{"spec.source.city", "source_city"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			got, err := GetActivityFacetColumn(tt.field)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedColumn, got)
+		})
+	}
+}
+
+func TestEventFacetColumnMapping_SourceFields(t *testing.T) {
+	tests := []struct {
+		field          string
+		expectedColumn string
+	}{
+		{"sourcePlaneType", "source_plane_type"},
+		{"sourceCluster", "source_cluster"},
+		{"sourceRegion", "source_region"},
+		{"sourceCity", "source_city"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			got, err := GetEventFacetColumn(tt.field)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedColumn, got)
+		})
+	}
+}
+
+// TestFacetFieldColumnMappingsAreConsistent re-runs the same consistency check
+// performed by fields.go's init() (which panics at apiserver startup on a
+// mismatch) as an ordinary test assertion, so a future regression here fails
+// CI with a clear message instead of only surfacing as a boot-time panic.
+func TestFacetFieldColumnMappingsAreConsistent(t *testing.T) {
+	for field := range AuditLogFacetFields {
+		_, ok := auditLogFacetColumnMapping[field]
+		assert.Truef(t, ok, "missing ClickHouse column mapping for audit log facet field %q", field)
+	}
+	for field := range auditLogFacetColumnMapping {
+		_, ok := AuditLogFacetFields[field]
+		assert.Truef(t, ok, "audit log facet column mapping %q has no field definition", field)
+	}
+
+	for field := range ActivityFacetFields {
+		_, ok := activityFacetColumnMapping[field]
+		assert.Truef(t, ok, "missing ClickHouse column mapping for activity facet field %q", field)
+	}
+	for field := range activityFacetColumnMapping {
+		_, ok := ActivityFacetFields[field]
+		assert.Truef(t, ok, "activity facet column mapping %q has no field definition", field)
+	}
+
+	for field := range EventFacetFields {
+		_, ok := eventFacetColumnMapping[field]
+		assert.Truef(t, ok, "missing ClickHouse column mapping for event facet field %q", field)
+	}
+	for field := range eventFacetColumnMapping {
+		_, ok := EventFacetFields[field]
+		assert.Truef(t, ok, "event facet column mapping %q has no field definition", field)
 	}
 }
 

@@ -10,6 +10,7 @@ Optional components that can be selectively included in overlays.
 - **clickhouse-database** - ClickHouse database deployment
 - **clickhouse-migrations** - Database schema migrations
 - **grafana-clickhouse** - Grafana datasource configuration
+- **nats-edge-relay** - Edge-local NATS relay that leafnodes into the hub
 - **nats-streams** - NATS JetStream configuration
 - **observability** - ServiceMonitors, alerts, and dashboards
 - **rustfs-bucket** - S3-compatible object storage

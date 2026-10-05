@@ -260,11 +260,10 @@ func TestBuildActivityTenantFromScopeAnnotations(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		event          map[string]any
-		involvedObject map[string]any
-		wantTenant     string
-		wantName       string
+		name       string
+		event      map[string]any
+		wantTenant string
+		wantName   string
 	}{
 		{
 			name: "project scope annotation is used",
@@ -279,9 +278,8 @@ func TestBuildActivityTenantFromScopeAnnotations(t *testing.T) {
 				"reportingController": "dns-operator",
 				"regarding":           involvedObject,
 			},
-			involvedObject: involvedObject,
-			wantTenant:     TenantTypeProject,
-			wantName:       "my-project",
+			wantTenant: TenantTypeProject,
+			wantName:   "my-project",
 		},
 		{
 			name: "organization scope annotation is used",
@@ -296,9 +294,8 @@ func TestBuildActivityTenantFromScopeAnnotations(t *testing.T) {
 				"reportingController": "dns-operator",
 				"regarding":           involvedObject,
 			},
-			involvedObject: involvedObject,
-			wantTenant:     TenantTypeOrganization,
-			wantName:       "acme-corp",
+			wantTenant: TenantTypeOrganization,
+			wantName:   "acme-corp",
 		},
 		{
 			name: "missing annotations fall back to platform scope",
@@ -309,9 +306,8 @@ func TestBuildActivityTenantFromScopeAnnotations(t *testing.T) {
 				"reportingController": "dns-operator",
 				"regarding":           involvedObject,
 			},
-			involvedObject: involvedObject,
-			wantTenant:     TenantTypePlatform,
-			wantName:       "",
+			wantTenant: TenantTypePlatform,
+			wantName:   "",
 		},
 		{
 			name: "scope annotations with nil regarding does not panic",
@@ -325,15 +321,14 @@ func TestBuildActivityTenantFromScopeAnnotations(t *testing.T) {
 				},
 				"reportingController": "dns-operator",
 			},
-			involvedObject: nil,
-			wantTenant:     TenantTypeProject,
-			wantName:       "my-project",
+			wantTenant: TenantTypeProject,
+			wantName:   "my-project",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			activity := p.buildActivity(tt.event, matched, tt.involvedObject, matched.Summary, nil)
+			activity := p.buildActivity(tt.event, matched, matched.Summary, nil)
 			if activity.Spec.Tenant.Type != tt.wantTenant {
 				t.Errorf("Tenant.Type = %q, want %q", activity.Spec.Tenant.Type, tt.wantTenant)
 			}
@@ -364,14 +359,6 @@ func TestBuildActivityFromEvent(t *testing.T) {
 		},
 	}
 
-	involvedObject := map[string]any{
-		"kind":       "Pod",
-		"name":       "my-pod",
-		"namespace":  "default",
-		"uid":        "pod-456",
-		"apiVersion": "v1",
-	}
-
 	matched := &MatchedPolicy{
 		PolicyName: "core-pods",
 		Generation: 1,
@@ -380,7 +367,7 @@ func TestBuildActivityFromEvent(t *testing.T) {
 		Summary:    "Pod my-pod was scheduled",
 	}
 
-	activity := p.buildActivity(event, matched, involvedObject, matched.Summary, nil)
+	activity := p.buildActivity(event, matched, matched.Summary, nil)
 
 	// Verify activity fields
 	if activity.Spec.Summary != "Pod my-pod was scheduled" {

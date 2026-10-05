@@ -146,3 +146,52 @@ func TestEvaluateEventBatch_ModernRegarding(t *testing.T) {
 		t.Errorf("Resource.Kind = %q, want %q", got.Kind, "Pod")
 	}
 }
+
+// TestEvaluateEventBatch_FederatedSource asserts evaluateEventBatch picks up
+// source annotations and qualifies Origin.ID automatically, since it
+// delegates entirely to processor.ActivityBuilder.BuildFromEvent.
+func TestEvaluateEventBatch_FederatedSource(t *testing.T) {
+	r := newTestReindexerForPodEvents(t)
+
+	batch := []map[string]interface{}{
+		{
+			"metadata": map[string]interface{}{
+				"uid": "evt-uid-3",
+				"annotations": map[string]interface{}{
+					"activity.miloapis.com/source-plane-type": "edge",
+					"activity.miloapis.com/source-cluster":    "cluster-dfw-1",
+				},
+			},
+			"reason": "SomeReason",
+			"regarding": map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"namespace":  "default",
+				"name":       "my-pod-3",
+				"uid":        "pod-uid-3",
+			},
+		},
+	}
+
+	activities, err := r.evaluateEventBatch(context.Background(), batch)
+	if err != nil {
+		t.Fatalf("evaluateEventBatch() error = %v", err)
+	}
+	if len(activities) != 1 {
+		t.Fatalf("len(activities) = %d, want 1", len(activities))
+	}
+
+	activity := activities[0]
+
+	if activity.Spec.Source == nil {
+		t.Fatal("Spec.Source is nil, want it populated from source annotations")
+	}
+	if activity.Spec.Source.PlaneType != "edge" || activity.Spec.Source.Cluster != "cluster-dfw-1" {
+		t.Errorf("Spec.Source = %+v, want PlaneType=edge Cluster=cluster-dfw-1", activity.Spec.Source)
+	}
+
+	wantOriginID := "edge/cluster-dfw-1/evt-uid-3"
+	if activity.Spec.Origin.ID != wantOriginID {
+		t.Errorf("Spec.Origin.ID = %q, want qualified %q", activity.Spec.Origin.ID, wantOriginID)
+	}
+}

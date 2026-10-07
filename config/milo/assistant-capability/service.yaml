@@ -1,0 +1,22 @@
+# Activity's catalog entry. ServiceAgent.spec.serviceRef names this object's
+# metadata.name ("activity"), not the reverse-DNS serviceName.
+apiVersion: services.miloapis.com/v1alpha1
+kind: Service
+metadata:
+  name: activity
+  labels:
+    app.kubernetes.io/name: activity
+    app.kubernetes.io/part-of: activity.miloapis.com
+spec:
+  serviceName: activity.miloapis.com
+  displayName: Activity
+  description: |
+    Queryable history for a project: human-readable activity summaries of who
+    changed what, audit logs, and Kubernetes events.
+  owner:
+    producerProjectRef:
+      name: datum-cloud
+  # Any project may enable it themselves; nothing here is billed.
+  enablementPolicy:
+    mode: SelfService
+  phase: Published

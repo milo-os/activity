@@ -1,0 +1,20 @@
+# Activity's registration with Patch, Datum's assistant: the catalog entry, the
+# agent customers talk to, and the docs, tools and guides it offers them.
+#
+# STAGING ONLY. This is a standalone Kustomization, deliberately NOT part of
+# config/milo (which infra applies to Milo in every environment). Infra applies
+# it to the staging Milo control plane with its own Flux Kustomization at
+# `path: ./milo/assistant-capability` in the activity-kustomize bundle.
+# Production stays unregistered until the production AI gateway has an
+# MCPRoute for activity-mcp: production Patch only reaches service MCP servers
+# through AI-gateway endpoints.
+#
+# The service catalog copies the agent's content into each project entitled to
+# the "activity" service as a CapabilityBinding; entitlement decides who gets it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - service.yaml
+  - service-agent.yaml
+  - service-agent-configuration.yaml

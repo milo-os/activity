@@ -397,7 +397,6 @@ func (m *mockEventFacetQueryInterface) Get(ctx context.Context, name string, opt
 	return &v1alpha1.EventFacetQuery{ObjectMeta: metav1.ObjectMeta{Name: name}}, nil
 }
 
-
 func (m *mockEventFacetQueryInterface) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 	return nil, nil
 }
@@ -410,9 +409,14 @@ func (m *mockEventFacetQueryInterface) Patch(ctx context.Context, name string, p
 // Mock EventQuery Interface
 // =============================================================================
 
-type mockEventQueryInterface struct{}
+type mockEventQueryInterface struct {
+	createFunc func(ctx context.Context, query *v1alpha1.EventQuery, opts metav1.CreateOptions) (*v1alpha1.EventQuery, error)
+}
 
 func (m *mockEventQueryInterface) Create(ctx context.Context, query *v1alpha1.EventQuery, opts metav1.CreateOptions) (*v1alpha1.EventQuery, error) {
+	if m.createFunc != nil {
+		return m.createFunc(ctx, query, opts)
+	}
 	return query, nil
 }
 

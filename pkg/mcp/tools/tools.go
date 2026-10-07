@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,16 +16,26 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 	activityclient "go.miloapis.com/activity/pkg/client/clientset/versioned/typed/activity/v1alpha1"
 )
 
+// ClientResolver returns the Activity API client a single tool call reads
+// through. It is called once per tool invocation, so a provider can bind each
+// call to the identity of whoever made it (HTTP mode) or hand back one fixed
+// client (stdio mode).
+//
+// An error is reported to the model as a tool error, never as a protocol
+// error, so it should be written for whoever reads the assistant's answer.
+type ClientResolver func(ctx context.Context) (activityclient.ActivityV1alpha1Interface, error)
+
 // ToolProvider provides MCP tools for interacting with the Activity API.
-// It wraps an Activity API client and exposes query capabilities as MCP tools.
+// It resolves an Activity API client per call and exposes query capabilities
+// as MCP tools.
 type ToolProvider struct {
-	client    activityclient.ActivityV1alpha1Interface
-	namespace string
+	resolve ClientResolver
 }
 
 // Config contains configuration for the ToolProvider.
@@ -36,8 +48,8 @@ type Config struct {
 	// If empty, uses the current context.
 	Context string
 
-	// Namespace for namespaced resources (e.g., Activities).
-	// If empty, uses "default".
+	// Namespace is retained for compatibility. Every tool queries
+	// cluster-scoped query resources, so it has no effect.
 	Namespace string
 }
 
@@ -78,27 +90,24 @@ func NewToolProvider(cfg Config) (*ToolProvider, error) {
 		return nil, fmt.Errorf("failed to create activity client: %w", err)
 	}
 
-	namespace := cfg.Namespace
-	if namespace == "" {
-		namespace = "default"
-	}
-
-	return &ToolProvider{
-		client:    client,
-		namespace: namespace,
-	}, nil
+	return NewToolProviderWithClient(client, cfg.Namespace), nil
 }
 
 // NewToolProviderWithClient creates a ToolProvider with an existing client.
 // This is useful for embedding the tools into an existing application.
-func NewToolProviderWithClient(client activityclient.ActivityV1alpha1Interface, namespace string) *ToolProvider {
-	if namespace == "" {
-		namespace = "default"
-	}
-	return &ToolProvider{
-		client:    client,
-		namespace: namespace,
-	}
+//
+// The namespace argument is retained for compatibility and has no effect.
+func NewToolProviderWithClient(client activityclient.ActivityV1alpha1Interface, _ string) *ToolProvider {
+	return NewToolProviderWithResolver(func(context.Context) (activityclient.ActivityV1alpha1Interface, error) {
+		return client, nil
+	})
+}
+
+// NewToolProviderWithResolver creates a ToolProvider that resolves its client
+// on every tool call. Use it when the client depends on the request, such as
+// a server that reads as the identity of each caller.
+func NewToolProviderWithResolver(resolve ClientResolver) *ToolProvider {
+	return &ToolProvider{resolve: resolve}
 }
 
 // Close releases resources held by the ToolProvider.
@@ -107,82 +116,212 @@ func (p *ToolProvider) Close() error {
 	return nil
 }
 
+// client resolves the Activity API client for one tool call. On failure it
+// returns the tool error to hand back to the model, so call sites read:
+//
+//	c, errRes := p.client(ctx)
+//	if errRes != nil {
+//		return errRes, nil, nil
+//	}
+func (p *ToolProvider) client(ctx context.Context) (activityclient.ActivityV1alpha1Interface, *mcp.CallToolResult) {
+	if p.resolve == nil {
+		return nil, errorResult("Activity API client is not configured")
+	}
+	c, err := p.resolve(ctx)
+	if err != nil {
+		return nil, errorResult(err.Error())
+	}
+	if c == nil {
+		return nil, errorResult("Activity API client is not configured")
+	}
+	return c, nil
+}
+
+// Tool names, exported so a caller building an allow-list (see
+// RegisterOptions) refers to tools by constant rather than by string.
+const (
+	ToolQueryAuditLogs          = "query_audit_logs"
+	ToolGetAuditLogFacets       = "get_audit_log_facets"
+	ToolQueryActivities         = "query_activities"
+	ToolGetActivityFacets       = "get_activity_facets"
+	ToolFindFailedOperations    = "find_failed_operations"
+	ToolGetResourceHistory      = "get_resource_history"
+	ToolGetUserActivitySummary  = "get_user_activity_summary"
+	ToolGetActivityTimeline     = "get_activity_timeline"
+	ToolSummarizeRecentActivity = "summarize_recent_activity"
+	ToolCompareActivityPeriods  = "compare_activity_periods"
+	ToolListActivityPolicies    = "list_activity_policies"
+	ToolPreviewActivityPolicy   = "preview_activity_policy"
+	ToolQueryEvents             = "query_events"
+	ToolGetEventFacets          = "get_event_facets"
+)
+
+// RegisterOptions controls which tools RegisterToolsWithOptions adds.
+type RegisterOptions struct {
+	// Tools is an allow-list of tool names to register. When nil, every tool
+	// is registered. Names that match no tool are ignored, so callers should
+	// pin the resulting tool list in a test.
+	Tools []string
+}
+
+// allows reports whether the options permit registering the named tool.
+func (o RegisterOptions) allows(name string) bool {
+	if o.Tools == nil {
+		return true
+	}
+	for _, t := range o.Tools {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// readOnly is the annotation every Activity tool carries: each one creates an
+// ephemeral query resource that is evaluated and returned, never stored, so no
+// call changes anything.
+func readOnly() *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{ReadOnlyHint: true}
+}
+
+// addTool registers a tool when opts allows it.
+//
+// Every call runs under one overall deadline (ToolCallTimeout), however many
+// API requests the handler makes, so a multi-query tool such as
+// compare_activity_periods cannot outlast the caller's own task budget.
+func addTool[In any](server *mcp.Server, opts RegisterOptions, tool *mcp.Tool, handler mcp.ToolHandlerFor[In, any]) {
+	if !opts.allows(tool.Name) {
+		return
+	}
+	mcp.AddTool(server, tool, func(ctx context.Context, req *mcp.CallToolRequest, args In) (*mcp.CallToolResult, any, error) {
+		ctx, cancel := context.WithTimeout(ctx, ToolCallTimeout)
+		defer cancel()
+		return handler(ctx, req, args)
+	})
+}
+
+// ToolCallTimeout bounds one tool call end to end, including every API
+// request it makes. It sits below the 60 second task budget Patch gives a
+// tool call, so a slow query fails as a tool error rather than being cut off.
+const ToolCallTimeout = 50 * time.Second
+
+// RecoverMiddleware turns a panic in any MCP method handler into an error
+// instead of a crash. The go-sdk runs handlers on its own goroutines without a
+// recover, so without this one malformed record could take down the process
+// and every caller's in-flight request with it. A panicking tools/call is
+// reported to the model as a tool error; other methods get a JSON-RPC error.
+func RecoverMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				klog.ErrorS(fmt.Errorf("panic: %v", r), "MCP handler panicked", "method", method, "stack", string(debug.Stack()))
+				if method == "tools/call" {
+					result, err = errorResult("Internal error while running this tool. The failure has been logged; retrying with the same arguments will likely fail the same way."), nil
+					return
+				}
+				result, err = nil, fmt.Errorf("internal error handling %s", method)
+			}
+		}()
+		return next(ctx, method, req)
+	}
+}
+
 // RegisterTools registers all activity tools with an MCP server.
 func (p *ToolProvider) RegisterTools(server *mcp.Server) {
+	p.RegisterToolsWithOptions(server, RegisterOptions{})
+}
+
+// RegisterToolsWithOptions registers the activity tools opts allows with an
+// MCP server.
+func (p *ToolProvider) RegisterToolsWithOptions(server *mcp.Server, opts RegisterOptions) {
 	// Audit log tools
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "query_audit_logs",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolQueryAuditLogs,
 		Description: "Search audit logs from the Kubernetes control plane. Use this to investigate incidents, track resource changes, or analyze user activity. Results are returned newest-first.",
+		Annotations: readOnly(),
 	}, p.handleQueryAuditLogs)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_audit_log_facets",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolGetAuditLogFacets,
 		Description: "Get distinct values and counts for audit log fields. Use this to discover what verbs, users, resources, and namespaces appear in the audit logs. Useful for building filters or understanding activity patterns.",
+		Annotations: readOnly(),
 	}, p.handleGetAuditLogFacets)
 
 	// Activity tools (human-readable summaries)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "query_activities",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolQueryActivities,
 		Description: "Search human-readable activity summaries. Activities are translated from audit logs into friendly descriptions like 'alice created HTTP proxy api-gateway'. Use this to understand what changed in plain language.",
+		Annotations: readOnly(),
 	}, p.handleQueryActivities)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_activity_facets",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolGetActivityFacets,
 		Description: "Get distinct values and counts for activity fields. Discover who's active, what resources are changing, and whether changes are human or automated. Valid fields: spec.changeSource, spec.actor.name, spec.actor.type, spec.resource.apiGroup, spec.resource.kind, spec.resource.namespace.",
+		Annotations: readOnly(),
 	}, p.handleGetActivityFacets)
 
 	// Investigation tools
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "find_failed_operations",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolFindFailedOperations,
 		Description: "Find operations that failed (HTTP 4xx/5xx responses). Use this to debug permission issues, find failed deployments, or investigate security events.",
+		Annotations: readOnly(),
 	}, p.handleFindFailedOperations)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_resource_history",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolGetResourceHistory,
 		Description: "Get the change history for a specific resource. See who changed what, when, with field-level diffs where available. Use this to understand how a resource evolved over time.",
+		Annotations: readOnly(),
 	}, p.handleGetResourceHistory)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_user_activity_summary",
-		Description: "Get a summary of a specific user's recent actions. See what resources they modified, when, and how often. Useful for security reviews and understanding user behavior.",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolGetUserActivitySummary,
+		Description: "Get a summary of a specific user's recent actions. See what resources they modified, when, and how often. Useful for security reviews and understanding user behavior. username is the actor name as Activities show it (usually an email); a leading 'system:' is dropped, matching how system actors are recorded.",
+		Annotations: readOnly(),
 	}, p.handleGetUserActivitySummary)
 
 	// Analytics tools
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_activity_timeline",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolGetActivityTimeline,
 		Description: "Get activity counts grouped by time buckets (hourly/daily). Use this to visualize activity patterns, identify peak periods, and correlate with incidents.",
+		Annotations: readOnly(),
 	}, p.handleGetActivityTimeline)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "summarize_recent_activity",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolSummarizeRecentActivity,
 		Description: "Generate a summary of recent activity including top actors, most changed resources, and key highlights. Perfect for status updates and handoffs.",
+		Annotations: readOnly(),
 	}, p.handleSummarizeRecentActivity)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "compare_activity_periods",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolCompareActivityPeriods,
 		Description: "Compare activity between two time periods. Identify what changed, new actors, increased/decreased activity. Use this for incident investigation and trend analysis.",
+		Annotations: readOnly(),
 	}, p.handleCompareActivityPeriods)
 
 	// Policy tools
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_activity_policies",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolListActivityPolicies,
 		Description: "List configured ActivityPolicies that translate audit logs into human-readable summaries. See what resource types have translation rules and their status.",
+		Annotations: readOnly(),
 	}, p.handleListActivityPolicies)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "preview_activity_policy",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolPreviewActivityPolicy,
 		Description: "Test an ActivityPolicy against sample audit events to see what activities would be generated. Use this to develop and debug policies before deployment.",
+		Annotations: readOnly(),
 	}, p.handlePreviewActivityPolicy)
 
 	// Event tools
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "query_events",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolQueryEvents,
 		Description: "Search control plane events stored in the Activity service. Events capture resource lifecycle changes, provisioning status, warnings, and errors. Use this to investigate issues, debug deployments, or monitor system health. Results are returned newest-first.",
+		Annotations: readOnly(),
 	}, p.handleQueryEvents)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_event_facets",
+	addTool(server, opts, &mcp.Tool{
+		Name:        ToolGetEventFacets,
 		Description: "Get distinct values and counts for event fields. Use this to discover what event types, reasons, source components, and involved resources appear in the event stream. Useful for building filters or understanding event patterns.",
+		Annotations: readOnly(),
 	}, p.handleGetEventFacets)
 }
 
@@ -206,6 +345,11 @@ type QueryAuditLogsArgs struct {
 }
 
 func (p *ToolProvider) handleQueryAuditLogs(ctx context.Context, req *mcp.CallToolRequest, args QueryAuditLogsArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	limit := int32(args.Limit)
 	if limit == 0 {
 		limit = 100
@@ -223,7 +367,7 @@ func (p *ToolProvider) handleQueryAuditLogs(ctx context.Context, req *mcp.CallTo
 		},
 	}
 
-	result, err := p.client.AuditLogQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.AuditLogQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -262,6 +406,11 @@ type GetAuditLogFacetsArgs struct {
 }
 
 func (p *ToolProvider) handleGetAuditLogFacets(ctx context.Context, req *mcp.CallToolRequest, args GetAuditLogFacetsArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	limit := int32(args.Limit)
 	if limit == 0 {
 		limit = 20
@@ -299,7 +448,7 @@ func (p *ToolProvider) handleGetAuditLogFacets(ctx context.Context, req *mcp.Cal
 		},
 	}
 
-	result, err := p.client.AuditLogFacetsQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.AuditLogFacetsQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -351,6 +500,11 @@ type QueryActivitiesArgs struct {
 }
 
 func (p *ToolProvider) handleQueryActivities(ctx context.Context, req *mcp.CallToolRequest, args QueryActivitiesArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	limit := int32(args.Limit)
 	if limit == 0 {
 		limit = 100
@@ -363,12 +517,18 @@ func (p *ToolProvider) handleQueryActivities(ctx context.Context, req *mcp.CallT
 		Spec: v1alpha1.ActivityQuerySpec{
 			StartTime: args.StartTime,
 			EndTime:   args.EndTime,
-			Search:    args.Search,
-			Limit:     limit,
+			Filter: activityFilter(
+				celEquals("spec.changeSource", args.ChangeSource),
+				celEquals("spec.actor.name", args.ActorName),
+				celEquals("spec.resource.kind", args.ResourceKind),
+				celEquals("spec.resource.apiGroup", args.APIGroup),
+			),
+			Search: args.Search,
+			Limit:  limit,
 		},
 	}
 
-	result, err := p.client.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -431,6 +591,11 @@ type GetActivityFacetsArgs struct {
 }
 
 func (p *ToolProvider) handleGetActivityFacets(ctx context.Context, req *mcp.CallToolRequest, args GetActivityFacetsArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	limit := int32(args.Limit)
 	if limit == 0 {
 		limit = 20
@@ -468,7 +633,7 @@ func (p *ToolProvider) handleGetActivityFacets(ctx context.Context, req *mcp.Cal
 		},
 	}
 
-	result, err := p.client.ActivityFacetQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.ActivityFacetQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -521,6 +686,11 @@ type FindFailedOperationsArgs struct {
 }
 
 func (p *ToolProvider) handleFindFailedOperations(ctx context.Context, req *mcp.CallToolRequest, args FindFailedOperationsArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	limit := int32(args.Limit)
 	if limit == 0 {
 		limit = 100
@@ -548,13 +718,13 @@ func (p *ToolProvider) handleFindFailedOperations(ctx context.Context, req *mcp.
 	}
 
 	if args.Username != "" {
-		filters = append(filters, fmt.Sprintf("user.username == '%s'", args.Username))
+		filters = append(filters, celEquals("user.username", args.Username))
 	}
 	if args.Resource != "" {
-		filters = append(filters, fmt.Sprintf("objectRef.resource == '%s'", args.Resource))
+		filters = append(filters, celEquals("objectRef.resource", args.Resource))
 	}
 	if args.Verb != "" {
-		filters = append(filters, fmt.Sprintf("verb == '%s'", args.Verb))
+		filters = append(filters, celEquals("verb", args.Verb))
 	}
 
 	filter := strings.Join(filters, " && ")
@@ -573,7 +743,7 @@ func (p *ToolProvider) handleFindFailedOperations(ctx context.Context, req *mcp.
 		},
 	}
 
-	result, err := p.client.AuditLogQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.AuditLogQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -583,20 +753,30 @@ func (p *ToolProvider) handleFindFailedOperations(ctx context.Context, req *mcp.
 	failures := make([]map[string]any, 0, len(result.Status.Results))
 
 	for _, event := range result.Status.Results {
-		code := int(event.ResponseStatus.Code)
+		// objectRef is absent for non-resource requests (e.g. a 404 on a
+		// discovery path) and responseStatus can be absent too, so neither
+		// may be dereferenced unchecked.
+		var code int
+		if event.ResponseStatus != nil {
+			code = int(event.ResponseStatus.Code)
+		}
 		statusCodeCounts[code]++
 
 		failure := map[string]any{
 			"timestamp":  event.RequestReceivedTimestamp.UTC().Format(time.RFC3339),
 			"user":       event.User.Username,
 			"verb":       event.Verb,
-			"resource":   event.ObjectRef.Resource,
-			"name":       event.ObjectRef.Name,
-			"namespace":  event.ObjectRef.Namespace,
 			"statusCode": code,
 		}
+		if event.ObjectRef != nil {
+			failure["resource"] = event.ObjectRef.Resource
+			failure["name"] = event.ObjectRef.Name
+			failure["namespace"] = event.ObjectRef.Namespace
+		} else if event.RequestURI != "" {
+			failure["requestURI"] = event.RequestURI
+		}
 
-		if event.ResponseStatus.Message != "" {
+		if event.ResponseStatus != nil && event.ResponseStatus.Message != "" {
 			failure["message"] = event.ResponseStatus.Message
 		}
 
@@ -644,6 +824,11 @@ type GetResourceHistoryArgs struct {
 }
 
 func (p *ToolProvider) handleGetResourceHistory(ctx context.Context, req *mcp.CallToolRequest, args GetResourceHistoryArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	limit := int32(args.Limit)
 	if limit == 0 {
 		limit = 100
@@ -671,16 +856,24 @@ func (p *ToolProvider) handleGetResourceHistory(ctx context.Context, req *mcp.Ca
 		Spec: v1alpha1.ActivityQuerySpec{
 			StartTime: startTime,
 			EndTime:   endTime,
-			Limit:     limit,
+			Filter: activityFilter(
+				celEquals("spec.resource.uid", args.ResourceUID),
+				celEquals("spec.resource.apiGroup", args.APIGroup),
+				celEquals("spec.resource.kind", args.Kind),
+				celEquals("spec.resource.name", args.Name),
+				celEquals("spec.resource.namespace", args.Namespace),
+			),
+			Limit: limit,
 		},
 	}
 
-	result, err := p.client.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
 
-	// Filter by name if specified (ActivityQuery doesn't support name filter directly)
+	// The filter above already selects this resource; the name check is kept
+	// as a guard so a server that ignored the filter cannot mix in others.
 	history := make([]map[string]any, 0, len(result.Status.Results))
 	for _, activity := range result.Status.Results {
 		// Skip if name filter specified and doesn't match
@@ -689,10 +882,10 @@ func (p *ToolProvider) handleGetResourceHistory(ctx context.Context, req *mcp.Ca
 		}
 
 		entry := map[string]any{
-		"timestamp":    activity.CreationTimestamp.UTC().Format(time.RFC3339),
-		"actor":        activity.Spec.Actor.Name,
-		"summary":      activity.Spec.Summary,
-		"changeSource": activity.Spec.ChangeSource,
+			"timestamp":    activity.CreationTimestamp.UTC().Format(time.RFC3339),
+			"actor":        activity.Spec.Actor.Name,
+			"summary":      activity.Spec.Summary,
+			"changeSource": activity.Spec.ChangeSource,
 		}
 
 		history = append(history, entry)
@@ -743,6 +936,11 @@ type GetUserActivitySummaryArgs struct {
 }
 
 func (p *ToolProvider) handleGetUserActivitySummary(ctx context.Context, req *mcp.CallToolRequest, args GetUserActivitySummaryArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	if args.Username == "" {
 		return errorResult("Username is required"), nil, nil
 	}
@@ -765,11 +963,14 @@ func (p *ToolProvider) handleGetUserActivitySummary(ctx context.Context, req *mc
 		Spec: v1alpha1.ActivityQuerySpec{
 			StartTime: startTime,
 			EndTime:   endTime,
-			Limit:     1000, // Get more activities for summary
+			// Activities record system actors without their "system:" prefix
+			// (see internal/processor/classifier.go), so match that form.
+			Filter: celEquals("spec.actor.name", strings.TrimPrefix(args.Username, "system:")),
+			Limit:  1000, // Get more activities for summary
 		},
 	}
 
-	result, err := p.client.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -853,6 +1054,11 @@ type GetActivityTimelineArgs struct {
 }
 
 func (p *ToolProvider) handleGetActivityTimeline(ctx context.Context, req *mcp.CallToolRequest, args GetActivityTimelineArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	endTime := args.EndTime
 	if endTime == "" {
 		endTime = "now"
@@ -865,11 +1071,12 @@ func (p *ToolProvider) handleGetActivityTimeline(ctx context.Context, req *mcp.C
 		Spec: v1alpha1.ActivityQuerySpec{
 			StartTime: args.StartTime,
 			EndTime:   endTime,
+			Filter:    celEquals("spec.changeSource", args.ChangeSource),
 			Limit:     1000,
 		},
 	}
 
-	result, err := p.client.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -954,6 +1161,11 @@ type SummarizeRecentActivityArgs struct {
 }
 
 func (p *ToolProvider) handleSummarizeRecentActivity(ctx context.Context, req *mcp.CallToolRequest, args SummarizeRecentActivityArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	endTime := args.EndTime
 	if endTime == "" {
 		endTime = "now"
@@ -971,11 +1183,12 @@ func (p *ToolProvider) handleSummarizeRecentActivity(ctx context.Context, req *m
 		Spec: v1alpha1.ActivityQuerySpec{
 			StartTime: args.StartTime,
 			EndTime:   endTime,
+			Filter:    celEquals("spec.changeSource", args.ChangeSource),
 			Limit:     1000,
 		},
 	}
 
-	result, err := p.client.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.ActivityQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -1057,6 +1270,11 @@ type CompareActivityPeriodsArgs struct {
 }
 
 func (p *ToolProvider) handleCompareActivityPeriods(ctx context.Context, req *mcp.CallToolRequest, args CompareActivityPeriodsArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	// Query baseline period
 	baselineQuery := &v1alpha1.ActivityQuery{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1069,7 +1287,7 @@ func (p *ToolProvider) handleCompareActivityPeriods(ctx context.Context, req *mc
 		},
 	}
 
-	baselineResult, err := p.client.ActivityQueries().Create(ctx, baselineQuery, metav1.CreateOptions{})
+	baselineResult, err := c.ActivityQueries().Create(ctx, baselineQuery, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Baseline query failed: %v", err)), nil, nil
 	}
@@ -1086,7 +1304,7 @@ func (p *ToolProvider) handleCompareActivityPeriods(ctx context.Context, req *mc
 		},
 	}
 
-	comparisonResult, err := p.client.ActivityQueries().Create(ctx, comparisonQuery, metav1.CreateOptions{})
+	comparisonResult, err := c.ActivityQueries().Create(ctx, comparisonQuery, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Comparison query failed: %v", err)), nil, nil
 	}
@@ -1156,7 +1374,12 @@ type ListActivityPoliciesArgs struct {
 }
 
 func (p *ToolProvider) handleListActivityPolicies(ctx context.Context, req *mcp.CallToolRequest, args ListActivityPoliciesArgs) (*mcp.CallToolResult, any, error) {
-	result, err := p.client.ActivityPolicies().List(ctx, metav1.ListOptions{})
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
+	result, err := c.ActivityPolicies().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -1227,6 +1450,11 @@ type PreviewActivityPolicyArgs struct {
 }
 
 func (p *ToolProvider) handlePreviewActivityPolicy(ctx context.Context, req *mcp.CallToolRequest, args PreviewActivityPolicyArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	// Unmarshal inputs from raw JSON into the API type.
 	// We use json.RawMessage in the args struct to avoid schema inference failures
 	// caused by embedded Kubernetes types (e.g., auditv1.Event) that use
@@ -1251,7 +1479,7 @@ func (p *ToolProvider) handlePreviewActivityPolicy(ctx context.Context, req *mcp
 		},
 	}
 
-	result, err := p.client.PolicyPreviews().Create(ctx, preview, metav1.CreateOptions{})
+	result, err := c.PolicyPreviews().Create(ctx, preview, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Preview failed: %v", err)), nil, nil
 	}
@@ -1341,9 +1569,28 @@ type QueryEventsArgs struct {
 }
 
 func (p *ToolProvider) handleQueryEvents(ctx context.Context, req *mcp.CallToolRequest, args QueryEventsArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	limit := int32(args.Limit)
 	if limit == 0 {
 		limit = 100
+	}
+
+	// Field selector values cannot be escaped, so a value that could close
+	// the term and start another is refused rather than passed through.
+	for name, v := range map[string]string{
+		"regardingKind":   args.RegardingKind,
+		"regardingName":   args.RegardingName,
+		"reason":          args.Reason,
+		"type":            args.Type,
+		"sourceComponent": args.SourceComponent,
+	} {
+		if strings.ContainsAny(v, ",=!") {
+			return errorResult(fmt.Sprintf("Invalid %s %q: values may not contain ',', '=' or '!'", name, v)), nil, nil
+		}
 	}
 
 	// Build field selector for filtering
@@ -1382,7 +1629,7 @@ func (p *ToolProvider) handleQueryEvents(ctx context.Context, req *mcp.CallToolR
 		},
 	}
 
-	result, err := p.client.EventQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.EventQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -1463,6 +1710,11 @@ type GetEventFacetsArgs struct {
 }
 
 func (p *ToolProvider) handleGetEventFacets(ctx context.Context, req *mcp.CallToolRequest, args GetEventFacetsArgs) (*mcp.CallToolResult, any, error) {
+	c, errRes := p.client(ctx)
+	if errRes != nil {
+		return errRes, nil, nil
+	}
+
 	limit := int32(args.Limit)
 	if limit == 0 {
 		limit = 20
@@ -1499,7 +1751,7 @@ func (p *ToolProvider) handleGetEventFacets(ctx context.Context, req *mcp.CallTo
 		},
 	}
 
-	result, err := p.client.EventFacetQueries().Create(ctx, query, metav1.CreateOptions{})
+	result, err := c.EventFacetQueries().Create(ctx, query, metav1.CreateOptions{})
 	if err != nil {
 		return errorResult(fmt.Sprintf("Query failed: %v", err)), nil, nil
 	}
@@ -1546,6 +1798,27 @@ func jsonResult(output any) (*mcp.CallToolResult, any, error) {
 		return errorResult(fmt.Sprintf("Failed to format results: %v", err)), nil, nil
 	}
 	return textResult(string(jsonBytes)), nil, nil
+}
+
+// celEquals returns a CEL equality test of field against value, or "" when
+// value is empty. The value is quoted as a CEL string literal, so a
+// model-supplied argument cannot close the string and extend the expression.
+func celEquals(field, value string) string {
+	if value == "" {
+		return ""
+	}
+	return field + " == " + strconv.Quote(value)
+}
+
+// activityFilter joins the non-empty CEL clauses with &&.
+func activityFilter(clauses ...string) string {
+	parts := make([]string, 0, len(clauses))
+	for _, c := range clauses {
+		if c != "" {
+			parts = append(parts, c)
+		}
+	}
+	return strings.Join(parts, " && ")
 }
 
 func isSystemUser(username string) bool {

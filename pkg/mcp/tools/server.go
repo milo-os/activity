@@ -30,6 +30,8 @@ func (p *ToolProvider) NewMCPServer(cfg ServerConfig) *mcp.Server {
 		nil,
 	)
 
+	server.AddReceivingMiddleware(RecoverMiddleware)
+
 	// Register all tools
 	p.RegisterTools(server)
 

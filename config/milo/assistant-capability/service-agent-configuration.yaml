@@ -1,0 +1,119 @@
+# What activity's agent offers a customer: docs to read, tools to call, and
+# guides to follow.
+#
+# New versions ship as new objects (activity-assistant-v2, ...) rather than
+# edits to this one, so it is always clear which content a customer saw. The
+# newest Published one wins.
+#
+# The catalog copies this into every entitled project, where the assistant
+# reads it. Nothing here entitles anyone on its own.
+apiVersion: services.miloapis.com/v1alpha1
+kind: ServiceAgentConfiguration
+metadata:
+  name: activity-assistant-v1
+  labels:
+    app.kubernetes.io/name: activity-assistant
+    app.kubernetes.io/part-of: activity.miloapis.com
+spec:
+  serviceAgentRef:
+    name: activity-assistant
+  phase: Published
+  # Our own stamp for the content below. Bump it, as a new object, whenever
+  # that content changes.
+  version: v1
+  # Where the activity team reads reports of things the assistant could not do.
+  reportingProject: datum-cloud
+
+  knowledge:
+    # Served by `activity mcp` (config/components/mcp-server). If it is ever
+    # unreachable the assistant carries on without it.
+    sources:
+      - type: LLMDocs
+        title: Activity, audit log and event query model
+        url: http://activity-mcp.activity-system.svc.cluster.local:8080/llms-full.txt
+    # Short explanations so basic questions need no fetch.
+    concepts:
+      - gvk:
+          group: activity.miloapis.com
+          kind: Activity
+        summary: "A human-readable record of one change to a resource: who did it (actor), what changed (summary, resource), when, and whether a person or the system made it (changeSource). Generated from audit logs and events by ActivityPolicy rules."
+      - gvk:
+          group: activity.miloapis.com
+          kind: EventQuery
+        summary: "A one-shot search over a project's Kubernetes events (Warning/Normal, reason, message, involved object), kept for 60 days, far longer than the events API keeps them. The place to look for why a resource is failing, not who changed it."
+
+  tools:
+    mcpServers:
+      # Tools reach the assistant as "activity__<tool>", so they cannot clash
+      # with another service's.
+      - name: activity
+        # Points straight at activity-mcp, which is fine in staging.
+        #
+        # Production needs this changed to the AI gateway address. Going direct
+        # there means the call is not billed, does not carry the customer's
+        # identity, and is refused by CAPABILITY_MCP_ENDPOINT_HOSTS.
+        endpoint: http://activity-mcp.activity-system.svc.cluster.local:8080/mcp
+        toolSelector:
+          # The approved list. Anything not named here is never offered to the
+          # assistant, even if activity-mcp serves it. Raw audit-log queries
+          # and ActivityPolicy tools are deliberately left out.
+          include:
+            # Activity summaries.
+            - query_activities
+            - get_activity_facets
+            # Investigation.
+            - get_resource_history
+            - find_failed_operations
+            - get_user_activity_summary
+            # Trends.
+            - summarize_recent_activity
+            - get_activity_timeline
+            - compare_activity_periods
+            # Kubernetes events.
+            - query_events
+            - get_event_facets
+        # None of these change anything. Left explicit so the next person
+        # adding a tool has to think about it.
+        mutating: []
+
+  # Investigation guides. Only the name and description reach the assistant;
+  # the guide itself is fetched when it is relevant.
+  skills:
+    - name: what-changed
+      description: Answer "what changed in my project?" for a time window, from an overview of recent activity down to the specific changes and who made them
+      source: http://activity-mcp.activity-system.svc.cluster.local:8080/runbooks/what-changed.md
+    - name: failed-operation-triage
+      description: Find operations that were rejected or errored, group them by cause, and explain each with the actor, resource and status
+      source: http://activity-mcp.activity-system.svc.cluster.local:8080/runbooks/failed-operation-triage.md
+    - name: who-changed-resource
+      description: Trace one resource's change history to find who changed it, when, and what the change was
+      source: http://activity-mcp.activity-system.svc.cluster.local:8080/runbooks/who-changed-resource.md
+    - name: event-investigation
+      description: Use Kubernetes events to explain why a resource is unhealthy or stuck, and connect warnings to the changes that preceded them
+      source: http://activity-mcp.activity-system.svc.cluster.local:8080/runbooks/event-investigation.md
+
+  authority:
+    # Reads run as the person asking, so this grants nothing they do not
+    # already have. Listed per kind rather than "*": the policy and preview
+    # kinds are out of scope. AuditLogQuery stays because
+    # find_failed_operations reads response codes from the audit log.
+    reads:
+      - gvk:
+          group: activity.miloapis.com
+          kind: Activity
+      - gvk:
+          group: activity.miloapis.com
+          kind: ActivityQuery
+      - gvk:
+          group: activity.miloapis.com
+          kind: ActivityFacetQuery
+      - gvk:
+          group: activity.miloapis.com
+          kind: AuditLogQuery
+      - gvk:
+          group: activity.miloapis.com
+          kind: EventQuery
+      - gvk:
+          group: activity.miloapis.com
+          kind: EventFacetQuery
+    maxTaskDurationSeconds: 60

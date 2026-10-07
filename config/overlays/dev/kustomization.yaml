@@ -7,6 +7,7 @@ namespace: activity-system
 resources:
   - ../../base
   - anonymous-rbac.yaml     # Dev-only: anonymous access for Gateway
+  - mcp-milo-kubeconfig.yaml  # Dev-only: kubeconfig for activity-mcp (no Milo in dev)
 
 components:
   - ../../components/namespace
@@ -24,6 +25,7 @@ components:
   - ../../components/tracing
   - ../../components/observability            # ServiceMonitors, alerts, dashboards
   - ../../components/ui
+  - ../../components/mcp-server               # MCP server (HTTP) for the Patch assistant
 
 # Note: The following HA components are excluded for dev environments:
 # - clickhouse-keeper       # Replaced by clickhouse-keeper-standalone (1 replica)
@@ -67,6 +69,8 @@ patches:
       kind: Deployment
       name: activity-ui
     path: patches/ui-cert-patch.yaml
+  - path: patches/mcp-server-patch.yaml
+  - path: patches/mcp-server-networkpolicy-delete.yaml
 
 labels:
   # Note: includeSelectors is false because operators (ClickHouse, etcd) create pods

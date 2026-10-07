@@ -1,0 +1,19 @@
+# Dev settings for activity-mcp: one replica, the locally loaded image, and
+# the kind cluster's own CA (kube-root-ca.crt exists in every namespace) in
+# place of datum-control-plane-trust-bundle, which dev does not create.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: activity-mcp
+  namespace: activity-system
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: mcp
+          imagePullPolicy: Never  # Use images loaded via kind load
+      volumes:
+        - name: trust-bundle
+          configMap:
+            name: kube-root-ca.crt

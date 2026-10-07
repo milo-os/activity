@@ -1,0 +1,22 @@
+# Activity's MCP server in HTTP mode (`activity mcp --transport=http`): the
+# endpoint Patch, Datum's assistant, calls for activity, audit and event
+# history. Serves /mcp, /llms-full.txt, /runbooks/<name>.md and /healthz on
+# container port 8080. Cluster-internal only; no Gateway or HTTPRoute.
+#
+# A component rather than part of config/base: base stamps
+# app.kubernetes.io/component=apiserver onto selectors, which would make the
+# activity-apiserver Service select these pods. Deploy it on its own, via
+# config/overlays/mcp-server, so a broken MCP rollout never blocks the
+# apiserver's reconcile.
+#
+# What the deployer supplies: a ConfigMap named activity-mcp-milo-kubeconfig
+# (key mcp-milo-kubeconfig.yaml) giving the Milo address and CA path, and
+# no user. See deployment.yaml.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - service_account.yaml
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml

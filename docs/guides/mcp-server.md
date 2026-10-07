@@ -227,6 +227,135 @@ expressions:
 Absolute timestamps in RFC 3339 format (`2026-03-10T14:00:00Z`) are also
 accepted.
 
+## HTTP mode (Patch assistant)
+
+Besides the local stdio mode above, `activity mcp` can serve the tools over
+[Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http)
+so Datum's assistant, Patch, can call them on behalf of a signed-in user:
+
+```bash
+activity mcp --transport=http --addr=:8080 --kubeconfig=/etc/activity-mcp/kubeconfig
+```
+
+`--transport` defaults to `stdio`, so existing local setups are unchanged.
+
+### Routes
+
+| Route | Purpose |
+|-------|---------|
+| `POST /mcp` | MCP endpoint, stateless (no session is kept between requests) |
+| `GET /llms-full.txt` | Knowledge document the assistant reads before calling tools: the Activity model, time syntax, scoping, and every exposed tool |
+| `GET /runbooks/<name>.md` | Investigation skills: `what-changed`, `who-changed-resource`, `failed-operation-triage`, `event-investigation` |
+| `GET /healthz` | Liveness |
+
+The knowledge and runbook documents are static, contain no tenant data, and
+need no credentials. Only `/mcp` reads data.
+
+### Request headers
+
+Every `/mcp` request must carry two headers, which Patch forwards from the
+signed-in user's session:
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer <token>` — the user's own token |
+| `X-Datum-Project` | The project the user is working in |
+
+The server holds no credentials of its own. For each request it builds a
+client that sends the caller's token to Milo at that project's control plane
+(`/apis/resourcemanager.miloapis.com/v1alpha1/projects/<project>/control-plane`).
+Milo authenticates the user, enforces their access, and forwards the query to
+Activity with the project attached, so every result is scoped to that one
+project. A tool call can never see more than the user could see themselves.
+
+If the token or project header is missing, or the project is not a valid
+DNS-1123 name, the tool call fails with an error explaining that the calling
+client is misconfigured, and no request is sent to the API. This matters
+because Activity treats a request with no project attached as a
+platform-wide query; the server never lets one through.
+
+The project comes only from the header, never from a tool argument, so the
+model cannot be talked into reading another project.
+
+### Access
+
+Tool calls read with the user's own permissions, so the user needs read access
+to Activity resources in the project. Organization members with Datum's
+default roles already have it: `viewer` (`datum-cloud-viewer`) inherits
+`activity.miloapis.com-viewer`, and `editor` and `owner` inherit `viewer`.
+Only members who hold nothing but custom roles may lack it; give them a role
+that includes `activity.miloapis.com-viewer`.
+
+### Project-only scoping
+
+HTTP mode answers questions about the current project only. It cannot query
+other projects, an organization as a whole, or the platform. An empty result
+means nothing was recorded in that project for the window and filters used.
+
+### Exposed tools
+
+HTTP mode registers ten tools, all read-only:
+
+| Category | Tools |
+|----------|-------|
+| Activity | `query_activities`, `get_activity_facets` |
+| Investigation | `get_resource_history`, `find_failed_operations`, `get_user_activity_summary` |
+| Analytics | `summarize_recent_activity`, `get_activity_timeline`, `compare_activity_periods` |
+| Events | `query_events`, `get_event_facets` |
+
+Not exposed:
+
+- **Raw audit log tools** (`query_audit_logs`, `get_audit_log_facets`). Audit
+  records are the full API request log, including request and response
+  bodies. That is an operator's view, not something a project member needs
+  from an assistant. `find_failed_operations` does read audit logs, because
+  failed requests never become Activities, but it returns only a fixed set of
+  summarised fields (time, user, verb, resource, name, status code, message).
+- **Policy tools** (`list_activity_policies`, `preview_activity_policy`).
+  ActivityPolicies are platform-managed translation rules, not project data.
+
+Stdio mode still registers all 14 tools.
+
+### Deployment notes
+
+- The kubeconfig supplies **only** the Milo API server address and CA. Any
+  credentials in it (token, client certificate, exec plugin, impersonation)
+  are ignored, so it can contain an empty user.
+- The server never falls back to in-cluster configuration. It refuses to
+  start if no kubeconfig is found (via `--kubeconfig`, `KUBECONFIG`, or
+  `~/.kube/config`).
+- As a best-effort check, it also refuses to start if the kubeconfig's server
+  address is exactly `https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT`,
+  the address in-cluster config resolves to. Other names for the local API
+  server, such as `https://kubernetes.default.svc`, are not detected. The
+  check only catches a common misconfiguration: the server's own credentials
+  are stripped from every read regardless of the address.
+- The kubeconfig's server address must be bare: no path, no query or
+  fragment, and no `user:password@` credentials. The server appends each
+  caller's project path itself and refuses to start otherwise.
+- Each `/mcp` request body is limited to 1 MiB, and each tool call to 50
+  seconds overall, however many queries it runs.
+- On SIGTERM the server stops accepting connections and lets in-flight
+  requests finish for up to 25 seconds.
+- Point liveness and readiness probes at `/healthz`.
+- The server is stateless, so it can run with any number of replicas behind a
+  plain load balancer; no session affinity is needed.
+
+### Deploying and registering with Patch
+
+- `config/overlays/mcp-server` deploys the `activity-mcp` Deployment, Service
+  and NetworkPolicy (component `config/components/mcp-server`); the published
+  `activity-kustomize` bundle pins its image tag.
+- `config/milo/assistant-capability` registers the server with Patch through
+  the service catalog (Service `activity`, ServiceAgent `activity-assistant`,
+  ServiceAgentConfiguration `activity-assistant-v1`). It is a standalone
+  Kustomization, separate from `config/milo`, and is applied to Milo **in
+  staging only**, at `./milo/assistant-capability` in the bundle.
+- Production stays unregistered for now. Production Patch reaches service MCP
+  servers only through AI-gateway endpoints, and there is no production
+  MCPRoute for `activity-mcp` yet. Once one exists, production can apply the
+  same registration with the gateway URL.
+
 ## Troubleshooting
 
 **The server fails to start with "failed to create kubernetes config"**
@@ -248,8 +377,10 @@ kubectl get activities --context your-context
 
 **Permission denied errors in tool responses**
 
-Your credentials need permission to query Activity resources. Ask your
-administrator to verify access.
+Your credentials need permission to query Activity resources. On Datum
+Cloud, the default organization roles (`viewer`, `editor`, `owner`) include it
+through `activity.miloapis.com-viewer`; members with only custom roles may
+not. Ask your administrator to verify access.
 
 **The assistant doesn't use the Activity tools**
 

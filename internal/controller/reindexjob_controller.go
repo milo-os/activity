@@ -18,7 +18,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 )
@@ -67,14 +66,21 @@ var (
 	)
 )
 
-func init() {
-	ctrlmetrics.Registry.MustRegister(
+// registerMetrics registers the ReindexJob controller's collectors. Not done
+// in init, so other subcommands in this binary don't serve them.
+func registerMetrics(reg prometheus.Registerer) error {
+	for _, c := range []prometheus.Collector{
 		reindexJobsStartedTotal,
 		reindexJobsCompletedTotal,
 		reindexJobDuration,
 		reindexJobsRunning,
 		reindexJobsTTLDeletedTotal,
-	)
+	} {
+		if err := reg.Register(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ReindexJobReconciler reconciles ReindexJob resources.

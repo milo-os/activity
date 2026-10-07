@@ -11,7 +11,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 var (
@@ -46,12 +45,15 @@ var (
 	)
 )
 
-func init() {
-	metrics.Registry.MustRegister(
-		dlqEventsPublished,
-		dlqPublishLatency,
-		dlqPublishErrors,
-	)
+// RegisterDLQMetrics registers the DLQ publisher's collectors. Only the
+// processor publishes dead letters; preview and reindex must not expose them.
+func RegisterDLQMetrics(reg prometheus.Registerer) error {
+	for _, c := range []prometheus.Collector{dlqEventsPublished, dlqPublishLatency, dlqPublishErrors} {
+		if err := reg.Register(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // EventType identifies the type of event that failed processing.

@@ -108,9 +108,10 @@ var (
 	)
 )
 
-func init() {
-	// Use controller-runtime's registry so metrics are exposed alongside other metrics.
-	metrics.Registry.MustRegister(
+// registerMetrics registers the exporter's collectors. Not done in init, so
+// other subcommands in this binary don't serve them.
+func registerMetrics(reg prometheus.Registerer) error {
+	for _, c := range []prometheus.Collector{
 		eventsPublished,
 		publishErrors,
 		informerSynced,
@@ -120,7 +121,13 @@ func init() {
 		noCityEvents,
 		droppedEvents,
 		queueDepth,
-	)
+		locationUnresolved,
+	} {
+		if err := reg.Register(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // planeTypeEdge is the Config.PlaneType value for an edge deployment: one
@@ -225,6 +232,10 @@ func Run(ctx context.Context, cfg Config) error {
 		"scopeName", cfg.ScopeName,
 		"healthProbeAddr", cfg.HealthProbeAddr,
 	)
+
+	if err := registerMetrics(metrics.Registry); err != nil {
+		return fmt.Errorf("failed to register exporter metrics: %w", err)
+	}
 
 	restConfig, err := buildRestConfig(cfg.Kubeconfig)
 	if err != nil {

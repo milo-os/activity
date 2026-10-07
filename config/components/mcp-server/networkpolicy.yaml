@@ -1,0 +1,71 @@
+# Only the assistant may call activity-mcp, and activity-mcp may only call Milo.
+#
+# The assistant forwards the calling user's bearer token to this endpoint over
+# plain HTTP. Without this ingress rule any pod in the cluster could reach
+# /mcp directly and read activity as whatever token it presented.
+#
+# Selecting these pods makes them default-deny in both directions, so a missing
+# rule TIMES OUT rather than erroring. Kubelet probes are unaffected under
+# Cilium, which always admits the local host.
+#
+# The assistant's side of this (an egress rule out of patch-system) lives with
+# the assistant's deployment; the two halves move together.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: activity-mcp-assistant-only
+  namespace: activity-system
+  labels:
+    app.kubernetes.io/name: activity-mcp
+    app.kubernetes.io/instance: activity-mcp
+    app.kubernetes.io/component: mcp-server
+    app.kubernetes.io/part-of: activity.miloapis.com
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: activity-mcp
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # One peer element, so the namespace AND the pod must both match. Separate
+    # elements are OR'd and would admit all of patch-system.
+    #
+    # `assistant` (A2A server, datumctl traffic) and `assistant-apiserver`
+    # (portal chat turns) both call capability endpoints themselves.
+    #
+    # 8080 is the CONTAINER port: NetworkPolicy applies after DNAT, so if the
+    # Service ever maps to a different targetPort this number follows the pod.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: patch-system
+          podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - assistant
+                  - assistant-apiserver
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # DNS, to resolve the Milo address in the kubeconfig.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Milo, the one server the kubeconfig names. Every project a tool call
+    # reads is a path on this endpoint, and Milo proxies activity.miloapis.com
+    # to activity-apiserver itself, so no rule to the apiserver is needed.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: datum-system
+      ports:
+        - protocol: TCP
+          port: 6443

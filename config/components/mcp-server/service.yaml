@@ -1,0 +1,25 @@
+# Cluster-internal only: the assistant reaches /mcp over this Service's DNS
+# name (activity-mcp.activity-system.svc.cluster.local:8080), which is the
+# address config/milo/assistant-capability registers. The pod serves plain
+# HTTP; networkpolicy.yaml limits who can reach it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: activity-mcp
+  namespace: activity-system
+  labels:
+    app.kubernetes.io/name: activity-mcp
+    app.kubernetes.io/instance: activity-mcp
+    app.kubernetes.io/component: mcp-server
+    app.kubernetes.io/part-of: activity.miloapis.com
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: activity-mcp
+    app.kubernetes.io/instance: activity-mcp
+    app.kubernetes.io/component: mcp-server

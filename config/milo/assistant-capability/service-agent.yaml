@@ -1,0 +1,24 @@
+# Activity's agent: what a customer's assistant talks to when they ask what
+# changed in their project, who changed it, or why something failed.
+#
+# Published means entitled projects receive it. The content it offers lives in
+# service-agent-configuration.yaml, so this object rarely changes.
+apiVersion: services.miloapis.com/v1alpha1
+kind: ServiceAgent
+metadata:
+  name: activity-assistant
+  labels:
+    app.kubernetes.io/name: activity-assistant
+    app.kubernetes.io/part-of: activity.miloapis.com
+spec:
+  # Must match the NAME of service.yaml ("activity"). Get it wrong and nothing
+  # reports it: the agent simply never reaches any customer.
+  serviceRef:
+    name: activity
+  phase: Published
+  displayName: Activity and audit history
+  description: |
+    Answers questions about what happened in a project: who changed a resource
+    and when, what changed recently, which operations failed and why, and what
+    Kubernetes events say about a problem. Reads activity summaries and events
+    as the person asking; changes nothing.

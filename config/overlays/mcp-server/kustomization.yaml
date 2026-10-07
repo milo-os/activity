@@ -1,0 +1,16 @@
+# Deployable wrapper for the mcp-server component, applied by its own Flux
+# Kustomization (path ./overlays/mcp-server). Kept separate from the apiserver
+# Kustomization so a bad MCP rollout cannot stop the apiserver reconciling,
+# and so the image tag is pinned at publish time (this directory must be
+# listed in the bundle workflow's image-overlays).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: activity-system
+
+components:
+  - ../../components/mcp-server
+
+images:
+  - name: ghcr.io/milo-os/activity
+    newTag: latest

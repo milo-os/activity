@@ -1,0 +1,9 @@
+# Dev has no patch-system namespace and no Milo at datum-system:6443, so the
+# assistant-only policy would just block everything. Reach the server with
+# `kubectl port-forward svc/activity-mcp 8080` instead.
+$patch: delete
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: activity-mcp-assistant-only
+  namespace: activity-system

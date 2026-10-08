@@ -14,7 +14,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"go.miloapis.com/activity/internal/processor"
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
@@ -62,15 +61,6 @@ var (
 		[]string{"api_group", "kind", "policy_name", "error_type"},
 	)
 )
-
-func init() {
-	metrics.Registry.MustRegister(
-		dlqRetryAttemptsTotal,
-		dlqRetryBatchDuration,
-		dlqEventsHighRetryTotal,
-		dlqRetryFailedTotal,
-	)
-}
 
 // DLQRetryConfig holds configuration for the DLQ retry controller.
 type DLQRetryConfig struct {

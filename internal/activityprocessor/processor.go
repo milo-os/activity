@@ -164,9 +164,10 @@ var (
 	)
 )
 
-func init() {
-	// Use controller-runtime's registry so metrics are exposed alongside controller metrics.
-	metrics.Registry.MustRegister(
+// registerMetrics registers the processor's collectors, including the DLQ publisher's.
+// Not done in init, so other subcommands in this binary don't serve them.
+func registerMetrics(reg prometheus.Registerer) error {
+	for _, c := range []prometheus.Collector{
 		eventsReceived,
 		eventsEvaluated,
 		eventsSkipped,
@@ -182,7 +183,17 @@ func init() {
 		natsErrorsTotal,
 		natsMessagesPublished,
 		natsPublishLatency,
-	)
+		// DLQ retry metrics
+		dlqRetryAttemptsTotal,
+		dlqRetryBatchDuration,
+		dlqEventsHighRetryTotal,
+		dlqRetryFailedTotal,
+	} {
+		if err := reg.Register(c); err != nil {
+			return err
+		}
+	}
+	return processor.RegisterDLQMetrics(reg)
 }
 
 // Config contains configuration for the activity processor.
@@ -322,6 +333,9 @@ func New(config Config, restConfig *rest.Config) (*Processor, error) {
 
 // Start begins processing audit events.
 func (p *Processor) Start(ctx context.Context) error {
+	if err := registerMetrics(metrics.Registry); err != nil {
+		return fmt.Errorf("failed to register processor metrics: %w", err)
+	}
 	if err := metrics.Registry.Register(p.policyCache); err != nil {
 		return fmt.Errorf("failed to register policy ownership metrics: %w", err)
 	}

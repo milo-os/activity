@@ -10,7 +10,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	locationsv1alpha1 "go.miloapis.com/locations/api/v1alpha1"
 	"go.miloapis.com/locations/pkg/locationidentity"
@@ -31,10 +30,6 @@ var locationUnresolved = prometheus.NewGauge(
 		Help:      "1 if this cell's location has not resolved to a delivered ServingLocation, so Source.City is empty; 0 once resolved.",
 	},
 )
-
-func init() {
-	metrics.Registry.MustRegister(locationUnresolved)
-}
 
 // locationResolveRetryInterval is how often cityResolver retries while
 // unresolved. Every event published during this window carries a

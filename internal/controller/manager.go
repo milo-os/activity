@@ -16,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
@@ -72,6 +73,10 @@ var ActivityPolicyGVR = schema.GroupVersionResource{
 
 // NewManager creates a new controller manager using controller-runtime.
 func NewManager(config *rest.Config, options ManagerOptions) (ctrl.Manager, error) {
+	if err := registerMetrics(ctrlmetrics.Registry); err != nil {
+		return nil, fmt.Errorf("failed to register controller metrics: %w", err)
+	}
+
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
 		Scheme:                 Scheme,
 		HealthProbeBindAddress: options.HealthProbeAddr,

@@ -41,6 +41,15 @@ type FieldMapper interface {
 	MapIdentExpr(ident *expr.Expr_Ident) (string, error)
 }
 
+// ArrayFieldMapper is optionally implemented by a FieldMapper with ClickHouse
+// Array columns. Array fields are only valid on the right of `in`, which
+// converts to has().
+type ArrayFieldMapper interface {
+	// MapArraySelectExpr returns the Array column for sel, or false if sel is
+	// not an array field.
+	MapArraySelectExpr(sel *expr.Expr_Select) (string, bool)
+}
+
 // ValidateFieldAccess recursively validates that only allowed fields are accessed
 // in a CEL expression. It uses the provided FieldValidator for domain-specific
 // field validation.
@@ -219,6 +228,9 @@ func (c *BaseSQLConverter) convertCallExpr(call *expr.Expr_Call) (string, error)
 		if err != nil {
 			return "", err
 		}
+		if column, ok := c.arrayColumn(call.Args[1]); ok {
+			return fmt.Sprintf("has(%s, %s)", column, left), nil
+		}
 		right, err := c.ConvertExpr(call.Args[1])
 		if err != nil {
 			return "", err
@@ -279,6 +291,18 @@ func (c *BaseSQLConverter) convertCallExpr(call *expr.Expr_Call) (string, error)
 	}
 
 	return "", fmt.Errorf("unsupported CEL function: %s", call.Function)
+}
+
+func (c *BaseSQLConverter) arrayColumn(e *expr.Expr) (string, bool) {
+	sel := e.GetSelectExpr()
+	if sel == nil {
+		return "", false
+	}
+	arrayMapper, ok := c.mapper.(ArrayFieldMapper)
+	if !ok {
+		return "", false
+	}
+	return arrayMapper.MapArraySelectExpr(sel)
 }
 
 func (c *BaseSQLConverter) convertBinaryOp(call *expr.Expr_Call, op string) (string, error) {

@@ -60,6 +60,12 @@ type ActivityQuery struct {
 //	spec.resource.uid      - resource UID
 //	spec.summary           - activity summary text
 //	spec.origin.type       - "audit" or "event"
+//	spec.source.planeType  - plane the record originated from (management, edge)
+//	spec.source.cluster    - cluster the record originated from
+//	spec.source.region     - region the record originated from
+//	spec.source.city       - city the record originated from
+//	spec.relatedUIDs       - UIDs of the resource, its related resources, and
+//	                         linked resources (list; use '<uid>' in spec.relatedUIDs)
 //	metadata.namespace     - activity namespace
 //
 // CEL Filter Examples:
@@ -70,6 +76,7 @@ type ActivityQuery struct {
 //	"spec.resource.kind in ['Deployment', 'StatefulSet']"
 //	"spec.resource.apiGroup == 'networking.datumapis.com'"
 //	"spec.actor.uid == 'abc123'"
+//	"'abc123' in spec.relatedUIDs && spec.source.region == 'us-east-1'"
 type ActivityQuerySpec struct {
 	// StartTime is the beginning of your search window (inclusive).
 	//

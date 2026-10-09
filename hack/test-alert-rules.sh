@@ -8,8 +8,12 @@ done
 scratch_dir="$(mktemp -d)"
 trap 'rm -rf "$scratch_dir"' EXIT
 
-yq '.spec' "$repo_root/config/components/observability/alerts/dlq-alerts.yaml" > "$scratch_dir/rules.yaml"
+alerts_dir="$repo_root/config/components/observability/alerts"
+yq '.spec' "$alerts_dir/dlq-alerts.yaml" > "$scratch_dir/rules.yaml"
+yq '.spec' "$alerts_dir/slo-alerts.yaml" > "$scratch_dir/slo-rules.yaml"
+yq '.spec' "$alerts_dir/generated/activity-recordings.yaml" > "$scratch_dir/recordings.yaml"
 cp "$repo_root/test/observability/dlq-alerts.test.yaml" "$scratch_dir/test.yaml"
+cp "$repo_root/test/observability/slo-alerts.test.yaml" "$scratch_dir/slo-test.yaml"
 cd "$scratch_dir"
-promtool check rules rules.yaml
-promtool test rules test.yaml
+promtool check rules rules.yaml slo-rules.yaml recordings.yaml
+promtool test rules test.yaml slo-test.yaml

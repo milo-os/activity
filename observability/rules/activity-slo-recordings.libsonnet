@@ -13,6 +13,7 @@
 // Recording rule naming convention:
 //   activity:slo_<name>:request_good:rate5m   — good (fast or non-error) requests
 //   activity:slo_<name>:request_total:rate5m  — total requests
+//   activity:slo_<name>:request_total:rate1h  — total requests, for the page tier's volume floor
 //   activity:slo_<name>:error_ratio:rate<W>   — 1 - (good / clamp_min(total, 1))
 {
   prometheusRules+:: {
@@ -48,6 +49,17 @@
                 resource="activitypolicies",
                 verb=~"GET|LIST|PATCH"
               }[5m]))
+            |||,
+          },
+
+          {
+            record: 'activity:slo_metadata:request_total:rate1h',
+            expr: |||
+              sum(rate(apiserver_request_duration_seconds_count{
+                job="activity-apiserver",
+                resource="activitypolicies",
+                verb=~"GET|LIST|PATCH"
+              }[1h]))
             |||,
           },
 
@@ -194,6 +206,17 @@
           },
 
           {
+            record: 'activity:slo_audit_query:request_total:rate1h',
+            expr: |||
+              sum(rate(apiserver_request_duration_seconds_count{
+                job="activity-apiserver",
+                resource="auditlogqueries",
+                verb="POST"
+              }[1h]))
+            |||,
+          },
+
+          {
             record: 'activity:slo_audit_query:error_ratio:rate5m',
             expr: |||
               (
@@ -331,6 +354,17 @@
                 resource=~"activityqueries|activityfacetqueries",
                 verb="POST"
               }[5m]))
+            |||,
+          },
+
+          {
+            record: 'activity:slo_activity_query:request_total:rate1h',
+            expr: |||
+              sum(rate(apiserver_request_duration_seconds_count{
+                job="activity-apiserver",
+                resource=~"activityqueries|activityfacetqueries",
+                verb="POST"
+              }[1h]))
             |||,
           },
 
@@ -476,6 +510,17 @@
           },
 
           {
+            record: 'activity:slo_event_query:request_total:rate1h',
+            expr: |||
+              sum(rate(apiserver_request_duration_seconds_count{
+                job="activity-apiserver",
+                resource=~"eventqueries|eventfacetqueries",
+                verb="POST"
+              }[1h]))
+            |||,
+          },
+
+          {
             record: 'activity:slo_event_query:error_ratio:rate5m',
             expr: |||
               (
@@ -611,6 +656,16 @@
                 job="activity-apiserver",
                 verb!="WATCH"
               }[5m]))
+            |||,
+          },
+
+          {
+            record: 'activity:slo_availability:request_total:rate1h',
+            expr: |||
+              sum(rate(apiserver_request_total{
+                job="activity-apiserver",
+                verb!="WATCH"
+              }[1h]))
             |||,
           },
 

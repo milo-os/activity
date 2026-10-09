@@ -485,23 +485,6 @@ func hasAPIGroupFilter(filter string) bool {
 		strings.Contains(filter, "api_group")
 }
 
-// hasActorFilter checks if the CEL filter expression contains actor-related fields.
-// This is used to determine whether to use the actor_query_projection for optimal performance.
-func hasActorFilter(filter string) bool {
-	if filter == "" {
-		return false
-	}
-	// Check for common actor filter patterns in CEL expressions
-	// This is a heuristic - doesn't need to be perfect, just helpful for optimization
-	return strings.Contains(filter, "actor.name") ||
-		strings.Contains(filter, "actor.type") ||
-		strings.Contains(filter, "actor.uid") ||
-		// Also match if someone uses the materialized column directly
-		strings.Contains(filter, "actor_name") ||
-		strings.Contains(filter, "actor_type") ||
-		strings.Contains(filter, "actor_uid")
-}
-
 // buildQuery constructs a ClickHouse SQL query from the query spec
 func (s *ClickHouseStorage) buildQuery(ctx context.Context, spec v1alpha1.AuditLogQuerySpec, scope ScopeContext) (string, []interface{}, error) {
 	var args []interface{}
@@ -808,48 +791,29 @@ func (s *ClickHouseStorage) buildActivityQuery(ctx context.Context, spec Activit
 		}
 	}
 
-	// Pagination cursor aligned with the new time-bucketed ORDER BY clauses.
+	// Pagination cursor aligned with the time-bucketed ORDER BY below.
 	// The 3-level toStartOfHour pattern ensures correct pagination across hour boundaries.
 	if spec.Continue != "" {
-		cursorTime, cursorUID, err := decodeActivityCursor(spec.Continue, spec)
+		cursorTime, cursorName, err := decodeActivityCursor(spec.Continue, spec)
 		if err != nil {
 			return "", nil, err
 		}
 		// Pagination logic: continue from where we left off
 		// 1. Hour bucket is earlier, OR
 		// 2. Same hour bucket but timestamp is earlier, OR
-		// 3. Same timestamp but resource_uid is earlier (for tie-breaking)
-		conditions = append(conditions, "(toStartOfHour(timestamp) < toStartOfHour(?) OR (toStartOfHour(timestamp) = toStartOfHour(?) AND timestamp < ?) OR (timestamp = ? AND resource_uid < ?))")
-		args = append(args, cursorTime, cursorTime, cursorTime, cursorTime, cursorUID)
+		// 3. Same timestamp but activity_name is earlier (for tie-breaking)
+		conditions = append(conditions, "(toStartOfHour(timestamp) < toStartOfHour(?) OR (toStartOfHour(timestamp) = toStartOfHour(?) AND timestamp < ?) OR (timestamp = ? AND activity_name < ?))")
+		args = append(args, cursorTime, cursorTime, cursorTime, cursorTime, cursorName)
 	}
 
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// ORDER BY must match projection/primary key sort order for ClickHouse
-	// to efficiently use indexes and projections.
-	//
-	// Primary key: (toStartOfHour(timestamp), timestamp, tenant_type, tenant_name, origin_id)
-	// Projections:
-	//   - platform_query_projection: (toStartOfHour(timestamp), timestamp, api_group, resource_kind, resource_uid)
-	//   - actor_query_projection:    (toStartOfHour(timestamp), timestamp, actor_name, api_group, resource_kind, resource_uid)
-	//   - actor_uid_query_projection: (toStartOfHour(timestamp), timestamp, actor_uid, api_group, resource_kind, resource_uid)
-	if scope.Type == "platform" {
-		if hasActorFilter(spec.Filter) {
-			// Actor filter present: use actor_query_projection
-			query += " ORDER BY toStartOfHour(timestamp) DESC, timestamp DESC, actor_name DESC, api_group DESC, resource_kind DESC, resource_uid DESC"
-		} else {
-			// No actor filter: use platform_query_projection
-			query += " ORDER BY toStartOfHour(timestamp) DESC, timestamp DESC, api_group DESC, resource_kind DESC, resource_uid DESC"
-		}
-	} else if scope.Type == types.TenantTypeUser {
-		// User-scoped: use actor_uid_query_projection to filter by UID
-		query += " ORDER BY toStartOfHour(timestamp) DESC, timestamp DESC, actor_uid DESC, api_group DESC, resource_kind DESC, resource_uid DESC"
-	} else {
-		// Tenant-scoped: match hour-bucketed primary key for efficient index use
-		query += " ORDER BY toStartOfHour(timestamp) DESC, timestamp DESC, tenant_type DESC, tenant_name DESC, origin_id DESC"
-	}
+	// The time prefix matches the primary key and every projection, keeping
+	// read-in-order. Ties break on the cursor's column; anything else can skip
+	// or repeat rows at a page boundary.
+	query += " ORDER BY toStartOfHour(timestamp) DESC, timestamp DESC, activity_name DESC"
 
 	// Limit
 	limit := spec.Limit
@@ -866,10 +830,11 @@ func (s *ClickHouseStorage) buildActivityQuery(ctx context.Context, spec Activit
 
 // activityCursorData encodes pagination state for activity queries.
 type activityCursorData struct {
-	Timestamp   time.Time `json:"t"`
-	ResourceUID string    `json:"r"`
-	QueryHash   string    `json:"h"`
-	IssuedAt    time.Time `json:"i"`
+	Timestamp time.Time `json:"t"`
+	// Name has a new key so legacy resource-UID tokens fail validation.
+	Name      string    `json:"n"`
+	QueryHash string    `json:"h"`
+	IssuedAt  time.Time `json:"i"`
 }
 
 // hashActivityQueryParams creates a hash to validate cursors.
@@ -890,16 +855,11 @@ func hashActivityQueryParams(spec ActivityQuerySpec) string {
 
 // encodeActivityCursor creates a pagination token from the last activity.
 func encodeActivityCursor(lastActivityJSON string, spec ActivityQuerySpec) string {
-	// Extract timestamp and resource_uid from JSON
 	var activity struct {
 		Metadata struct {
+			Name              string `json:"name"`
 			CreationTimestamp string `json:"creationTimestamp"`
 		} `json:"metadata"`
-		Spec struct {
-			Resource struct {
-				UID string `json:"uid"`
-			} `json:"resource"`
-		} `json:"spec"`
 	}
 
 	if err := json.Unmarshal([]byte(lastActivityJSON), &activity); err != nil {
@@ -909,10 +869,10 @@ func encodeActivityCursor(lastActivityJSON string, spec ActivityQuerySpec) strin
 	timestamp, _ := time.Parse(time.RFC3339, activity.Metadata.CreationTimestamp)
 
 	data := activityCursorData{
-		Timestamp:   timestamp,
-		ResourceUID: activity.Spec.Resource.UID,
-		QueryHash:   hashActivityQueryParams(spec),
-		IssuedAt:    time.Now(),
+		Timestamp: timestamp,
+		Name:      activity.Metadata.Name,
+		QueryHash: hashActivityQueryParams(spec),
+		IssuedAt:  time.Now(),
 	}
 
 	jsonData, _ := json.Marshal(data)
@@ -927,7 +887,7 @@ func decodeActivityCursor(cursor string, spec ActivityQuerySpec) (time.Time, str
 	}
 
 	var data activityCursorData
-	if err := json.Unmarshal(decoded, &data); err != nil {
+	if err := json.Unmarshal(decoded, &data); err != nil || data.Name == "" {
 		return time.Time{}, "", fmt.Errorf("the continue token is invalid. Remove the continue parameter to start a new query")
 	}
 
@@ -943,7 +903,7 @@ func decodeActivityCursor(cursor string, spec ActivityQuerySpec) (time.Time, str
 		)
 	}
 
-	return data.Timestamp, data.ResourceUID, nil
+	return data.Timestamp, data.Name, nil
 }
 
 // FacetFieldSpec defines a single facet field to query.

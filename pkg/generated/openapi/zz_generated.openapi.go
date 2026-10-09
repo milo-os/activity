@@ -1372,6 +1372,25 @@ func schema_pkg_apis_activity_v1alpha1_ActivitySpec(ref common.ReferenceCallback
 							},
 						},
 					},
+					"related": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Related lists other resources the source record references, such as an event's related object (e.g., the Workload an Instance belongs to).",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityResource"),
+									},
+								},
+							},
+						},
+					},
 					"tenant": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Tenant identifies the scope for multi-tenant isolation.",

@@ -80,6 +80,13 @@ type ActivitySpec struct {
 	// +listType=atomic
 	Links []ActivityLink `json:"links,omitempty"`
 
+	// Related lists other resources the source record references, such as an
+	// event's related object (e.g., the Workload an Instance belongs to).
+	//
+	// +optional
+	// +listType=atomic
+	Related []ActivityResource `json:"related,omitempty"`
+
 	// Tenant identifies the scope for multi-tenant isolation.
 	//
 	// +required

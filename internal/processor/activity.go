@@ -213,8 +213,9 @@ func (b *ActivityBuilder) BuildFromEvent(
 				Namespace:  namespace,
 				UID:        resourceUID,
 			},
-			Links:  activityLinks,
-			Tenant: tenant,
+			Links:   activityLinks,
+			Related: ResolveRelatedResources(eventMap),
+			Tenant:  tenant,
 			Origin: v1alpha1.ActivityOrigin{
 				Type: "event",
 				ID:   originID,

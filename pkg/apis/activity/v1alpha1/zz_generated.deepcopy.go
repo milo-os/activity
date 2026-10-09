@@ -461,6 +461,11 @@ func (in *ActivitySpec) DeepCopyInto(out *ActivitySpec) {
 		*out = make([]ActivityLink, len(*in))
 		copy(*out, *in)
 	}
+	if in.Related != nil {
+		in, out := &in.Related, &out.Related
+		*out = make([]ActivityResource, len(*in))
+		copy(*out, *in)
+	}
 	out.Tenant = in.Tenant
 	if in.Changes != nil {
 		in, out := &in.Changes, &out.Changes

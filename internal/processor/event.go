@@ -339,7 +339,8 @@ func (p *EventProcessor) buildActivity(
 				Namespace:  namespace,
 				UID:        resourceUID,
 			},
-			Links: activityLinks,
+			Links:   activityLinks,
+			Related: ResolveRelatedResources(event),
 			// Extract tenant from scope annotations; fall back to platform scope when absent.
 			Tenant: ExtractTenantFromAnnotations(event),
 			Origin: v1alpha1.ActivityOrigin{

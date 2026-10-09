@@ -258,6 +258,24 @@ func ResolveInvolvedObject(event map[string]interface{}) map[string]interface{} 
 	return nil
 }
 
+// ResolveRelatedResources returns an event's related object as an
+// ActivityResource list, or nil when the event has none.
+func ResolveRelatedResources(event map[string]interface{}) []v1alpha1.ActivityResource {
+	related, ok := event["related"].(map[string]interface{})
+	if !ok || len(related) == 0 {
+		return nil
+	}
+	kind, apiGroup := resolveKindAndAPIGroup(related)
+	return []v1alpha1.ActivityResource{{
+		APIGroup:   apiGroup,
+		APIVersion: GetNestedString(related, "apiVersion"),
+		Kind:       kind,
+		Name:       GetNestedString(related, "name"),
+		Namespace:  GetNestedString(related, "namespace"),
+		UID:        GetNestedString(related, "uid"),
+	}}
+}
+
 // isFederatedSource reports whether source carries enough information to
 // treat its event as federated. Both fields are required together: a
 // Cluster with no PlaneType can't be composed into a well-formed qualified

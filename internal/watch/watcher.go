@@ -19,6 +19,7 @@ import (
 
 	"go.miloapis.com/activity/internal/cel"
 	"go.miloapis.com/activity/internal/storage"
+	"go.miloapis.com/activity/internal/types"
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 )
 
@@ -154,13 +155,8 @@ type WatchFilter struct {
 	// If 0, starts from the latest message (real-time only).
 	// If > 0, replays from that sequence number.
 	ResourceVersion uint64
-	// Namespace filters activities by namespace
-	Namespace string
-	// APIGroup filters by resource API group
-	APIGroup string
-	// ResourceKind filters by resource kind
-	ResourceKind string
-	// CELFilter is a CEL expression for advanced filtering
+	// CELFilter selects which activities the watch delivers. Every filter
+	// beyond tenant scope goes here; the NATS subject only narrows by tenant.
 	CELFilter string
 }
 
@@ -182,7 +178,7 @@ func (w *NATSWatcher) Watch(ctx context.Context, scope storage.ScopeContext, fil
 	}
 
 	// Build the NATS subject filter based on scope
-	subject := w.buildSubject(scope, filter)
+	subject := w.buildSubject(scope)
 
 	// Generate unique consumer name for this watch
 	consumerName := fmt.Sprintf("watch-%s", uuid.New().String()[:8])
@@ -248,6 +244,7 @@ func (w *NATSWatcher) Watch(ctx context.Context, scope storage.ScopeContext, fil
 		consumerName: consumerName,
 		ctx:          watchCtx,
 		cancel:       cancel,
+		scope:        scope,
 		filter:       filter,
 		celFilter:    celFilter,
 		stopped:      false,
@@ -259,50 +256,16 @@ func (w *NATSWatcher) Watch(ctx context.Context, scope storage.ScopeContext, fil
 	return aw, nil
 }
 
-// buildSubject constructs a NATS subject pattern based on scope and filters.
-// Subject format: activities.<tenant_type>.<tenant_name>.<api_group>.<source>.<kind>.<namespace>.<name>
-func (w *NATSWatcher) buildSubject(scope storage.ScopeContext, filter WatchFilter) string {
-	parts := []string{w.subjectPrefix}
-
-	// Tenant type and name
-	if scope.Type == "platform" {
-		parts = append(parts, ">") // Wildcard for all tenants
-		return strings.Join(parts, ".")
+// buildSubject returns the NATS subject pattern for a scope's activities.
+// Published subjects are activities.<tenant_type>.<tenant_name>.<api_group>.<origin>.<kind>.<namespace>.<name>,
+// but the API group is published raw and its dots add tokens, so nothing after
+// the tenant has a fixed position. The pattern narrows by tenant only and the
+// CEL filter does the rest.
+func (w *NATSWatcher) buildSubject(scope storage.ScopeContext) string {
+	if scope.Type == types.TenantTypePlatform {
+		return w.subjectPrefix + ".>"
 	}
-
-	parts = append(parts, scope.Type)
-	parts = append(parts, scope.Name)
-
-	// API group - use wildcard or normalized name
-	if filter.APIGroup != "" {
-		// Replace dots with underscores for NATS compatibility
-		normalizedGroup := strings.ReplaceAll(filter.APIGroup, ".", "_")
-		parts = append(parts, normalizedGroup)
-	} else {
-		parts = append(parts, "*")
-	}
-
-	// Source (audit/event) - always wildcard for now
-	parts = append(parts, "*")
-
-	// Kind
-	if filter.ResourceKind != "" {
-		parts = append(parts, filter.ResourceKind)
-	} else {
-		parts = append(parts, "*")
-	}
-
-	// Namespace
-	if filter.Namespace != "" {
-		parts = append(parts, filter.Namespace)
-	} else {
-		parts = append(parts, "*")
-	}
-
-	// Name - always wildcard
-	parts = append(parts, ">")
-
-	return strings.Join(parts, ".")
+	return strings.Join([]string{w.subjectPrefix, scope.Type, scope.Name, ">"}, ".")
 }
 
 // ActivityWatch implements watch.Interface for activity resources using JetStream.
@@ -314,6 +277,7 @@ type ActivityWatch struct {
 	consumerName string
 	ctx          context.Context
 	cancel       context.CancelFunc
+	scope        storage.ScopeContext
 	filter       WatchFilter
 	celFilter    *cel.CompiledActivityFilter // Pre-compiled CEL filter for advanced filtering
 
@@ -397,7 +361,6 @@ func (w *ActivityWatch) processMessages() {
 				activity.ResourceVersion = strconv.FormatUint(meta.Sequence.Stream, 10)
 			}
 
-			// Apply client-side filters that weren't covered by the subject pattern
 			if !w.matchesFilter(&activity) {
 				msg.Ack()
 				continue
@@ -418,8 +381,26 @@ func (w *ActivityWatch) processMessages() {
 	}
 }
 
-// matchesFilter checks if an activity matches the additional filter criteria.
+// inScope reports whether activity belongs to scope, using the same rules as
+// ClickHouse activity queries. Tenant isolation must not depend on the NATS
+// subject alone: a tenant name containing a dot would let a subject pattern
+// match another tenant's activities.
+func inScope(scope storage.ScopeContext, activity *v1alpha1.Activity) bool {
+	switch scope.Type {
+	case types.TenantTypePlatform:
+		return true
+	case types.TenantTypeUser:
+		return activity.Spec.Actor.UID == scope.Name
+	default:
+		return activity.Spec.Tenant.Type == scope.Type && activity.Spec.Tenant.Name == scope.Name
+	}
+}
+
+// matchesFilter checks if an activity is in the watch's scope and matches its filter.
 func (w *ActivityWatch) matchesFilter(activity *v1alpha1.Activity) bool {
+	if !inScope(w.scope, activity) {
+		return false
+	}
 	if w.celFilter != nil {
 		match, err := w.celFilter.EvaluateActivity(activity)
 		if err != nil {

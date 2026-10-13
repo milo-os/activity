@@ -156,8 +156,6 @@ type WatchFilter struct {
 	ResourceVersion uint64
 	// Namespace filters activities by namespace
 	Namespace string
-	// ChangeSource filters by change source (human/system)
-	ChangeSource string
 	// APIGroup filters by resource API group
 	APIGroup string
 	// ResourceKind filters by resource kind
@@ -422,12 +420,6 @@ func (w *ActivityWatch) processMessages() {
 
 // matchesFilter checks if an activity matches the additional filter criteria.
 func (w *ActivityWatch) matchesFilter(activity *v1alpha1.Activity) bool {
-	// Simple field checks
-	if w.filter.ChangeSource != "" && activity.Spec.ChangeSource != w.filter.ChangeSource {
-		return false
-	}
-
-	// CEL filter evaluation
 	if w.celFilter != nil {
 		match, err := w.celFilter.EvaluateActivity(activity)
 		if err != nil {

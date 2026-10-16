@@ -12,6 +12,7 @@ spec:
     # ActivityPolicy management - full CRUD operations
     - activity.miloapis.com/activitypolicies.list
     - activity.miloapis.com/activitypolicies.get
+    - activity.miloapis.com/activitypolicies/status.get
     - activity.miloapis.com/activitypolicies.create
     - activity.miloapis.com/activitypolicies.update
     - activity.miloapis.com/activitypolicies.patch
@@ -23,4 +24,5 @@ spec:
     - activity.miloapis.com/reindexjobs.create
     - activity.miloapis.com/reindexjobs.list
     - activity.miloapis.com/reindexjobs.get
+    - activity.miloapis.com/reindexjobs/status.get
     - activity.miloapis.com/reindexjobs.delete

@@ -28,70 +28,70 @@ S3-compatible cold storage after 90 days. A 10 GB local cache accelerates
 queries against cold data. Events and activities are deleted after their
 retention period expires.
 
-## Audit Events Table
+## Audit Logs Table
 
-The `audit.events` table stores raw audit events from the control plane:
+The `audit.audit_logs` table stores raw audit events from the control plane.
+Migration 001 created it as `audit.events`; migration 003 renamed it. Every
+column but `event_json` is `MATERIALIZED` from the event's JSON when it is
+stored:
 
 ```sql
-CREATE TABLE audit.events (
-    -- Full audit event as compressed JSON
+CREATE TABLE audit.audit_logs (
     event_json String CODEC(ZSTD(3)),
 
-    -- Extracted timestamp for partitioning and ordering
-    timestamp DateTime64(6),
-
-    -- Tenant scope
-    scope_type LowCardinality(String),  -- Organization, Project, User
-    scope_name String,
-
-    -- Actor identity
-    user String,
-    user_uid String,
-
-    -- Request metadata
-    verb LowCardinality(String),
-    resource LowCardinality(String),
-    api_group LowCardinality(String),
-    namespace String,
-    resource_name String,
-
-    -- Response
-    status_code UInt16
-
-) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/audit_events', '{replica}')
+    timestamp DateTime64(3) MATERIALIZED ...,       -- requestReceivedTimestamp
+    scope_type LowCardinality(String) MATERIALIZED ..., -- Organization, Project
+    scope_name String MATERIALIZED ...,
+    user String MATERIALIZED ...,
+    user_uid String MATERIALIZED ...,
+    audit_id UUID MATERIALIZED ...,
+    verb LowCardinality(String) MATERIALIZED ...,
+    api_group LowCardinality(String) MATERIALIZED ...,
+    resource LowCardinality(String) MATERIALIZED ...,
+    namespace LowCardinality(String) MATERIALIZED ...,
+    resource_name String MATERIALIZED ...,
+    status_code UInt16 MATERIALIZED ...
+)
+ENGINE = ReplicatedReplacingMergeTree
 PARTITION BY toYYYYMMDD(timestamp)
-ORDER BY (scope_type, scope_name, timestamp, user_uid)
-TTL timestamp + INTERVAL 90 DAY TO VOLUME 'cold'
-SETTINGS index_granularity = 8192;
+ORDER BY (toStartOfHour(timestamp), timestamp, scope_type, scope_name, user, audit_id)
+TTL timestamp + INTERVAL 90 DAY TO VOLUME 'cold';
 ```
+
+The key sorts by time first. Because `timestamp` is almost unique per row, the
+key columns after it cannot skip granules, so a search scoped to an
+organization or project relies on the `scope_name` skip index below.
 
 ### Indexes
 
-| Index | Type | Columns | Purpose |
-|-------|------|---------|---------|
-| `idx_verb` | bloom_filter | `verb` | Filter by operation type |
-| `idx_resource` | bloom_filter | `resource, resource_name` | Resource lookups |
-| `idx_user` | bloom_filter | `user, user_uid` | Actor-based queries |
-| `idx_status` | minmax | `status_code` | Error filtering |
+| Index | Type | Columns |
+|-------|------|---------|
+| `idx_timestamp_minmax` | minmax | `timestamp` |
+| `idx_verb_set` | set(10) | `verb` |
+| `idx_resource_bloom` | bloom_filter(0.01) | `resource` |
+| `bf_api_resource` | bloom_filter(0.01) | `api_group, resource` |
+| `idx_verb_resource_bloom` | bloom_filter(0.01) | `verb, resource` |
+| `idx_user_bloom` | bloom_filter(0.001) | `user` |
+| `idx_user_uid_bloom` | bloom_filter(0.001) | `user_uid` |
+| `idx_status_code_set` | set(100) | `status_code` |
+| `idx_status_code_minmax` | minmax | `status_code` |
+| `idx_scope_name_bloom` | bloom_filter(0.01) | `scope_name` (migration 012) |
+
+A skip index added by a migration covers new parts as they are inserted and
+merged. Parts written before it carry no index until `MATERIALIZE INDEX` runs
+on their partition.
 
 ### Projections
 
-Three projections provide optimized sort orders:
-
 ```sql
--- Platform-wide queries (sorted by time)
-PROJECTION platform_queries (
-    SELECT * ORDER BY timestamp, scope_type, scope_name
+PROJECTION platform_query_projection (
+    SELECT * ORDER BY (toStartOfHour(timestamp), timestamp, api_group, resource, audit_id)
 )
-
--- Username-based queries
-PROJECTION user_queries (
-    SELECT * ORDER BY user, timestamp
+PROJECTION user_query_projection (
+    SELECT * ORDER BY (toStartOfHour(timestamp), timestamp, user, api_group, resource, audit_id)
 )
-
--- User UID-based queries (stable across name changes)
-PROJECTION uid_queries (
-    SELECT * ORDER BY user_uid, timestamp
+PROJECTION user_uid_query_projection (
+    SELECT * ORDER BY (toStartOfHour(timestamp), timestamp, user_uid, api_group, resource, audit_id)
 )
 ```
 

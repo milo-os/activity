@@ -133,6 +133,13 @@
         }[5m]))
       "record": "activity:slo_metadata:request_total:rate5m"
     - "expr": |
+        sum(rate(apiserver_request_duration_seconds_count{
+          job="activity-apiserver",
+          resource="activitypolicies",
+          verb=~"GET|LIST|PATCH"
+        }[1h]))
+      "record": "activity:slo_metadata:request_total:rate1h"
+    - "expr": |
         (
           1 - (
             activity:slo_metadata:request_good:rate5m
@@ -240,6 +247,13 @@
           verb="POST"
         }[5m]))
       "record": "activity:slo_audit_query:request_total:rate5m"
+    - "expr": |
+        sum(rate(apiserver_request_duration_seconds_count{
+          job="activity-apiserver",
+          resource="auditlogqueries",
+          verb="POST"
+        }[1h]))
+      "record": "activity:slo_audit_query:request_total:rate1h"
     - "expr": |
         (
           1 - (
@@ -349,6 +363,13 @@
         }[5m]))
       "record": "activity:slo_activity_query:request_total:rate5m"
     - "expr": |
+        sum(rate(apiserver_request_duration_seconds_count{
+          job="activity-apiserver",
+          resource=~"activityqueries|activityfacetqueries",
+          verb="POST"
+        }[1h]))
+      "record": "activity:slo_activity_query:request_total:rate1h"
+    - "expr": |
         (
           1 - (
             activity:slo_activity_query:request_good:rate5m
@@ -457,6 +478,13 @@
         }[5m]))
       "record": "activity:slo_event_query:request_total:rate5m"
     - "expr": |
+        sum(rate(apiserver_request_duration_seconds_count{
+          job="activity-apiserver",
+          resource=~"eventqueries|eventfacetqueries",
+          verb="POST"
+        }[1h]))
+      "record": "activity:slo_event_query:request_total:rate1h"
+    - "expr": |
         (
           1 - (
             activity:slo_event_query:request_good:rate5m
@@ -562,6 +590,12 @@
           verb!="WATCH"
         }[5m]))
       "record": "activity:slo_availability:request_total:rate5m"
+    - "expr": |
+        sum(rate(apiserver_request_total{
+          job="activity-apiserver",
+          verb!="WATCH"
+        }[1h]))
+      "record": "activity:slo_availability:request_total:rate1h"
     - "expr": |
         (
           1 - (

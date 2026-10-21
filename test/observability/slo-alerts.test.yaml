@@ -1,0 +1,36 @@
+rule_files:
+  - recordings.yaml
+  - slo-rules.yaml
+evaluation_interval: 30s
+tests:
+  - name: a fast burn on a dozen requests an hour does not page
+    interval: 1m
+    input_series:
+      - series: apiserver_request_duration_seconds_count{job="activity-apiserver",resource="activityqueries",verb="POST"}
+        values: 0+0.2x120
+      - series: apiserver_request_duration_seconds_bucket{job="activity-apiserver",resource="activityqueries",verb="POST",le="5"}
+        values: 0+0.12x120
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: ActivitySLOActivityQueryPageBurn
+        exp_alerts: []
+
+  - name: a fast burn on sustained traffic pages
+    interval: 1m
+    input_series:
+      - series: apiserver_request_duration_seconds_count{job="activity-apiserver",resource="activityqueries",verb="POST"}
+        values: 0+2x120
+      - series: apiserver_request_duration_seconds_bucket{job="activity-apiserver",resource="activityqueries",verb="POST",le="5"}
+        values: 0+1.5x120
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: ActivitySLOActivityQueryPageBurn
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: activity-apiserver
+              slo: activity_query
+            exp_annotations:
+              summary: "Activity query SLO burning fast — page"
+              description: "Error ratio is 25% over the last hour (threshold: 14.4%). ActivityQuery/ActivityFacetQuery POST latency is breaching the 3s target at a rate that will exhaust the error budget within hours."
+              runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/slo-burn.md"

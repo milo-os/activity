@@ -23,6 +23,11 @@ spec:
     #    6.0% = 0.06   (exhausts 5% of monthly budget in 6h → ticket)
     #    3.0% = 0.03   (slow trend burn → low)
     #
+    # Page tier also needs at least 60 requests in the last hour. Below that,
+    # a 14.4% ratio is a few slow requests from one or two users. An SLO that
+    # rarely sees 60 requests an hour therefore never pages, and its burns
+    # surface through the ticket and low tiers only.
+    #
     # Depends on recording rules in activity-slo-recordings (mixin).
     # =========================================================================
     - name: activity-slo-burn
@@ -39,6 +44,7 @@ spec:
             AND
             activity:slo_metadata:error_ratio:rate5m > 0.144
             AND activity:slo_metadata:request_total:rate5m > 0
+            AND activity:slo_metadata:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
             severity: critical
@@ -100,6 +106,7 @@ spec:
             AND
             activity:slo_audit_query:error_ratio:rate5m > 0.144
             AND activity:slo_audit_query:request_total:rate5m > 0
+            AND activity:slo_audit_query:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
             severity: critical
@@ -161,6 +168,7 @@ spec:
             AND
             activity:slo_activity_query:error_ratio:rate5m > 0.144
             AND activity:slo_activity_query:request_total:rate5m > 0
+            AND activity:slo_activity_query:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
             severity: critical
@@ -222,6 +230,7 @@ spec:
             AND
             activity:slo_event_query:error_ratio:rate5m > 0.144
             AND activity:slo_event_query:request_total:rate5m > 0
+            AND activity:slo_event_query:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
             severity: critical
@@ -283,6 +292,7 @@ spec:
             AND
             activity:slo_availability:error_ratio:rate5m > 0.144
             AND activity:slo_availability:request_total:rate5m > 0
+            AND activity:slo_availability:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
             severity: critical

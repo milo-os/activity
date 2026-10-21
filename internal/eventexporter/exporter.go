@@ -319,13 +319,7 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			exporter.enqueue(event, "ADDED")
 		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			event, ok := newObj.(*eventsv1.Event)
-			if !ok {
-				return
-			}
-			exporter.enqueue(event, "MODIFIED")
-		},
+		UpdateFunc: exporter.onUpdate,
 		// We don't need to handle deletes - events are ephemeral and TTL'd
 	})
 
@@ -450,6 +444,19 @@ func FederatedCluster(planeType, clusterName string) string {
 		return ""
 	}
 	return clusterName
+}
+
+// onUpdate publishes a changed event as MODIFIED. It skips informer resyncs,
+// which redeliver unchanged events long after the stream's duplicate window.
+func (e *Exporter) onUpdate(oldObj, newObj interface{}) {
+	event, ok := newObj.(*eventsv1.Event)
+	if !ok {
+		return
+	}
+	if old, ok := oldObj.(*eventsv1.Event); ok && old.ResourceVersion == event.ResourceVersion {
+		return
+	}
+	e.enqueue(event, "MODIFIED")
 }
 
 // enqueue copies event and queues it for publish, never blocking the informer

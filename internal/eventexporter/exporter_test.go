@@ -383,6 +383,55 @@ func TestExporter_Enqueue(t *testing.T) {
 	})
 }
 
+func TestExporter_OnUpdate(t *testing.T) {
+	event := func(rv string) *eventsv1.Event {
+		return &eventsv1.Event{ObjectMeta: metav1.ObjectMeta{Name: "event-a", ResourceVersion: rv}}
+	}
+
+	tests := []struct {
+		name       string
+		oldObj     interface{}
+		newObj     interface{}
+		wantQueued bool
+	}{
+		{
+			name:       "resync with unchanged resource version is skipped",
+			oldObj:     event("100"),
+			newObj:     event("100"),
+			wantQueued: false,
+		},
+		{
+			name:       "real update is published as MODIFIED",
+			oldObj:     event("100"),
+			newObj:     event("101"),
+			wantQueued: true,
+		},
+		{
+			name:       "non-event object is ignored",
+			oldObj:     event("100"),
+			newObj:     "not an event",
+			wantQueued: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exporter := &Exporter{queue: make(chan eventJob, 1)}
+
+			exporter.onUpdate(tt.oldObj, tt.newObj)
+
+			if got := len(exporter.queue) == 1; got != tt.wantQueued {
+				t.Fatalf("queued = %v, want %v", got, tt.wantQueued)
+			}
+			if tt.wantQueued {
+				if job := <-exporter.queue; job.eventType != "MODIFIED" {
+					t.Errorf("eventType = %q, want MODIFIED", job.eventType)
+				}
+			}
+		})
+	}
+}
+
 // fakeFuture is a nats.PubAckFuture whose outcome is already decided.
 type fakeFuture struct {
 	ok  chan *nats.PubAck

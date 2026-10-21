@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -396,5 +397,70 @@ func TestCursorExpiration_EdgeCase_ExactlyAtTTL(t *testing.T) {
 	_, _, err := decodeCursor(cursor, spec)
 	if err == nil {
 		t.Fatal("expected error for cursor at TTL boundary, got nil")
+	}
+}
+
+const lastActivityJSON = `{"metadata":{"name":"act-df69938cba05","creationTimestamp":"2026-10-08T14:12:06Z"}}`
+
+func TestActivityCursorEncodeDecodeRoundtrip(t *testing.T) {
+	spec := ActivityQuerySpec{StartTime: "now-30d", Filter: "spec.resource.kind == 'Instance'", Limit: 100}
+
+	gotTime, gotName, err := decodeActivityCursor(encodeActivityCursor(lastActivityJSON, spec), spec)
+	if err != nil {
+		t.Fatalf("decodeActivityCursor failed: %v", err)
+	}
+	if want := time.Date(2026, 10, 8, 14, 12, 6, 0, time.UTC); !gotTime.Equal(want) {
+		t.Errorf("timestamp = %v, want %v", gotTime, want)
+	}
+	if want := "act-df69938cba05"; gotName != want {
+		t.Errorf("name = %q, want %q", gotName, want)
+	}
+}
+
+// Tokens issued before the activity_name tie-breaker carry a resource UID.
+func TestDecodeActivityCursor_LegacyToken(t *testing.T) {
+	spec := ActivityQuerySpec{StartTime: "now-30d", Limit: 100}
+	legacy, _ := json.Marshal(map[string]interface{}{
+		"t": time.Now(),
+		"r": "resource-uid",
+		"h": hashActivityQueryParams(spec),
+		"i": time.Now(),
+	})
+
+	_, _, err := decodeActivityCursor(base64.URLEncoding.EncodeToString(legacy), spec)
+	if err == nil {
+		t.Fatal("expected error for legacy cursor, got nil")
+	}
+	if !strings.Contains(err.Error(), "continue token is invalid") {
+		t.Errorf("expected 'continue token is invalid' error, got: %v", err)
+	}
+}
+
+func TestBuildActivityQuery_TieBreakMatchesCursor(t *testing.T) {
+	s := &ClickHouseStorage{config: ClickHouseConfig{Database: "audit", MaxPageSize: 1000}}
+	spec := ActivityQuerySpec{StartTime: "now-30d", Limit: 100}
+	spec.Continue = encodeActivityCursor(lastActivityJSON, spec)
+
+	for _, scope := range []ScopeContext{
+		{Type: "platform"},
+		{Type: "Project", Name: "p"},
+		{Type: "Organization", Name: "o"},
+		{Type: "User", Name: "u"},
+	} {
+		t.Run(scope.Type, func(t *testing.T) {
+			query, args, err := s.buildActivityQuery(context.Background(), spec, scope)
+			if err != nil {
+				t.Fatalf("buildActivityQuery failed: %v", err)
+			}
+			if !strings.Contains(query, "(timestamp = ? AND activity_name < ?)") {
+				t.Errorf("cursor predicate does not tie-break on activity_name: %s", query)
+			}
+			if !strings.Contains(query, "ORDER BY toStartOfHour(timestamp) DESC, timestamp DESC, activity_name DESC LIMIT") {
+				t.Errorf("ORDER BY does not tie-break on activity_name: %s", query)
+			}
+			if got, want := args[len(args)-1], "act-df69938cba05"; got != want {
+				t.Errorf("last arg = %v, want %q", got, want)
+			}
+		})
 	}
 }

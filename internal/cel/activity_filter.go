@@ -126,6 +126,16 @@ func (m *ActivityFieldMapper) mapNestedField(baseName, parentField, field string
 	case baseName == "spec" && parentField == "origin" && field == "type":
 		return "origin_type", nil
 
+	// spec.source.*
+	case baseName == "spec" && parentField == "source" && field == "planeType":
+		return "source_plane_type", nil
+	case baseName == "spec" && parentField == "source" && field == "cluster":
+		return "source_cluster", nil
+	case baseName == "spec" && parentField == "source" && field == "region":
+		return "source_region", nil
+	case baseName == "spec" && parentField == "source" && field == "city":
+		return "source_city", nil
+
 	default:
 		return "", fmt.Errorf("field '%s.%s.%s' is not available for filtering", baseName, parentField, field)
 	}
@@ -142,10 +152,21 @@ func (m *ActivityFieldMapper) mapDirectField(baseName, field string) (string, er
 		return "activity_namespace", nil
 	case baseName == "metadata" && field == "name":
 		return "activity_name", nil
+	case baseName == "spec" && field == "relatedUIDs":
+		return "", fmt.Errorf("field 'spec.relatedUIDs' is a list and only supports 'in', e.g. 'abc-123' in spec.relatedUIDs")
 
 	default:
 		return "", fmt.Errorf("field '%s.%s' is not available for filtering", baseName, field)
 	}
+}
+
+// MapArraySelectExpr maps list-valued activity fields to ClickHouse Array columns.
+func (m *ActivityFieldMapper) MapArraySelectExpr(sel *expr.Expr_Select) (string, bool) {
+	ident := sel.GetOperand().GetIdentExpr()
+	if ident != nil && ident.GetName() == "spec" && sel.GetField() == "relatedUIDs" {
+		return "related_uids", true
+	}
+	return "", false
 }
 
 // ActivityEnvironment creates a CEL environment for activity filtering.
@@ -162,6 +183,10 @@ func (m *ActivityFieldMapper) mapDirectField(baseName, field string) (string, er
 //   - spec.resource.uid - resource UID
 //   - spec.summary - activity summary text
 //   - spec.origin.type - origin type (audit/event)
+//   - spec.source.planeType, spec.source.cluster, spec.source.region,
+//     spec.source.city - where the underlying record originated
+//   - spec.relatedUIDs - resource, related, and linked UIDs; only valid as
+//     'uid' in spec.relatedUIDs
 //   - metadata.namespace - activity namespace
 //
 // Supports standard CEL operators (==, !=, &&, ||, !, in) and string methods
@@ -181,10 +206,12 @@ var activityValidFields = map[string]map[string]bool{
 	"spec": {
 		"changeSource": true,
 		"summary":      true,
+		"relatedUIDs":  true,
 		// Parent fields - these are intermediate paths to nested fields
 		"actor":    true,
 		"resource": true,
 		"origin":   true,
+		"source":   true,
 	},
 	"spec.actor": {
 		"name": true,
@@ -200,6 +227,12 @@ var activityValidFields = map[string]map[string]bool{
 	},
 	"spec.origin": {
 		"type": true,
+	},
+	"spec.source": {
+		"planeType": true,
+		"cluster":   true,
+		"region":    true,
+		"city":      true,
 	},
 	"metadata": {
 		"namespace": true,
@@ -318,10 +351,22 @@ func (f *CompiledActivityFilter) EvaluateActivity(activity *v1alpha1.Activity) (
 // ActivityToMap converts an Activity struct to a map format for CEL evaluation.
 // The map structure matches the CEL variables defined in ActivityEnvironment.
 func ActivityToMap(activity *v1alpha1.Activity) map[string]interface{} {
+	var source v1alpha1.ActivitySource
+	if activity.Spec.Source != nil {
+		source = *activity.Spec.Source
+	}
+
 	return map[string]interface{}{
 		"spec": map[string]interface{}{
 			"changeSource": activity.Spec.ChangeSource,
 			"summary":      activity.Spec.Summary,
+			"relatedUIDs":  RelatedUIDs(activity),
+			"source": map[string]interface{}{
+				"planeType": source.PlaneType,
+				"cluster":   source.Cluster,
+				"region":    source.Region,
+				"city":      source.City,
+			},
 			"actor": map[string]interface{}{
 				"name": activity.Spec.Actor.Name,
 				"type": activity.Spec.Actor.Type,
@@ -345,6 +390,28 @@ func ActivityToMap(activity *v1alpha1.Activity) map[string]interface{} {
 	}
 }
 
+// RelatedUIDs returns the distinct, non-empty UIDs of an activity's resource,
+// related resources, and linked resources. Keep in sync with the related_uids
+// column in migrations/011_activities_related_uids.sql.
+func RelatedUIDs(activity *v1alpha1.Activity) []string {
+	uids := make([]string, 0, 1+len(activity.Spec.Related)+len(activity.Spec.Links))
+	seen := make(map[string]bool, cap(uids))
+	add := func(uid string) {
+		if uid != "" && !seen[uid] {
+			seen[uid] = true
+			uids = append(uids, uid)
+		}
+	}
+	add(activity.Spec.Resource.UID)
+	for _, r := range activity.Spec.Related {
+		add(r.UID)
+	}
+	for _, l := range activity.Spec.Links {
+		add(l.Resource.UID)
+	}
+	return uids
+}
+
 // formatActivityFilterError formats error messages for activity filter expressions
 func formatActivityFilterError(err error) string {
 	errMsg := err.Error()
@@ -359,6 +426,8 @@ Available fields for activity filtering:
   - spec.resource.apiGroup, spec.resource.kind, spec.resource.name
   - spec.resource.namespace, spec.resource.uid
   - spec.summary, spec.origin.type
+  - spec.source.planeType, spec.source.cluster, spec.source.region, spec.source.city
+  - spec.relatedUIDs (list; use "<uid>" in spec.relatedUIDs)
   - metadata.namespace, metadata.name
 
 Example: spec.changeSource == "human" && spec.resource.kind == "Deployment"`, errMsg)

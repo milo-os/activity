@@ -332,6 +332,12 @@ Available CEL Fields:
 	spec.resource.uid      - resource UID
 	spec.summary           - activity summary text
 	spec.origin.type       - "audit" or "event"
+	spec.source.planeType  - plane the record originated from (management, edge)
+	spec.source.cluster    - cluster the record originated from
+	spec.source.region     - region the record originated from
+	spec.source.city       - city the record originated from
+	spec.relatedUIDs       - UIDs of the resource, its related resources, and
+	                         linked resources (list; use '<uid>' in spec.relatedUIDs)
 	metadata.namespace     - activity namespace
 
 
@@ -344,6 +350,7 @@ CEL Filter Examples:
 	"spec.resource.kind in ['Deployment', 'StatefulSet']"
 	"spec.resource.apiGroup == 'networking.datumapis.com'"
 	"spec.actor.uid == 'abc123'"
+	"'abc123' in spec.relatedUIDs && spec.source.region == 'us-east-1'"
 
 
 
@@ -401,6 +408,25 @@ _Appears in:_
 | `uid` _string_ | UID is the unique identifier of the resource. |  |  |
 
 
+#### ActivitySource
+
+
+
+ActivitySource describes where the underlying event or activity originated.
+
+
+
+_Appears in:_
+- [ActivitySpec](#activityspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `planeType` _string_ | PlaneType indicates which plane the event or activity originated from.<br />Example values: "management", "edge". |  |  |
+| `cluster` _string_ | Cluster is the name of the cluster the event or activity originated from. |  |  |
+| `region` _string_ | Region is the region the event or activity originated from. |  |  |
+| `city` _string_ | City is the city the event or activity originated from. |  |  |
+
+
 #### ActivitySpec
 
 
@@ -419,9 +445,11 @@ _Appears in:_
 | `actor` _[ActivityActor](#activityactor)_ | Actor identifies who performed the action. |  |  |
 | `resource` _[ActivityResource](#activityresource)_ | Resource identifies the Kubernetes resource that was affected. |  |  |
 | `links` _[ActivityLink](#activitylink) array_ | Links contains clickable references found in the summary.<br />The portal uses these to make resource names in the summary clickable. |  |  |
+| `related` _[ActivityResource](#activityresource) array_ | Related lists other resources the source record references, such as an<br />event's related object (e.g., the Workload an Instance belongs to). |  |  |
 | `tenant` _[ActivityTenant](#activitytenant)_ | Tenant identifies the scope for multi-tenant isolation. |  |  |
 | `changes` _[ActivityChange](#activitychange) array_ | Changes contains field-level changes for update/patch operations.<br />Shows old and new values for modified fields.<br /><br />NOTE: This field may be empty in the initial implementation.<br />Populating old values requires resource history lookups. |  |  |
 | `origin` _[ActivityOrigin](#activityorigin)_ | Origin identifies the source record for correlation. |  |  |
+| `source` _[ActivitySource](#activitysource)_ | Source describes where the underlying event or activity originated:<br />plane type, cluster, region, and city.<br /><br />Unset means this information is unknown or not yet populated. |  |  |
 
 
 #### ActivityTenant

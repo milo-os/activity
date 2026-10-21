@@ -96,6 +96,16 @@ export interface ActivityFeedProps {
   loadMoreThreshold?: number;
   /** Handler called when user wants to create a policy (for empty state) */
   onCreatePolicy?: () => void;
+  /**
+   * Whether to probe ActivityPolicies to decide between the "No Policies"
+   * and "No activities found" empty states (default: false).
+   *
+   * ActivityPolicy is a Platform-scope resource. Tenant-scoped clients
+   * (Project, Organization, User) cannot list it and always receive a 403,
+   * so leave this off in tenant UIs. Enable it only in platform-operator
+   * UIs that have access to the Platform scope.
+   */
+  checkPolicies?: boolean;
   /** Enable real-time streaming (default: false) */
   enableStreaming?: boolean;
   /** Callback invoked when the effective time range is resolved */
@@ -136,6 +146,7 @@ export function ActivityFeed({
   infiniteScroll = true,
   loadMoreThreshold = 200,
   onCreatePolicy,
+  checkPolicies = false,
   enableStreaming = false,
   onEffectiveTimeRangeChange,
   errorFormatter,
@@ -179,13 +190,21 @@ export function ActivityFeed({
   // Store the latest loadMore function in a ref to avoid observer re-subscription
   const loadMoreRef = useRef(loadMore);
 
-  // Track whether policies exist in the system
+  // Track whether policies exist in the system. Null means unknown: neither
+  // empty state is shown, so tenants never see the policy prompt.
   const [hasPolicies, setHasPolicies] = useState<boolean | null>(null);
-  const [policiesLoading, setPoliciesLoading] = useState(true);
+  const [policiesLoading, setPoliciesLoading] = useState(checkPolicies);
 
-  // Check for policies on mount
+  // Check for policies on mount, but only when the host opts in. Tenant
+  // clients cannot list the Platform-scope ActivityPolicy resource.
   useEffect(() => {
-    const checkPolicies = async () => {
+    if (!checkPolicies) {
+      setHasPolicies(null);
+      setPoliciesLoading(false);
+      return;
+    }
+
+    const probePolicies = async () => {
       try {
         const policyList = await client.listPolicies();
         setHasPolicies((policyList.items?.length ?? 0) > 0);
@@ -196,8 +215,8 @@ export function ActivityFeed({
         setPoliciesLoading(false);
       }
     };
-    checkPolicies();
-  }, [client]);
+    probePolicies();
+  }, [client, checkPolicies]);
 
   // Auto-execute on mount
   useEffect(() => {

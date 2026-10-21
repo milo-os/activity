@@ -2,6 +2,7 @@ package cel
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,6 +56,21 @@ func TestCompileActivityFilterProgram(t *testing.T) {
 			name:    "valid metadata namespace filter",
 			filter:  `metadata.namespace == "production"`,
 			wantErr: false,
+		},
+		{
+			name:    "valid source region filter",
+			filter:  `spec.source.region == "us-east-1"`,
+			wantErr: false,
+		},
+		{
+			name:    "valid relatedUIDs filter",
+			filter:  `"workload-uid" in spec.relatedUIDs`,
+			wantErr: false,
+		},
+		{
+			name:    "unknown source field",
+			filter:  `spec.source.zone == "a"`,
+			wantErr: true,
 		},
 		{
 			name:    "empty filter",
@@ -116,9 +132,15 @@ func TestActivityToMap(t *testing.T) {
 				Namespace: "production",
 				UID:       "deployment-uid-456",
 			},
+			Related: []v1alpha1.ActivityResource{{UID: "replicaset-uid"}, {}},
+			Links: []v1alpha1.ActivityLink{
+				{Resource: v1alpha1.ActivityResource{UID: "replicaset-uid"}},
+				{Resource: v1alpha1.ActivityResource{UID: "configmap-uid"}},
+			},
 			Origin: v1alpha1.ActivityOrigin{
 				Type: "audit",
 			},
+			Source: &v1alpha1.ActivitySource{Region: "us-east-1"},
 		},
 	}
 
@@ -164,6 +186,22 @@ func TestActivityToMap(t *testing.T) {
 
 	if resource["apiGroup"] != "apps" {
 		t.Errorf("spec.resource.apiGroup = %v, want %v", resource["apiGroup"], "apps")
+	}
+
+	// Verify relatedUIDs are distinct and skip empty UIDs
+	wantRelated := []string{"deployment-uid-456", "replicaset-uid", "configmap-uid"}
+	if !reflect.DeepEqual(spec["relatedUIDs"], wantRelated) {
+		t.Errorf("spec.relatedUIDs = %v, want %v", spec["relatedUIDs"], wantRelated)
+	}
+
+	// Verify source fields
+	source, ok := spec["source"].(map[string]interface{})
+	if !ok {
+		t.Fatal("spec.source is not a map")
+	}
+
+	if source["region"] != "us-east-1" {
+		t.Errorf("spec.source.region = %v, want %v", source["region"], "us-east-1")
 	}
 
 	// Verify metadata fields
@@ -258,6 +296,17 @@ func TestEvaluateActivity(t *testing.T) {
 			Origin: v1alpha1.ActivityOrigin{
 				Type: "audit",
 			},
+		},
+	}
+
+	instanceActivity := &v1alpha1.Activity{
+		Spec: v1alpha1.ActivitySpec{
+			Resource: v1alpha1.ActivityResource{Kind: "Instance", UID: "instance-uid"},
+			Related:  []v1alpha1.ActivityResource{{Kind: "Workload", UID: "workload-uid"}},
+			Links: []v1alpha1.ActivityLink{
+				{Resource: v1alpha1.ActivityResource{Kind: "Network", UID: "network-uid"}},
+			},
+			Source: &v1alpha1.ActivitySource{PlaneType: "edge", Region: "us-east-1"},
 		},
 	}
 
@@ -429,6 +478,42 @@ func TestEvaluateActivity(t *testing.T) {
 			activity: humanDeploymentActivity,
 			want:     true,
 		},
+		{
+			name:     "relatedUIDs - matches own resource",
+			filter:   `"instance-uid" in spec.relatedUIDs`,
+			activity: instanceActivity,
+			want:     true,
+		},
+		{
+			name:     "relatedUIDs - matches related resource",
+			filter:   `"workload-uid" in spec.relatedUIDs`,
+			activity: instanceActivity,
+			want:     true,
+		},
+		{
+			name:     "relatedUIDs - matches linked resource",
+			filter:   `"network-uid" in spec.relatedUIDs`,
+			activity: instanceActivity,
+			want:     true,
+		},
+		{
+			name:     "relatedUIDs - does not match",
+			filter:   `"workload-uid" in spec.relatedUIDs`,
+			activity: humanDeploymentActivity,
+			want:     false,
+		},
+		{
+			name:     "source region filter",
+			filter:   `spec.source.region == "us-east-1"`,
+			activity: instanceActivity,
+			want:     true,
+		},
+		{
+			name:     "source region filter - unset source does not match",
+			filter:   `spec.source.region == "us-east-1"`,
+			activity: humanDeploymentActivity,
+			want:     false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -473,13 +558,14 @@ func TestEvaluateActivity_NilFilter(t *testing.T) {
 	}
 }
 
-// TestConvertActivityToClickHouseSQL_ChangeSource tests the SQL conversion for changeSource filter.
-func TestConvertActivityToClickHouseSQL_ChangeSource(t *testing.T) {
+// TestConvertActivityToClickHouseSQL tests the SQL conversion for activity filters.
+func TestConvertActivityToClickHouseSQL(t *testing.T) {
 	tests := []struct {
 		name           string
 		filter         string
 		wantSQLContain string
 		wantArg        string
+		wantErr        bool
 	}{
 		{
 			name:           "changeSource equals human",
@@ -493,11 +579,45 @@ func TestConvertActivityToClickHouseSQL_ChangeSource(t *testing.T) {
 			wantSQLContain: "change_source = {arg",
 			wantArg:        "system",
 		},
+		{
+			name:           "source region",
+			filter:         `spec.source.region == "us-east-1"`,
+			wantSQLContain: "source_region = {arg",
+			wantArg:        "us-east-1",
+		},
+		{
+			name:           "uid in relatedUIDs uses has()",
+			filter:         `"workload-uid" in spec.relatedUIDs`,
+			wantSQLContain: "has(related_uids, {arg",
+			wantArg:        "workload-uid",
+		},
+		{
+			name:           "in with a list literal still uses IN",
+			filter:         `spec.resource.kind in ["Workload"]`,
+			wantSQLContain: "resource_kind IN [{arg",
+			wantArg:        "Workload",
+		},
+		{
+			name:    "relatedUIDs rejects equality",
+			filter:  `spec.relatedUIDs == "workload-uid"`,
+			wantErr: true,
+		},
+		{
+			name:    "relatedUIDs rejects string methods",
+			filter:  `spec.relatedUIDs.contains("workload-uid")`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sql, args, err := ConvertActivityToClickHouseSQL(context.Background(), tt.filter)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ConvertActivityToClickHouseSQL() = %q, want error", sql)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("ConvertActivityToClickHouseSQL() error = %v", err)
 			}

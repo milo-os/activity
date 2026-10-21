@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"reflect"
 	"testing"
 
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
@@ -8,8 +9,8 @@ import (
 
 // TestEventBuildersScenarios asserts EventProcessor.buildActivity (live) and
 // ActivityBuilder.BuildFromEvent (PolicyPreview/reindex) build identical
-// Activities. Resource always resolves from regarding/involvedObject, never
-// from "related".
+// Activities. Resource always resolves from regarding/involvedObject;
+// "related" goes to Related, never Resource.
 func TestEventBuildersScenarios(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -18,6 +19,7 @@ func TestEventBuildersScenarios(t *testing.T) {
 
 		wantSource   *v1alpha1.ActivitySource
 		wantResource v1alpha1.ActivityResource
+		wantRelated  []v1alpha1.ActivityResource
 		wantOriginID string
 
 		// wantResourceMatchesPolicy is true only when resourceObject is the
@@ -29,7 +31,7 @@ func TestEventBuildersScenarios(t *testing.T) {
 		wantQualified bool
 	}{
 		{
-			name: "no source annotations: backward compatible, related field ignored",
+			name: "no source annotations: backward compatible, related goes to Related",
 			event: map[string]interface{}{
 				"metadata": map[string]interface{}{
 					"uid": "event-uid-no-source",
@@ -42,7 +44,7 @@ func TestEventBuildersScenarios(t *testing.T) {
 					"uid":        "pod-uid-1",
 					"apiVersion": "v1",
 				},
-				// Present, but always ignored for Resource resolution.
+				// Present, but never used for Resource resolution.
 				"related": map[string]interface{}{
 					"kind": "Node",
 					"name": "node-1",
@@ -64,6 +66,7 @@ func TestEventBuildersScenarios(t *testing.T) {
 				Namespace:  "default",
 				UID:        "pod-uid-1",
 			},
+			wantRelated:               []v1alpha1.ActivityResource{{Kind: "Node", Name: "node-1", UID: "node-uid-1"}},
 			wantOriginID:              "event-uid-no-source",
 			wantResourceMatchesPolicy: true,
 		},
@@ -105,9 +108,9 @@ func TestEventBuildersScenarios(t *testing.T) {
 		},
 		{
 			// Full federated case: Source populated, Resource still resolves
-			// from regarding (Pod) even though "related" (WorkloadDeployment)
-			// is present and is ignored; Origin.ID/Name are still qualified.
-			name: "federated case: resource still from regarding, related ignored, origin qualified",
+			// from regarding (Pod) while "related" (WorkloadDeployment) goes to
+			// Related; Origin.ID/Name are still qualified.
+			name: "federated case: resource still from regarding, related goes to Related, origin qualified",
 			event: map[string]interface{}{
 				"metadata": map[string]interface{}{
 					"uid": "a1b2c3",
@@ -147,6 +150,14 @@ func TestEventBuildersScenarios(t *testing.T) {
 				Namespace: "default",
 				UID:       "instance-pod-uid",
 			},
+			wantRelated: []v1alpha1.ActivityResource{{
+				APIGroup:   "compute.datumapis.com",
+				APIVersion: "compute.datumapis.com/v1alpha1",
+				Kind:       "WorkloadDeployment",
+				Name:       "my-workload-deployment",
+				Namespace:  "default",
+				UID:        "wd-uid-1",
+			}},
 			wantOriginID:              "edge/cluster-dfw-1/a1b2c3",
 			wantResourceMatchesPolicy: true,
 			wantQualified:             true,
@@ -318,6 +329,10 @@ func TestEventBuildersScenarios(t *testing.T) {
 
 					if activity.Spec.Resource != tt.wantResource {
 						t.Errorf("Spec.Resource = %+v, want %+v", activity.Spec.Resource, tt.wantResource)
+					}
+
+					if !reflect.DeepEqual(activity.Spec.Related, tt.wantRelated) {
+						t.Errorf("Spec.Related = %+v, want %+v", activity.Spec.Related, tt.wantRelated)
 					}
 
 					if activity.Namespace != tt.wantResource.Namespace {

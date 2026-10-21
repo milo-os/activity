@@ -71,6 +71,10 @@ export default function ActivityFeedPage() {
     end: urlState.endTime,
   }));
 
+  // The example app doubles as a platform-operator UI, where probing
+  // ActivityPolicies is allowed. E2E tests opt in via ?checkPolicies=true.
+  const checkPolicies = searchParams.get("checkPolicies") === "true";
+
   useEffect(() => {
     // Check if in production environment
     const isProduction = typeof window !== "undefined" &&
@@ -129,6 +133,7 @@ export default function ActivityFeedPage() {
           onActivityClick={handleActivityClick}
           resourceLinkResolver={defaultResourceLinkResolver}
           onCreatePolicy={() => navigate("/policies")}
+          checkPolicies={checkPolicies}
           initialTimeRange={initialTimeRange}
           initialFilters={initialFilters}
           onFiltersChange={handleFiltersChange}

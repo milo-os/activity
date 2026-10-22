@@ -140,8 +140,7 @@ func ActivityFieldLabelConversionFunc(label, value string) (string, string, erro
 	// Actor fields
 	case "spec.actor.name",
 		"spec.actor.type",
-		"spec.actor.uid",
-		"spec.actor.email":
+		"spec.actor.uid":
 		return label, value, nil
 
 	default:
@@ -163,5 +162,4 @@ var SupportedActivityFieldSelectors = []string{
 	"spec.actor.name",
 	"spec.actor.type",
 	"spec.actor.uid",
-	"spec.actor.email",
 }

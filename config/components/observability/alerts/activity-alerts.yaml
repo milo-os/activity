@@ -216,7 +216,7 @@ spec:
 
         # NATS Connection Health
         - alert: ActivityProcessorNATSDisconnected
-          expr: activity_processor_nats_connection_status == 0
+          expr: activity_processor_nats_connection_status{job="activity-processor"} == 0
           for: 2m
           labels:
             severity: critical
@@ -263,7 +263,7 @@ spec:
 
         # Policy Cache Health
         - alert: ActivityProcessorNoPolicies
-          expr: activity_processor_active_policies == 0
+          expr: activity_processor_active_policies{job="activity-processor"} == 0
           for: 15m
           labels:
             severity: warning

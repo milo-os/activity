@@ -1,8 +1,8 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:26.12.1-alpine3.24 AS builder
 
-# Enable corepack for pnpm
-RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
+# Install pnpm
+RUN npm install -g pnpm@10.29.3
 
 WORKDIR /app
 
@@ -35,7 +35,10 @@ RUN pnpm install --frozen-lockfile && \
     cp -r example/build /deploy/build
 
 # Runtime stage - Node.js for Remix server
-FROM node:20-alpine AS runtime
+FROM node:26.12.1-alpine3.24 AS runtime
+
+RUN apk add --no-cache --upgrade 'ca-certificates>=20261020-r0'
+RUN ! grep -q MIICTjCCAdOgAwIBAgIKPPYHqWhwDtqLhDAKBggqhkjOPQQDAzBrMQswCQYDVQQG /etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /app
 

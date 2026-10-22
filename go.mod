@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
-	github.com/google/cel-go v0.27.0
+	github.com/google/cel-go v0.30.0
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/nats-io/nats-server/v2 v2.14.3

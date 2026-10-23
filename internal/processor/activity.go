@@ -60,8 +60,12 @@ func (b *ActivityBuilder) BuildFromAudit(
 		apiVersion = audit.ObjectRef.APIVersion
 	}
 
-	// Try to get UID from responseObject metadata
-	resourceUID := extractResponseUID(audit.ResponseObject)
+	// A create with generateName has no name in its ObjectRef; the server
+	// assigns it, so it is only in the response object.
+	responseName, resourceUID := extractResponseIdentity(audit.ResponseObject)
+	if resourceName == "" {
+		resourceName = responseName
+	}
 
 	// Classify change source and resolve actor
 	changeSource := ClassifyChangeSource(audit.User)
@@ -115,22 +119,23 @@ func (b *ActivityBuilder) BuildFromAudit(
 	}, nil
 }
 
-// extractResponseUID extracts the UID from an audit response object's metadata.
-func extractResponseUID(responseObject *runtime.Unknown) string {
+// extractResponseIdentity extracts the name and UID from an audit response
+// object's metadata.
+func extractResponseIdentity(responseObject *runtime.Unknown) (name, uid string) {
 	if responseObject == nil || len(responseObject.Raw) == 0 {
-		return ""
+		return "", ""
 	}
 
-	// We still need to unmarshal the raw response to get metadata.uid
 	var obj struct {
 		Metadata struct {
-			UID string `json:"uid"`
+			Name string `json:"name"`
+			UID  string `json:"uid"`
 		} `json:"metadata"`
 	}
 	if err := json.Unmarshal(responseObject.Raw, &obj); err != nil {
-		return ""
+		return "", ""
 	}
-	return obj.Metadata.UID
+	return obj.Metadata.Name, obj.Metadata.UID
 }
 
 // BuildFromEvent constructs an Activity from a Kubernetes event.

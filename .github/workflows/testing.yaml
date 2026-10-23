@@ -15,7 +15,7 @@ jobs:
         run: go test -timeout 5m ./...
   ui-tests:
     name: UI lint, typecheck, build, e2e
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: ui

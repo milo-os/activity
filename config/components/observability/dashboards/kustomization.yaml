@@ -52,6 +52,14 @@ configMapGenerator:
         grafana_dashboard: "1"
       disableNameSuffixHash: true
 
+  - name: activity-dlq-policy-health-dashboard
+    files:
+      - generated/activity-dlq-policy-health.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+      disableNameSuffixHash: true
+
 resources:
   - audit-pipeline-grafanadashboard.yaml
   - activity-apiserver-grafanadashboard.yaml
@@ -59,3 +67,4 @@ resources:
   - events-pipeline-grafanadashboard.yaml
   - activity-system-overview-grafanadashboard.yaml
   - activity-slo-grafanadashboard.yaml
+  - activity-dlq-policy-health-grafanadashboard.yaml

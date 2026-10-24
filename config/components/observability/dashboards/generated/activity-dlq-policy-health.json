@@ -1,0 +1,1150 @@
+{
+   "description": "Single-pane triage dashboard for DLQ backlog, failing policies, retry recovery, and processor logs",
+   "editable": true,
+   "graphTooltip": 1,
+   "links": [
+      {
+         "icon": "external link",
+         "targetBlank": true,
+         "title": "DLQ Runbooks",
+         "type": "link",
+         "url": "https://github.com/milo-os/activity/tree/main/docs/runbooks/dlq/"
+      }
+   ],
+   "panels": [
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 0,
+            "x": 0,
+            "y": 0
+         },
+         "id": 1,
+         "panels": [ ],
+         "title": "At-a-Glance",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Current number of events stuck in the DLQ",
+         "fieldConfig": {
+            "defaults": {
+               "thresholds": {
+                  "steps": [
+                     {
+                        "color": "green",
+                        "value": null
+                     },
+                     {
+                        "color": "yellow",
+                        "value": 100
+                     },
+                     {
+                        "color": "red",
+                        "value": 1000
+                     }
+                  ]
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 1
+         },
+         "id": 2,
+         "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ]
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "max(nats_stream_total_messages{stream_name=\"ACTIVITY_DEAD_LETTER\", cluster=~\"$cluster\"})",
+               "legendFormat": "Messages"
+            }
+         ],
+         "title": "DLQ Backlog",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Sequence gap in DLQ stream — proxy for backlog age",
+         "fieldConfig": {
+            "defaults": {
+               "thresholds": {
+                  "steps": [
+                     {
+                        "color": "green",
+                        "value": null
+                     },
+                     {
+                        "color": "yellow",
+                        "value": 1000
+                     },
+                     {
+                        "color": "red",
+                        "value": 10000
+                     }
+                  ]
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 1
+         },
+         "id": 3,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ]
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "max(nats_stream_last_seq{stream_name=\"ACTIVITY_DEAD_LETTER\", cluster=~\"$cluster\"} - on() nats_stream_first_seq{stream_name=\"ACTIVITY_DEAD_LETTER\", cluster=~\"$cluster\"})",
+               "legendFormat": "Seq gap"
+            }
+         ],
+         "title": "Backlog Age (oldest)",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Rate of new events being published to the DLQ",
+         "fieldConfig": {
+            "defaults": {
+               "thresholds": {
+                  "steps": [
+                     {
+                        "color": "green",
+                        "value": null
+                     },
+                     {
+                        "color": "yellow",
+                        "value": 0.10000000000000001
+                     },
+                     {
+                        "color": "red",
+                        "value": 1
+                     }
+                  ]
+               },
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 1
+         },
+         "id": 4,
+         "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ]
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "sum(rate(activity_processor_dlq_events_published_total{cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\", policy_name=~\"$policy_name\", error_type=~\"$error_type\"}[5m])) or vector(0)",
+               "legendFormat": "Events/s"
+            }
+         ],
+         "title": "DLQ Publish Rate",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Rate at which retries are clearing DLQ events",
+         "fieldConfig": {
+            "defaults": {
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 1
+         },
+         "id": 5,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ]
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "sum(rate(activity_processor_dlq_retry_attempts_total{result=~\"succeeded|republished\", cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\"}[5m])) or vector(0)",
+               "legendFormat": "Resolved/s"
+            }
+         ],
+         "title": "Retry Resolve Rate",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Publish rate minus resolve rate — positive means backlog is growing",
+         "fieldConfig": {
+            "defaults": {
+               "thresholds": {
+                  "steps": [
+                     {
+                        "color": "green",
+                        "value": null
+                     },
+                     {
+                        "color": "yellow",
+                        "value": 0
+                     },
+                     {
+                        "color": "red",
+                        "value": 0.01
+                     }
+                  ]
+               },
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 6
+         },
+         "id": 6,
+         "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ]
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "(sum(rate(activity_processor_dlq_events_published_total{cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\", policy_name=~\"$policy_name\", error_type=~\"$error_type\"}[5m])) or vector(0)) - (sum(rate(activity_processor_dlq_retry_attempts_total{result=~\"succeeded|republished\", cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\"}[5m])) or vector(0))",
+               "legendFormat": "Net drain"
+            }
+         ],
+         "title": "Net Drain",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Fraction of DLQ retry attempts that succeeded",
+         "fieldConfig": {
+            "defaults": {
+               "thresholds": {
+                  "steps": [
+                     {
+                        "color": "red",
+                        "value": null
+                     },
+                     {
+                        "color": "yellow",
+                        "value": 0.80000000000000004
+                     },
+                     {
+                        "color": "green",
+                        "value": 0.94999999999999996
+                     }
+                  ]
+               },
+               "unit": "percentunit"
+            }
+         },
+         "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 6
+         },
+         "id": 7,
+         "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ]
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "(sum(rate(activity_processor_dlq_retry_attempts_total{result=\"succeeded\", cluster=~\"$cluster\"}[5m])) or vector(0)) / clamp_min(sum(rate(activity_processor_dlq_retry_attempts_total{cluster=~\"$cluster\"}[5m])), 1)",
+               "legendFormat": "Success rate"
+            }
+         ],
+         "title": "Retry Success Rate",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Rate of errors when publishing to DLQ — non-zero means events are being lost",
+         "fieldConfig": {
+            "defaults": {
+               "thresholds": {
+                  "steps": [
+                     {
+                        "color": "green",
+                        "value": null
+                     },
+                     {
+                        "color": "red",
+                        "value": 0.01
+                     }
+                  ]
+               },
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 6
+         },
+         "id": 8,
+         "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ]
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "sum(rate(activity_processor_dlq_publish_errors_total{cluster=~\"$cluster\"}[5m])) or vector(0)",
+               "legendFormat": "Errors/s"
+            }
+         ],
+         "title": "DLQ Publish Errors",
+         "type": "stat"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 0,
+            "x": 18,
+            "y": 11
+         },
+         "id": 9,
+         "panels": [ ],
+         "title": "What is broken NOW",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Top 25 policies currently publishing to DLQ — the primary triage view for ActivityPolicyDLQErrors",
+         "fieldConfig": {
+            "defaults": {
+               "links": [
+                  {
+                     "targetBlank": true,
+                     "title": "View in Loki",
+                     "url": "/explore?orgId=1&left={\"datasource\":\"loki\",\"queries\":[{\"expr\":\"{namespace=\\\"activity-system\\\", container=\\\"processor\\\"} | json | policy=\\\"${__data.fields.policy_name}\\\" | errorType=~\\\".+\\\"\",\"refId\":\"A\"}],\"range\":{\"from\":\"${__from}\",\"to\":\"${__to}\"}}"
+                  }
+               ],
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 12
+         },
+         "id": 10,
+         "options": {
+            "showHeader": true,
+            "sortBy": [
+               {
+                  "desc": true,
+                  "displayName": "Value"
+               }
+            ]
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "topk(25, sum by (policy_name, api_group, kind, error_type) (rate(activity_processor_dlq_events_published_total{policy_name!=\"\", cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\", policy_name=~\"$policy_name\", error_type=~\"$error_type\"}[10m])))",
+               "instant": true,
+               "legendFormat": "{{policy_name}}"
+            }
+         ],
+         "title": "Top Failing Policies",
+         "type": "table"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 0,
+            "x": 24,
+            "y": 22
+         },
+         "id": 11,
+         "panels": [ ],
+         "title": "Trends",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "DLQ rate by failure class — identifies dominant error mode",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "fillOpacity": 30,
+                  "showPoints": "never",
+                  "stacking": {
+                     "mode": "normal"
+                  }
+               },
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 23
+         },
+         "id": 12,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "mean"
+               ],
+               "displayMode": "table",
+               "placement": "bottom",
+               "showLegend": true
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "sum by (error_type) (rate(activity_processor_dlq_events_published_total{cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\", policy_name=~\"$policy_name\", error_type=~\"$error_type\"}[5m]))",
+               "legendFormat": "{{error_type}}"
+            }
+         ],
+         "title": "DLQ Rate by error_type",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "DLQ rate by policy — identifies persistent per-policy failures (DLQSlowLeak)",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "fillOpacity": 30,
+                  "showPoints": "never",
+                  "stacking": {
+                     "mode": "normal"
+                  }
+               },
+               "links": [
+                  {
+                     "targetBlank": true,
+                     "title": "View in Loki",
+                     "url": "/explore?orgId=1&left={\"datasource\":\"loki\",\"queries\":[{\"expr\":\"{namespace=\\\"activity-system\\\", container=\\\"processor\\\"} | json | policy=\\\"${__field.labels.policy_name}\\\"\",\"refId\":\"A\"}],\"range\":{\"from\":\"${__from}\",\"to\":\"${__to}\"}}"
+                  }
+               ],
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 23
+         },
+         "id": 13,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "mean"
+               ],
+               "displayMode": "table",
+               "placement": "bottom",
+               "showLegend": true
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "label_replace(sum by (policy_name) (rate(activity_processor_dlq_events_published_total{cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\", policy_name=~\"$policy_name\", error_type=~\"$error_type\"}[5m])), \"policy_name\", \"(no policy)\", \"policy_name\", \"^$\")",
+               "legendFormat": "{{policy_name}}"
+            }
+         ],
+         "title": "DLQ Rate by policy",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "DLQ rate by resource kind — identifies affected resource types",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "fillOpacity": 30,
+                  "showPoints": "never",
+                  "stacking": {
+                     "mode": "normal"
+                  }
+               },
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 31
+         },
+         "id": 14,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "mean"
+               ],
+               "displayMode": "table",
+               "placement": "bottom",
+               "showLegend": true
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "sum by (api_group, kind) (rate(activity_processor_dlq_events_published_total{cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\", policy_name=~\"$policy_name\", error_type=~\"$error_type\"}[5m]))",
+               "legendFormat": "{{api_group}}/{{kind}}"
+            }
+         ],
+         "title": "DLQ Rate by kind",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 0,
+            "x": 12,
+            "y": 39
+         },
+         "id": 15,
+         "panels": [ ],
+         "title": "Retry & Recovery",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Retry attempt outcomes over time — succeeded vs republished vs failed",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "fillOpacity": 30,
+                  "showPoints": "never",
+                  "stacking": {
+                     "mode": "normal"
+                  }
+               },
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 40
+         },
+         "id": 16,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "mean"
+               ],
+               "displayMode": "table",
+               "placement": "bottom",
+               "showLegend": true
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "sum by (result) (rate(activity_processor_dlq_retry_attempts_total{cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\"}[5m]))",
+               "legendFormat": "{{result}}"
+            }
+         ],
+         "title": "Retry outcomes",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Policies NOT recovering after retry — triage for DLQRetryIneffective",
+         "fieldConfig": {
+            "defaults": {
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 40
+         },
+         "id": 17,
+         "options": {
+            "showHeader": true,
+            "sortBy": [
+               {
+                  "desc": true,
+                  "displayName": "Value"
+               }
+            ]
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "topk(25, sum by (policy_name, error_type) (rate(activity_processor_dlq_retry_failed_total{cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\", policy_name=~\"$policy_name\", error_type=~\"$error_type\"}[10m])))",
+               "instant": true,
+               "legendFormat": "{{policy_name}}"
+            }
+         ],
+         "title": "Still-failing re-eval by policy",
+         "type": "table"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Events exceeding retry threshold by policy — identifies poison events (DLQHighRetryCount)",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "fillOpacity": 10,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 48
+         },
+         "id": 18,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "mean"
+               ],
+               "displayMode": "table",
+               "placement": "bottom",
+               "showLegend": true
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "sum by (policy_name, api_group, kind) (increase(activity_processor_dlq_retry_events_high_retry_total{cluster=~\"$cluster\", api_group=~\"$api_group\", kind=~\"$kind\", policy_name=~\"$policy_name\"}[1h]))",
+               "legendFormat": "{{policy_name}}"
+            }
+         ],
+         "title": "High-retry (poison) events by policy",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "Retry batch processing duration — high values indicate retry path stalling",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "fillOpacity": 10,
+                  "showPoints": "never"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 48
+         },
+         "id": 19,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom",
+               "showLegend": true
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, trigger) (rate(activity_processor_dlq_retry_batch_duration_seconds_bucket{cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "{{trigger}} p99"
+            }
+         ],
+         "title": "Retry batch duration p99",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 0,
+            "x": 24,
+            "y": 56
+         },
+         "id": 20,
+         "panels": [ ],
+         "title": "Publish-Path Health",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "DLQ publish errors by phase (marshal/publish) — non-zero is data loss risk",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "fillOpacity": 30,
+                  "showPoints": "never",
+                  "stacking": {
+                     "mode": "normal"
+                  }
+               },
+               "unit": "ops"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 57
+         },
+         "id": 21,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "mean"
+               ],
+               "displayMode": "table",
+               "placement": "bottom",
+               "showLegend": true
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "sum by (error_phase) (rate(activity_processor_dlq_publish_errors_total{cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{error_phase}}"
+            }
+         ],
+         "title": "Publish errors by phase",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+         },
+         "description": "DLQ publish write path latency distribution",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "fillOpacity": 10,
+                  "showPoints": "never"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 57
+         },
+         "id": 22,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom",
+               "showLegend": true
+            }
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(activity_processor_dlq_publish_latency_seconds_bucket{cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(activity_processor_dlq_publish_latency_seconds_bucket{cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "histogram_quantile(0.50, sum by (le) (rate(activity_processor_dlq_publish_latency_seconds_bucket{cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50"
+            }
+         ],
+         "title": "DLQ publish latency",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 0,
+            "x": 24,
+            "y": 65
+         },
+         "id": 23,
+         "panels": [ ],
+         "title": "Processor Logs",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "loki",
+            "uid": "$loki_datasource"
+         },
+         "description": "DLQ processor logs filtered by selected policy and error type — shows Published event to DLQ lines with policy and errorType fields",
+         "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 66
+         },
+         "id": 24,
+         "options": {
+            "displayedFields": [
+               "policy",
+               "errorType",
+               "msg"
+            ],
+            "enableLogDetails": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "loki",
+                  "uid": "$loki_datasource"
+               },
+               "expr": "{namespace=\"activity-system\", container=\"processor\"} | json | errorType != \"\" | policy=~\"${policy_name:regex}\" | errorType=~\"${error_type:regex}\"",
+               "refId": "A"
+            }
+         ],
+         "title": "DLQ Events — Processor Logs",
+         "type": "logs"
+      },
+      {
+         "datasource": {
+            "type": "loki",
+            "uid": "$loki_datasource"
+         },
+         "description": "Catch-all DLQ log filter — includes non-JSON error lines and all dlq/dead-letter references",
+         "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 76
+         },
+         "id": 25,
+         "options": {
+            "enableLogDetails": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "loki",
+                  "uid": "$loki_datasource"
+               },
+               "expr": "{namespace=\"activity-system\", container=\"processor\"} |~ \"(?i)dlq|dead.letter|failed to evaluate|failed to republish|Published event to DLQ\"",
+               "refId": "A"
+            }
+         ],
+         "title": "DLQ/Policy Errors (raw)",
+         "type": "logs"
+      }
+   ],
+   "refresh": "30s",
+   "schemaVersion": 39,
+   "tags": [
+      "activity",
+      "dlq",
+      "policy",
+      "health",
+      "on-call"
+   ],
+   "templating": {
+      "list": [
+         {
+            "label": "Prometheus Datasource",
+            "name": "datasource",
+            "query": "prometheus",
+            "regex": "",
+            "type": "datasource"
+         },
+         {
+            "datasource": {
+               "type": "prometheus",
+               "uid": "$datasource"
+            },
+            "includeAll": true,
+            "label": "Cluster",
+            "multi": true,
+            "name": "cluster",
+            "query": "label_values(activity_processor_dlq_events_published_total, cluster)",
+            "refresh": 2,
+            "type": "query"
+         },
+         {
+            "datasource": {
+               "type": "prometheus",
+               "uid": "$datasource"
+            },
+            "includeAll": true,
+            "label": "API Group",
+            "multi": true,
+            "name": "api_group",
+            "query": "label_values(activity_processor_dlq_events_published_total{cluster=~\"$cluster\"}, api_group)",
+            "refresh": 2,
+            "type": "query"
+         },
+         {
+            "datasource": {
+               "type": "prometheus",
+               "uid": "$datasource"
+            },
+            "includeAll": true,
+            "label": "Kind",
+            "multi": true,
+            "name": "kind",
+            "query": "label_values(activity_processor_dlq_events_published_total{cluster=~\"$cluster\",api_group=~\"$api_group\"}, kind)",
+            "refresh": 2,
+            "type": "query"
+         },
+         {
+            "datasource": {
+               "type": "prometheus",
+               "uid": "$datasource"
+            },
+            "includeAll": true,
+            "label": "Policy",
+            "multi": true,
+            "name": "policy_name",
+            "query": "label_values(activity_processor_dlq_events_published_total{cluster=~\"$cluster\",api_group=~\"$api_group\",kind=~\"$kind\"}, policy_name)",
+            "refresh": 2,
+            "type": "query"
+         },
+         {
+            "datasource": {
+               "type": "prometheus",
+               "uid": "$datasource"
+            },
+            "includeAll": true,
+            "label": "Error Type",
+            "multi": true,
+            "name": "error_type",
+            "query": "label_values(activity_processor_dlq_events_published_total{cluster=~\"$cluster\"}, error_type)",
+            "refresh": 2,
+            "type": "query"
+         },
+         {
+            "hide": 2,
+            "label": "Loki Datasource",
+            "name": "loki_datasource",
+            "query": "loki",
+            "type": "datasource"
+         }
+      ]
+   },
+   "time": {
+      "from": "now-6h",
+      "to": "now"
+   },
+   "timezone": "utc",
+   "title": "Activity — DLQ & Policy Health",
+   "uid": "activity-dlq-policy-health"
+}

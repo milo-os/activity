@@ -85,12 +85,12 @@ func (s activityPolicyStrategy) WarningsOnCreate(ctx context.Context, obj runtim
 }
 
 // AllowCreateOnUpdate returns false because ActivityPolicy should be created via POST.
-func (s activityPolicyStrategy) AllowCreateOnUpdate() bool {
+func (s activityPolicyStrategy) AllowCreateOnUpdate(ctx context.Context) bool {
 	return false
 }
 
 // AllowUnconditionalUpdate allows unconditional updates to ActivityPolicy.
-func (s activityPolicyStrategy) AllowUnconditionalUpdate() bool {
+func (s activityPolicyStrategy) AllowUnconditionalUpdate(ctx context.Context) bool {
 	return true
 }
 
@@ -284,12 +284,12 @@ func (s activityPolicyStatusStrategy) WarningsOnUpdate(ctx context.Context, obj,
 }
 
 // AllowCreateOnUpdate returns false because ActivityPolicy should be created via POST.
-func (s activityPolicyStatusStrategy) AllowCreateOnUpdate() bool {
+func (s activityPolicyStatusStrategy) AllowCreateOnUpdate(ctx context.Context) bool {
 	return false
 }
 
 // AllowUnconditionalUpdate allows unconditional updates to ActivityPolicy status.
-func (s activityPolicyStatusStrategy) AllowUnconditionalUpdate() bool {
+func (s activityPolicyStatusStrategy) AllowUnconditionalUpdate(ctx context.Context) bool {
 	return true
 }
 

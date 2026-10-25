@@ -18,11 +18,39 @@ import (
 )
 
 // ActivityPolicyInformer provides access to a shared informer and lister for
-// ActivityPolicies.
+// ActivityPolicies. Prefer using the type-safe variant (see [TypedActivityPolicyInformer]).
 type ActivityPolicyInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() activityv1alpha1.ActivityPolicyLister
 }
+
+// TypedActivityPolicyInformer provides access to a shared informer and lister for
+// ActivityPolicies, including the type-safe TypedInformer variant.
+// It is a superset of ActivityPolicyInformer.
+type TypedActivityPolicyInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() ActivityPolicyIndexInformer
+	Lister() activityv1alpha1.ActivityPolicyLister
+}
+
+// ActivityPolicyIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type ActivityPolicyIndexInformer cache.TypedSharedIndexInformer[*apisactivityv1alpha1.ActivityPolicy]
+
+// ActivityPolicyHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for ActivityPolicy.
+type ActivityPolicyHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apisactivityv1alpha1.ActivityPolicy]
+
+// ActivityPolicyDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for ActivityPolicy.
+type ActivityPolicyDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apisactivityv1alpha1.ActivityPolicy]
+
+// ActivityPolicyFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for ActivityPolicy.
+type ActivityPolicyFilteringHandler = cache.TypedFilteringResourceEventHandler[*apisactivityv1alpha1.ActivityPolicy]
+
+// ActivityPolicyIndexers is a specialization of [cache.TypedIndexers] for ActivityPolicy.
+type ActivityPolicyIndexers = cache.TypedIndexers[*apisactivityv1alpha1.ActivityPolicy]
+
+// DeletedActivityPolicy is a specialization of [cache.DeletedObject] for ActivityPolicy.
+type DeletedActivityPolicy = cache.DeletedObject[*apisactivityv1alpha1.ActivityPolicy]
 
 type activityPolicyInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -32,25 +60,49 @@ type activityPolicyInformer struct {
 // NewActivityPolicyInformer constructs a new informer for ActivityPolicy type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedActivityPolicyInformer]).
 func NewActivityPolicyInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewActivityPolicyInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedActivityPolicyInformer constructs a new informer for ActivityPolicy type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedActivityPolicyInformer(client versioned.Interface, resyncPeriod time.Duration, indexers ActivityPolicyIndexers) ActivityPolicyIndexInformer {
+	return NewTypedActivityPolicyInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredActivityPolicyInformer constructs a new informer for ActivityPolicy type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredActivityPolicyInformer]).
 func NewFilteredActivityPolicyInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewActivityPolicyInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedActivityPolicyInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredActivityPolicyInformer constructs a new informer for ActivityPolicy type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredActivityPolicyInformer(client versioned.Interface, resyncPeriod time.Duration, indexers ActivityPolicyIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) ActivityPolicyIndexInformer {
+	return NewTypedActivityPolicyInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewActivityPolicyInformerWithOptions constructs a new informer for ActivityPolicy type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedActivityPolicyInformerWithOptions]).
 func NewActivityPolicyInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedActivityPolicyInformerWithOptions(client, options)
+}
+
+// NewTypedActivityPolicyInformerWithOptions constructs a new informer for ActivityPolicy type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedActivityPolicyInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) ActivityPolicyIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "activity.miloapis.com", Version: "v1alpha1", Resource: "activitypolicys"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.ActivityPolicy](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -83,17 +135,57 @@ func NewActivityPolicyInformerWithOptions(client versioned.Interface, options in
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *activityPolicyInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewActivityPolicyInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedActivityPolicyInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *activityPolicyInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apisactivityv1alpha1.ActivityPolicy{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *activityPolicyInformer) TypedInformer() ActivityPolicyIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.ActivityPolicy](f.factory.InformerFor(&apisactivityv1alpha1.ActivityPolicy{}, f.defaultInformer))
 }
 
 func (f *activityPolicyInformer) Lister() activityv1alpha1.ActivityPolicyLister {
 	return activityv1alpha1.NewActivityPolicyLister(f.Informer().GetIndexer())
+}
+
+// ToTypedActivityPolicyInformer converts an untyped informer into a TypedActivityPolicyInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *ActivityPolicy. If that is not the case, calling type-safe methods of the returned
+// TypedActivityPolicyInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedActivityPolicyInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedActivityPolicyInformer(informer ActivityPolicyInformer) TypedActivityPolicyInformer {
+	if informer, ok := informer.(TypedActivityPolicyInformer); ok {
+		return informer
+	}
+	return &activityPolicyTypedInformerAdapter{informer}
+}
+
+type activityPolicyTypedInformerAdapter struct {
+	ActivityPolicyInformer
+}
+
+func (a *activityPolicyTypedInformerAdapter) TypedInformer() ActivityPolicyIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.ActivityPolicy](a.Informer())
+}
+
+// ToActivityPolicyIndexInformer converts an untyped informer into a ActivityPolicyIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *ActivityPolicy. If that is not the case, calling type-safe methods of the returned
+// ActivityPolicyIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a ActivityPolicyIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToActivityPolicyIndexInformer(informer cache.SharedIndexInformer) ActivityPolicyIndexInformer {
+	if informer, ok := informer.(ActivityPolicyIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.ActivityPolicy](informer)
 }

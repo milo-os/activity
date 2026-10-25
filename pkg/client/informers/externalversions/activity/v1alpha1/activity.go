@@ -18,11 +18,39 @@ import (
 )
 
 // ActivityInformer provides access to a shared informer and lister for
-// Activities.
+// Activities. Prefer using the type-safe variant (see [TypedActivityInformer]).
 type ActivityInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() activityv1alpha1.ActivityLister
 }
+
+// TypedActivityInformer provides access to a shared informer and lister for
+// Activities, including the type-safe TypedInformer variant.
+// It is a superset of ActivityInformer.
+type TypedActivityInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() ActivityIndexInformer
+	Lister() activityv1alpha1.ActivityLister
+}
+
+// ActivityIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type ActivityIndexInformer cache.TypedSharedIndexInformer[*apisactivityv1alpha1.Activity]
+
+// ActivityHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for Activity.
+type ActivityHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apisactivityv1alpha1.Activity]
+
+// ActivityDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for Activity.
+type ActivityDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apisactivityv1alpha1.Activity]
+
+// ActivityFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for Activity.
+type ActivityFilteringHandler = cache.TypedFilteringResourceEventHandler[*apisactivityv1alpha1.Activity]
+
+// ActivityIndexers is a specialization of [cache.TypedIndexers] for Activity.
+type ActivityIndexers = cache.TypedIndexers[*apisactivityv1alpha1.Activity]
+
+// DeletedActivity is a specialization of [cache.DeletedObject] for Activity.
+type DeletedActivity = cache.DeletedObject[*apisactivityv1alpha1.Activity]
 
 type activityInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -33,25 +61,49 @@ type activityInformer struct {
 // NewActivityInformer constructs a new informer for Activity type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedActivityInformer]).
 func NewActivityInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewActivityInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedActivityInformer constructs a new informer for Activity type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedActivityInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers ActivityIndexers) ActivityIndexInformer {
+	return NewTypedActivityInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredActivityInformer constructs a new informer for Activity type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredActivityInformer]).
 func NewFilteredActivityInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewActivityInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedActivityInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredActivityInformer constructs a new informer for Activity type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredActivityInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers ActivityIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) ActivityIndexInformer {
+	return NewTypedActivityInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewActivityInformerWithOptions constructs a new informer for Activity type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedActivityInformerWithOptions]).
 func NewActivityInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedActivityInformerWithOptions(client, namespace, options)
+}
+
+// NewTypedActivityInformerWithOptions constructs a new informer for Activity type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedActivityInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) ActivityIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "activity.miloapis.com", Version: "v1alpha1", Resource: "activitys"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.Activity](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -84,17 +136,57 @@ func NewActivityInformerWithOptions(client versioned.Interface, namespace string
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *activityInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewActivityInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedActivityInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *activityInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apisactivityv1alpha1.Activity{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *activityInformer) TypedInformer() ActivityIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.Activity](f.factory.InformerFor(&apisactivityv1alpha1.Activity{}, f.defaultInformer))
 }
 
 func (f *activityInformer) Lister() activityv1alpha1.ActivityLister {
 	return activityv1alpha1.NewActivityLister(f.Informer().GetIndexer())
+}
+
+// ToTypedActivityInformer converts an untyped informer into a TypedActivityInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *Activity. If that is not the case, calling type-safe methods of the returned
+// TypedActivityInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedActivityInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedActivityInformer(informer ActivityInformer) TypedActivityInformer {
+	if informer, ok := informer.(TypedActivityInformer); ok {
+		return informer
+	}
+	return &activityTypedInformerAdapter{informer}
+}
+
+type activityTypedInformerAdapter struct {
+	ActivityInformer
+}
+
+func (a *activityTypedInformerAdapter) TypedInformer() ActivityIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.Activity](a.Informer())
+}
+
+// ToActivityIndexInformer converts an untyped informer into a ActivityIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *Activity. If that is not the case, calling type-safe methods of the returned
+// ActivityIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a ActivityIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToActivityIndexInformer(informer cache.SharedIndexInformer) ActivityIndexInformer {
+	if informer, ok := informer.(ActivityIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.Activity](informer)
 }

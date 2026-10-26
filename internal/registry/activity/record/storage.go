@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,12 +14,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/duration"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/klog/v2"
 
+	"go.miloapis.com/activity/internal/apiserver/filterparam"
+	activitycel "go.miloapis.com/activity/internal/cel"
 	"go.miloapis.com/activity/internal/registry/scope"
 	"go.miloapis.com/activity/internal/storage"
 	activitywatch "go.miloapis.com/activity/internal/watch"
@@ -32,7 +37,7 @@ type ActivityStorageInterface interface {
 
 // ActivityStorage implements REST storage for Activity resources.
 // This provides a simplified List/Watch interface for real-time activity streaming.
-// For complex queries with time ranges, search, and CEL filters, use ActivityQuery instead.
+// For historical queries with time ranges and search, use ActivityQuery instead.
 type ActivityStorage struct {
 	storage ActivityStorageInterface
 	watcher activitywatch.WatcherInterface
@@ -91,7 +96,7 @@ func (s *ActivityStorage) GetSingularName() string {
 const DefaultListTimeWindow = "now-1h"
 
 // List returns a list of activities matching the query.
-// Uses standard Kubernetes field selectors for filtering.
+// Filters by field selectors and an optional CEL `filter` query parameter.
 // Automatically constrains to the last hour for performance.
 // For historical queries with custom time ranges, use ActivityQuery instead.
 func (s *ActivityStorage) List(ctx context.Context, options *metainternalversion.ListOptions) (runtime.Object, error) {
@@ -104,20 +109,16 @@ func (s *ActivityStorage) List(ctx context.Context, options *metainternalversion
 	}
 	scopeCtx := scope.ExtractScopeFromUser(reqUser)
 
+	celFilter, err := requestFilter(ctx, options.FieldSelector)
+	if err != nil {
+		return nil, errors.NewBadRequest(err.Error())
+	}
+
 	spec := storage.ActivityQuerySpec{
 		Limit:     int32(options.Limit),
 		Continue:  options.Continue,
 		StartTime: DefaultListTimeWindow, // Default to last hour for performance
-	}
-
-	// Build CEL filter for namespace scoping when namespace is set
-	if namespace != "" {
-		spec.Filter = fmt.Sprintf("metadata.namespace == '%s'", escapeCELString(namespace))
-	}
-
-	// Parse standard field selectors
-	if options.FieldSelector != nil && !options.FieldSelector.Empty() {
-		parseFieldSelector(options.FieldSelector, &spec)
+		Filter:    celFilter,
 	}
 
 	klog.V(4).InfoS("Listing activities",
@@ -169,9 +170,11 @@ func (s *ActivityStorage) Watch(ctx context.Context, options *metainternalversio
 	}
 	scopeCtx := scope.ExtractScopeFromUser(reqUser)
 
-	filter := activitywatch.WatchFilter{
-		Namespace: namespace,
+	celFilter, err := requestFilter(ctx, options.FieldSelector)
+	if err != nil {
+		return nil, errors.NewBadRequest(err.Error())
 	}
+	filter := activitywatch.WatchFilter{CELFilter: celFilter}
 
 	// Parse resourceVersion for replay support
 	if options.ResourceVersion != "" && options.ResourceVersion != "0" {
@@ -180,19 +183,6 @@ func (s *ActivityStorage) Watch(ctx context.Context, options *metainternalversio
 			klog.V(4).InfoS("Invalid resourceVersion, starting from now", "resourceVersion", options.ResourceVersion)
 		} else {
 			filter.ResourceVersion = rv
-		}
-	}
-
-	// Parse field selectors for watch filtering
-	if options.FieldSelector != nil && !options.FieldSelector.Empty() {
-		if value, found := options.FieldSelector.RequiresExactMatch("spec.changeSource"); found {
-			filter.ChangeSource = value
-		}
-		if value, found := options.FieldSelector.RequiresExactMatch("spec.resource.apiGroup"); found {
-			filter.APIGroup = value
-		}
-		if value, found := options.FieldSelector.RequiresExactMatch("spec.resource.kind"); found {
-			filter.ResourceKind = value
 		}
 	}
 
@@ -259,55 +249,97 @@ func activityToTableRow(activity *v1alpha1.Activity) metav1.TableRow {
 	}
 }
 
+// celStringEscaper escapes the only characters CEL forbids raw inside a
+// single-quoted string literal.
+var celStringEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`, "\r", `\r`)
 
-// escapeCELString escapes single quotes and backslashes in a value so it can
-// be safely interpolated into a CEL string literal delimited by single quotes.
+// escapeCELString escapes a value so it can be safely interpolated into a CEL
+// string literal delimited by single quotes.
 func escapeCELString(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `'`, `\'`)
-	return s
+	return celStringEscaper.Replace(s)
 }
 
-// celEquality builds a CEL equality expression with proper escaping, e.g.
-// celEquality("spec.actor.name", "alice") => "spec.actor.name == 'alice'"
-func celEquality(field, value string) string {
-	return fmt.Sprintf("%s == '%s'", field, escapeCELString(value))
+// celComparison builds an escaped CEL comparison, e.g.
+// celComparison("spec.actor.name", "==", "alice") => "spec.actor.name == 'alice'".
+func celComparison(field, op, value string) string {
+	return fmt.Sprintf("%s %s '%s'", field, op, escapeCELString(value))
 }
 
-// parseFieldSelector extracts query parameters from standard field selectors,
-// converting them to CEL filter expressions appended to the spec.Filter field.
-// CEL is the sole filtering mechanism for ActivityQuerySpec beyond time range and search.
-func parseFieldSelector(selector fields.Selector, spec *storage.ActivityQuerySpec) {
+// maxFilterLength is the maximum size, in bytes, of the `filter` query parameter.
+const maxFilterLength = 64 * 1024
+
+// fieldSelectorToCEL converts a field selector into an equivalent CEL expression.
+// Unsupported labels are rejected rather than ignored, so a caller never
+// silently gets unfiltered results.
+func fieldSelectorToCEL(selector fields.Selector) (string, error) {
 	if selector == nil || selector.Empty() {
-		return
+		return "", nil
 	}
 
-	var filters []string
+	var conds []string
+	for _, r := range selector.Requirements() {
+		if !slices.Contains(v1alpha1.SupportedActivityFieldSelectors, r.Field) {
+			return "", fmt.Errorf("field selector %q is not supported for activities", r.Field)
+		}
+		switch r.Operator {
+		case selection.Equals, selection.DoubleEquals:
+			conds = append(conds, celComparison(r.Field, "==", r.Value))
+		case selection.NotEquals:
+			conds = append(conds, celComparison(r.Field, "!=", r.Value))
+		default:
+			return "", fmt.Errorf("field selector %q: operator %q is not supported", r.Field, r.Operator)
+		}
+	}
+	return strings.Join(conds, " && "), nil
+}
 
-	if value, found := selector.RequiresExactMatch("spec.changeSource"); found {
-		filters = append(filters, celEquality("spec.changeSource", value))
-	}
-	if value, found := selector.RequiresExactMatch("spec.resource.apiGroup"); found {
-		filters = append(filters, celEquality("spec.resource.apiGroup", value))
-	}
-	if value, found := selector.RequiresExactMatch("spec.resource.kind"); found {
-		filters = append(filters, celEquality("spec.resource.kind", value))
-	}
-	if value, found := selector.RequiresExactMatch("spec.actor.name"); found {
-		filters = append(filters, celEquality("spec.actor.name", value))
-	}
-	if value, found := selector.RequiresExactMatch("spec.resource.uid"); found {
-		filters = append(filters, celEquality("spec.resource.uid", value))
+// requestFilter combines the request namespace, the field selector and the
+// `filter` query parameter into one validated CEL expression, so List and
+// Watch filter identically. Errors are suitable for a BadRequest response.
+func requestFilter(ctx context.Context, selector fields.Selector) (string, error) {
+	var parts []string
+
+	if namespace, _ := request.NamespaceFrom(ctx); namespace != "" {
+		// The apiserver doesn't validate the path segment; reject what can't be a
+		// namespace rather than silently matching nothing.
+		if errs := validation.IsDNS1123Label(namespace); len(errs) > 0 {
+			return "", fmt.Errorf("invalid namespace %q: %s", namespace, strings.Join(errs, "; "))
+		}
+		parts = append(parts, celComparison("metadata.namespace", "==", namespace))
 	}
 
-	if len(filters) == 0 {
-		return
+	selectorCEL, err := fieldSelectorToCEL(selector)
+	if err != nil {
+		return "", err
+	}
+	if selectorCEL != "" {
+		parts = append(parts, selectorCEL)
 	}
 
-	combined := strings.Join(filters, " && ")
-	if spec.Filter != "" {
-		spec.Filter = "(" + spec.Filter + ") && " + combined
-	} else {
-		spec.Filter = combined
+	if userFilter := filterparam.FromContext(ctx); userFilter != "" {
+		if len(userFilter) > maxFilterLength {
+			return "", fmt.Errorf("filter must be at most %d bytes", maxFilterLength)
+		}
+		// Compile alone first: a filter like `true) || (true` is invalid by
+		// itself but valid once wrapped, and would escape the && with other parts.
+		if _, err := activitycel.CompileActivityFilterProgram(userFilter); err != nil {
+			return "", fmt.Errorf("invalid filter: %w", err)
+		}
+		// The newline stops a trailing `//` comment from swallowing the paren.
+		parts = append(parts, "("+userFilter+"\n)")
 	}
+
+	if len(parts) == 0 {
+		return "", nil
+	}
+	combined := strings.Join(parts, " && ")
+	if _, err := activitycel.CompileActivityFilterProgram(combined); err != nil {
+		return "", fmt.Errorf("invalid filter: %w", err)
+	}
+	// Accept only what ClickHouse can run, matching ActivityQuery, so a filter
+	// that works for history also works on watch and vice versa.
+	if _, _, err := activitycel.ConvertActivityToClickHouseSQL(ctx, combined); err != nil {
+		return "", fmt.Errorf("invalid filter: %w", err)
+	}
+	return combined, nil
 }

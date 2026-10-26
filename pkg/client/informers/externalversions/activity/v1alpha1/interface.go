@@ -9,11 +9,11 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// Activities returns a ActivityInformer.
-	Activities() ActivityInformer
+	Activities() TypedActivityInformer
 	// ActivityPolicies returns a ActivityPolicyInformer.
-	ActivityPolicies() ActivityPolicyInformer
+	ActivityPolicies() TypedActivityPolicyInformer
 	// ReindexJobs returns a ReindexJobInformer.
-	ReindexJobs() ReindexJobInformer
+	ReindexJobs() TypedReindexJobInformer
 }
 
 type version struct {
@@ -27,17 +27,17 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// Activities returns a ActivityInformer.
-func (v *version) Activities() ActivityInformer {
+// Activities returns a TypedActivityInformer.
+func (v *version) Activities() TypedActivityInformer {
 	return &activityInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
-// ActivityPolicies returns a ActivityPolicyInformer.
-func (v *version) ActivityPolicies() ActivityPolicyInformer {
+// ActivityPolicies returns a TypedActivityPolicyInformer.
+func (v *version) ActivityPolicies() TypedActivityPolicyInformer {
 	return &activityPolicyInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
-// ReindexJobs returns a ReindexJobInformer.
-func (v *version) ReindexJobs() ReindexJobInformer {
+// ReindexJobs returns a TypedReindexJobInformer.
+func (v *version) ReindexJobs() TypedReindexJobInformer {
 	return &reindexJobInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

@@ -96,12 +96,12 @@ func (s reindexJobStrategy) WarningsOnCreate(ctx context.Context, obj runtime.Ob
 }
 
 // AllowCreateOnUpdate returns false because ReindexJob should be created via POST.
-func (s reindexJobStrategy) AllowCreateOnUpdate() bool {
+func (s reindexJobStrategy) AllowCreateOnUpdate(ctx context.Context) bool {
 	return false
 }
 
 // AllowUnconditionalUpdate allows unconditional updates to ReindexJob.
-func (s reindexJobStrategy) AllowUnconditionalUpdate() bool {
+func (s reindexJobStrategy) AllowUnconditionalUpdate(ctx context.Context) bool {
 	return true
 }
 
@@ -325,12 +325,12 @@ func (s reindexJobStatusStrategy) WarningsOnUpdate(ctx context.Context, obj, old
 }
 
 // AllowCreateOnUpdate returns false because ReindexJob should be created via POST.
-func (s reindexJobStatusStrategy) AllowCreateOnUpdate() bool {
+func (s reindexJobStatusStrategy) AllowCreateOnUpdate(ctx context.Context) bool {
 	return false
 }
 
 // AllowUnconditionalUpdate allows unconditional updates to ReindexJob status.
-func (s reindexJobStatusStrategy) AllowUnconditionalUpdate() bool {
+func (s reindexJobStatusStrategy) AllowUnconditionalUpdate(ctx context.Context) bool {
 	return true
 }
 

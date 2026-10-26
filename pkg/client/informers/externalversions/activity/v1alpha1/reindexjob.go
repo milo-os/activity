@@ -18,11 +18,39 @@ import (
 )
 
 // ReindexJobInformer provides access to a shared informer and lister for
-// ReindexJobs.
+// ReindexJobs. Prefer using the type-safe variant (see [TypedReindexJobInformer]).
 type ReindexJobInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() activityv1alpha1.ReindexJobLister
 }
+
+// TypedReindexJobInformer provides access to a shared informer and lister for
+// ReindexJobs, including the type-safe TypedInformer variant.
+// It is a superset of ReindexJobInformer.
+type TypedReindexJobInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() ReindexJobIndexInformer
+	Lister() activityv1alpha1.ReindexJobLister
+}
+
+// ReindexJobIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type ReindexJobIndexInformer cache.TypedSharedIndexInformer[*apisactivityv1alpha1.ReindexJob]
+
+// ReindexJobHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for ReindexJob.
+type ReindexJobHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apisactivityv1alpha1.ReindexJob]
+
+// ReindexJobDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for ReindexJob.
+type ReindexJobDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apisactivityv1alpha1.ReindexJob]
+
+// ReindexJobFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for ReindexJob.
+type ReindexJobFilteringHandler = cache.TypedFilteringResourceEventHandler[*apisactivityv1alpha1.ReindexJob]
+
+// ReindexJobIndexers is a specialization of [cache.TypedIndexers] for ReindexJob.
+type ReindexJobIndexers = cache.TypedIndexers[*apisactivityv1alpha1.ReindexJob]
+
+// DeletedReindexJob is a specialization of [cache.DeletedObject] for ReindexJob.
+type DeletedReindexJob = cache.DeletedObject[*apisactivityv1alpha1.ReindexJob]
 
 type reindexJobInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -32,25 +60,49 @@ type reindexJobInformer struct {
 // NewReindexJobInformer constructs a new informer for ReindexJob type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedReindexJobInformer]).
 func NewReindexJobInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewReindexJobInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedReindexJobInformer constructs a new informer for ReindexJob type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedReindexJobInformer(client versioned.Interface, resyncPeriod time.Duration, indexers ReindexJobIndexers) ReindexJobIndexInformer {
+	return NewTypedReindexJobInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredReindexJobInformer constructs a new informer for ReindexJob type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredReindexJobInformer]).
 func NewFilteredReindexJobInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewReindexJobInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedReindexJobInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredReindexJobInformer constructs a new informer for ReindexJob type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredReindexJobInformer(client versioned.Interface, resyncPeriod time.Duration, indexers ReindexJobIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) ReindexJobIndexInformer {
+	return NewTypedReindexJobInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewReindexJobInformerWithOptions constructs a new informer for ReindexJob type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedReindexJobInformerWithOptions]).
 func NewReindexJobInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedReindexJobInformerWithOptions(client, options)
+}
+
+// NewTypedReindexJobInformerWithOptions constructs a new informer for ReindexJob type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedReindexJobInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) ReindexJobIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "activity.miloapis.com", Version: "v1alpha1", Resource: "reindexjobs"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.ReindexJob](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -83,17 +135,57 @@ func NewReindexJobInformerWithOptions(client versioned.Interface, options intern
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *reindexJobInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewReindexJobInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedReindexJobInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *reindexJobInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apisactivityv1alpha1.ReindexJob{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *reindexJobInformer) TypedInformer() ReindexJobIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.ReindexJob](f.factory.InformerFor(&apisactivityv1alpha1.ReindexJob{}, f.defaultInformer))
 }
 
 func (f *reindexJobInformer) Lister() activityv1alpha1.ReindexJobLister {
 	return activityv1alpha1.NewReindexJobLister(f.Informer().GetIndexer())
+}
+
+// ToTypedReindexJobInformer converts an untyped informer into a TypedReindexJobInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *ReindexJob. If that is not the case, calling type-safe methods of the returned
+// TypedReindexJobInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedReindexJobInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedReindexJobInformer(informer ReindexJobInformer) TypedReindexJobInformer {
+	if informer, ok := informer.(TypedReindexJobInformer); ok {
+		return informer
+	}
+	return &reindexJobTypedInformerAdapter{informer}
+}
+
+type reindexJobTypedInformerAdapter struct {
+	ReindexJobInformer
+}
+
+func (a *reindexJobTypedInformerAdapter) TypedInformer() ReindexJobIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.ReindexJob](a.Informer())
+}
+
+// ToReindexJobIndexInformer converts an untyped informer into a ReindexJobIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *ReindexJob. If that is not the case, calling type-safe methods of the returned
+// ReindexJobIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a ReindexJobIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToReindexJobIndexInformer(informer cache.SharedIndexInformer) ReindexJobIndexInformer {
+	if informer, ok := informer.(ReindexJobIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apisactivityv1alpha1.ReindexJob](informer)
 }

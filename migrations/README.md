@@ -45,7 +45,12 @@ staging, goes in `environments/<env>/` instead of this directory.
   `task migrations:generate` fails if a file is in the wrong range.
 - `task migrations:generate` writes `config/overlays/clickhouse-migrations-<env>/`:
   the shared component plus a patch that adds that environment's files to the
-  same ConfigMap. The Job applies them after the shared ones.
+  same ConfigMap. Within one run the Job applies them after the shared ones; a
+  shared migration added later still runs after them, so an environment
+  migration must not depend on running last. Removing `environments/<env>/`
+  removes its overlay on the next generate.
+- The generator refuses a version outside its range or used twice in one
+  directory, since `migrate.sh` would skip the second file as already applied.
 - The environment's deployment points its migrations at that overlay instead of
   `components/clickhouse-migrations`. Every other environment is unaffected.
 
@@ -55,8 +60,9 @@ Current environment migrations:
 |---|---|---|
 | staging | `900_audit_logs_30_day_retention` | `audit_logs` keeps 30 days and deletes older days, instead of moving them to cold storage after 90 days |
 
-A shared migration that changes `audit_logs`' TTL would override staging's
-30 days. Pair it with a matching staging migration.
+A shared migration that changes `audit_logs`' TTL, or recreates or renames the
+table (as 003 did), would drop staging's 30 days. Pair it with a matching
+staging migration.
 
 ## See Also
 

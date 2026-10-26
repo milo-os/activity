@@ -14,8 +14,9 @@ data:
     -- of moving them to cold storage after 90 days and keeping them forever.
     -- materialize_ttl_after_modify = 0 stops ClickHouse from recomputing TTL on every
     -- existing part, which would read the whole cold volume back from object storage.
-    -- Parts written before this runs keep no delete TTL and never expire on their own;
-    -- the operator drops those days with ALTER TABLE ... DROP PARTITION ID.
+    -- Parts written before this runs carry no delete TTL until a merge rewrites them, and
+    -- a day that no longer merges never expires on its own; the operator drops those days
+    -- with ALTER TABLE ... DROP PARTITION ID.
     -- Author: Activity System
     -- Date: 2026-10-26
 

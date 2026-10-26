@@ -60,6 +60,9 @@ Current environment migrations:
 |---|---|---|
 | staging | `900_audit_logs_30_day_retention` | `audit_logs` keeps 30 days and deletes older days, instead of moving them to cold storage after 90 days |
 
+In staging, a ReindexJob that reaches back further than 30 days rebuilds
+activities from incomplete audit logs, because the older days are gone.
+
 A shared migration that changes `audit_logs`' TTL, or recreates or renames the
 table (as 003 did), would drop staging's 30 days. Pair it with a matching
 staging migration.

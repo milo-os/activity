@@ -1,0 +1,15 @@
+# AUTO-GENERATED - DO NOT EDIT MANUALLY
+# Generated from migrations/environments/staging/ by hack/generate-migrations-configmap.sh
+#
+# The shared migrations plus the ones only staging applies. Point the
+# environment's migrations deployment at this directory instead of
+# components/clickhouse-migrations.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+components:
+  - ../../components/clickhouse-migrations
+
+patches:
+  - path: configmap-patch.yaml

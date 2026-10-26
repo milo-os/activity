@@ -35,6 +35,29 @@ Migrations run automatically on deployment via a Kubernetes Job that:
 
 Always use `IF NOT EXISTS` / `IF EXISTS` to make migrations idempotent.
 
+## Environment-Specific Migrations
+
+A change that only one environment should get, such as a shorter retention in
+staging, goes in `environments/<env>/` instead of this directory.
+
+- Versions **001–899** are shared. Versions **900–999** are for environment
+  migrations, so no shared migration takes a number one environment would skip.
+  `task migrations:generate` fails if a file is in the wrong range.
+- `task migrations:generate` writes `config/overlays/clickhouse-migrations-<env>/`:
+  the shared component plus a patch that adds that environment's files to the
+  same ConfigMap. The Job applies them after the shared ones.
+- The environment's deployment points its migrations at that overlay instead of
+  `components/clickhouse-migrations`. Every other environment is unaffected.
+
+Current environment migrations:
+
+| Environment | Migration | What it does |
+|---|---|---|
+| staging | `900_audit_logs_30_day_retention` | `audit_logs` keeps 30 days and deletes older days, instead of moving them to cold storage after 90 days |
+
+A shared migration that changes `audit_logs`' TTL would override staging's
+30 days. Pair it with a matching staging migration.
+
 ## See Also
 
 - [Migration Component README](../config/components/clickhouse-migrations/README.md) - Kubernetes deployment details

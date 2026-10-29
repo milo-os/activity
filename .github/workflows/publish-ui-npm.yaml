@@ -73,7 +73,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.14.0
+    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.24.0
     with:
       package-name: "@datum-cloud/activity-ui"
       package-path: ui
@@ -90,7 +90,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.14.0
+    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.24.0
     with:
       package-name: "@datum-cloud/activity-ui"
       package-path: ui

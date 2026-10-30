@@ -19,7 +19,7 @@ All tables use `ReplicatedReplacingMergeTree` with:
 
 | Table | Retention | Storage |
 |-------|-----------|---------|
-| Audit Events | Unlimited | Hot (90 days) → Cold (S3) |
+| Audit Events | Unlimited (staging: 30 days) | Hot (90 days) → Cold (S3); staging: hot only, deleted after 30 days |
 | Events | 60 days | Hot only |
 | Activities | 60 days | Hot only |
 
@@ -27,6 +27,10 @@ Audit logs use tiered storage: data automatically moves from local SSD to
 S3-compatible cold storage after 90 days. A 10 GB local cache accelerates
 queries against cold data. Events and activities are deleted after their
 retention period expires.
+
+Staging keeps audit logs for 30 days only, set by the staging-only migration
+`900_audit_logs_30_day_retention` (see `migrations/README.md`). Every other
+environment keeps them without limit.
 
 ## Audit Logs Table
 

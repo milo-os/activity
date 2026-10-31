@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: metrics
-          image: natsio/prometheus-nats-exporter:0.20.2
+          image: natsio/prometheus-nats-exporter:0.20.3
           args:
             - -varz
             - -connz
@@ -39,7 +39,7 @@ spec:
               cpu: 50m
               memory: 64Mi
         - name: nats
-          image: nats:2.14.6-alpine
+          image: nats:2.14.9-alpine
           command: ["nats-server", "-c", "/etc/nats/nats.conf"]
           env:
             # Resolved by Flux postBuild.substituteFrom against the

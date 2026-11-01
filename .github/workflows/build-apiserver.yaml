@@ -16,7 +16,7 @@ jobs:
     # activity-ui release can reach this workflow. Gate it here: every other
     # job needs this one, so skipping it skips the whole run.
     if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'activity-ui/')) }}
-    uses: datum-cloud/actions/.github/workflows/validate-kustomize.yaml@v1.24.0
+    uses: datum-cloud/actions/.github/workflows/validate-kustomize.yaml@v1.26.0
 
   publish-container-image:
     # No point in trying to build the container image if the deployment
@@ -28,7 +28,7 @@ jobs:
       contents: read
       packages: write
       attestations: write
-    uses: datum-cloud/actions/.github/workflows/publish-docker.yaml@v1.24.0
+    uses: datum-cloud/actions/.github/workflows/publish-docker.yaml@v1.26.0
     with:
       image-name: activity
       registry-organization: milo-os
@@ -43,7 +43,7 @@ jobs:
       contents: read
       packages: write
       attestations: write
-    uses: datum-cloud/actions/.github/workflows/publish-docker.yaml@v1.24.0
+    uses: datum-cloud/actions/.github/workflows/publish-docker.yaml@v1.26.0
     with:
       image-name: activity-ui
       context: ui
@@ -62,7 +62,7 @@ jobs:
       id-token: write
       contents: read
       packages: write
-    uses: datum-cloud/actions/.github/workflows/publish-kustomize-bundle.yaml@v1.24.0
+    uses: datum-cloud/actions/.github/workflows/publish-kustomize-bundle.yaml@v1.26.0
     with:
       bundle-name: ghcr.io/milo-os/activity-kustomize
       bundle-path: config
@@ -79,7 +79,7 @@ jobs:
       id-token: write
       contents: read
       packages: write
-    uses: datum-cloud/actions/.github/workflows/publish-kustomize-bundle.yaml@v1.24.0
+    uses: datum-cloud/actions/.github/workflows/publish-kustomize-bundle.yaml@v1.26.0
     with:
       bundle-name: ghcr.io/milo-os/activity-ui-kustomize
       bundle-path: config/components/ui

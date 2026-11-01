@@ -29,10 +29,10 @@ jobs:
       version: ${{ steps.compare.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
 
@@ -73,7 +73,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.14.0
+    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.24.0
     with:
       package-name: "@datum-cloud/activity-ui"
       package-path: ui
@@ -90,7 +90,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.14.0
+    uses: datum-cloud/actions/.github/workflows/publish-npm-package.yaml@v1.24.0
     with:
       package-name: "@datum-cloud/activity-ui"
       package-path: ui
@@ -112,7 +112,7 @@ jobs:
       TAG: activity-ui/v${{ needs.detect.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -150,12 +150,12 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26
 
@@ -172,15 +172,11 @@ jobs:
 
       - name: Push release branch
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.bump.outputs.version }}
           BRANCH: ${{ steps.bump.outputs.branch }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add ui/package.json
-          git commit -m "chore(ui): release @datum-cloud/activity-ui v${VERSION}"
-          git push origin "$BRANCH"
+          BASE_SHA="$(git rev-parse HEAD)" hack/sign-commit "$BRANCH" "chore(ui): release @datum-cloud/activity-ui v${VERSION}" ui/package.json
 
       - name: Open pull request
         env:

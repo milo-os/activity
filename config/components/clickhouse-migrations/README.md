@@ -35,6 +35,13 @@ components:
 
 The Job will run automatically and apply new migrations.
 
+## Environment-Specific Migrations
+
+An environment that needs migrations of its own deploys
+`config/overlays/clickhouse-migrations-<env>/` instead of this component. That
+overlay is generated from `migrations/environments/<env>/`; see the
+[migrations README](../../../migrations/README.md#environment-specific-migrations).
+
 ## Troubleshooting
 
 ```bash

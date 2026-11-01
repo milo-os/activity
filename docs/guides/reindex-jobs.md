@@ -118,6 +118,10 @@ limit is enforced when processing starts, not when the job is created — so a
 job that sits in `Pending` for a long time could fail if its start time ages
 past the 60-day window.
 
+In staging, audit logs are kept for 30 days only. A staging reindex that
+reaches further back than 30 days finds no audit logs for the older part of
+the window, so the activities it rebuilds there are incomplete.
+
 ### Dry run
 
 To see how many events would be processed without writing any activities, set

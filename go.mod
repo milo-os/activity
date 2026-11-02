@@ -2,6 +2,8 @@ module go.miloapis.com/activity
 
 go 1.26.0
 
+toolchain go1.27.3
+
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
 	github.com/google/cel-go v0.30.0

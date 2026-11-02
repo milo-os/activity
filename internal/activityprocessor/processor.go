@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"go.miloapis.com/activity/internal/activitysubject"
 	"go.miloapis.com/activity/internal/controller"
 	"go.miloapis.com/activity/internal/natsconn"
 	"go.miloapis.com/activity/internal/processor"
@@ -1247,32 +1248,7 @@ func (p *Processor) publishActivity(activity *v1alpha1.Activity, policy *Compile
 // buildActivitySubject returns the NATS subject for routing activities.
 // Format: <prefix>.<tenant_type>.<tenant_name>.<api_group>.<origin>.<kind>.<namespace>.<name>
 func (p *Processor) buildActivitySubject(activity *v1alpha1.Activity) string {
-	prefix := p.config.OutputSubjectPrefix
-
-	tenantType := activity.Spec.Tenant.Type
-	if tenantType == "" {
-		tenantType = "platform"
-	}
-	tenantName := activity.Spec.Tenant.Name
-	if tenantName == "" {
-		tenantName = "_"
-	}
-
-	apiGroup := activity.Spec.Resource.APIGroup
-	if apiGroup == "" {
-		apiGroup = "core"
-	}
-
-	origin := activity.Spec.Origin.Type
-	kind := activity.Spec.Resource.Kind
-	namespace := activity.Spec.Resource.Namespace
-	if namespace == "" {
-		namespace = "_"
-	}
-	name := activity.Name
-
-	return fmt.Sprintf("%s.%s.%s.%s.%s.%s.%s.%s",
-		prefix, tenantType, tenantName, apiGroup, origin, kind, namespace, name)
+	return activitysubject.ForActivity(p.config.OutputSubjectPrefix, activity)
 }
 
 func policyKey(apiGroup, kindOrResource string) string {

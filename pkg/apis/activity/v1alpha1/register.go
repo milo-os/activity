@@ -144,6 +144,16 @@ func ActivityFieldLabelConversionFunc(label, value string) (string, string, erro
 		"spec.actor.email":
 		return label, value, nil
 
+	// CEL expression, same language as ActivityQuery spec.filter. Clients
+	// escape the value with fields.EscapeValue (backslash, comma and '=').
+	case ActivityFilterFieldSelector:
+		return label, value, nil
+
+	// Watch-only time bounds; List ignores them.
+	case ActivityStartTimeFieldSelector,
+		ActivityMaxAgeFieldSelector:
+		return label, value, nil
+
 	default:
 		return "", "", fmt.Errorf("%q is not a known field selector: only %q",
 			label, SupportedActivityFieldSelectors)
@@ -164,4 +174,22 @@ var SupportedActivityFieldSelectors = []string{
 	"spec.actor.type",
 	"spec.actor.uid",
 	"spec.actor.email",
+	ActivityFilterFieldSelector,
+	ActivityStartTimeFieldSelector,
+	ActivityMaxAgeFieldSelector,
 }
+
+const (
+	// ActivityFilterFieldSelector carries a CEL filter expression for List and
+	// Watch, ANDed with every other field selector.
+	ActivityFilterFieldSelector = "filter"
+
+	// ActivityStartTimeFieldSelector drops watch events whose
+	// creationTimestamp is before the given time (RFC3339 or relative, e.g.
+	// "now-5m"), resolved when the watch starts. Watch only.
+	ActivityStartTimeFieldSelector = "startTime"
+
+	// ActivityMaxAgeFieldSelector drops watch events whose creationTimestamp is
+	// older than the given Go duration (e.g. "10m") at delivery. Watch only.
+	ActivityMaxAgeFieldSelector = "maxAge"
+)

@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
+	"go.miloapis.com/activity/internal/activitysubject"
 	"go.miloapis.com/activity/internal/cel"
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 )
@@ -380,32 +381,7 @@ func (p *EventProcessor) publishActivity(ctx context.Context, activity *v1alpha1
 // buildActivitySubject returns the NATS subject for routing activities.
 // Format: <prefix>.<tenant_type>.<tenant_name>.<api_group>.<origin>.<kind>.<namespace>.<name>
 func (p *EventProcessor) buildActivitySubject(activity *v1alpha1.Activity) string {
-	prefix := p.activityPrefix
-
-	tenantType := activity.Spec.Tenant.Type
-	if tenantType == "" {
-		tenantType = "platform"
-	}
-	tenantName := activity.Spec.Tenant.Name
-	if tenantName == "" {
-		tenantName = "_"
-	}
-
-	apiGroup := activity.Spec.Resource.APIGroup
-	if apiGroup == "" {
-		apiGroup = "core"
-	}
-
-	origin := activity.Spec.Origin.Type
-	kind := activity.Spec.Resource.Kind
-	namespace := activity.Spec.Resource.Namespace
-	if namespace == "" {
-		namespace = "_"
-	}
-	name := activity.Name
-
-	return fmt.Sprintf("%s.%s.%s.%s.%s.%s.%s.%s",
-		prefix, tenantType, tenantName, apiGroup, origin, kind, namespace, name)
+	return activitysubject.ForActivity(p.activityPrefix, activity)
 }
 
 // parseAPIGroup extracts the API group from an apiVersion string.

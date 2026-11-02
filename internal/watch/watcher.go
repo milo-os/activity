@@ -5,10 +5,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/klog/v2"
 
+	"go.miloapis.com/activity/internal/activitysubject"
 	"go.miloapis.com/activity/internal/cel"
 	"go.miloapis.com/activity/internal/storage"
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
@@ -164,7 +165,17 @@ type WatchFilter struct {
 	ResourceKind string
 	// CELFilter is a CEL expression for advanced filtering
 	CELFilter string
+	// StartTime, when non-zero, drops activities whose creationTimestamp is
+	// before it. Resolved once when the watch is created.
+	StartTime time.Time
+	// MaxAge, when non-zero, drops activities whose creationTimestamp is older
+	// than MaxAge at the moment they are delivered.
+	MaxAge time.Duration
 }
+
+// ErrInvalidFilter is returned (wrapped) by Watch when WatchFilter.CELFilter
+// does not compile; callers should treat it as a client error.
+var ErrInvalidFilter = errors.New("invalid CEL filter")
 
 // Watch creates a new watch for activities matching the given scope and filter.
 // Uses JetStream ephemeral push consumers for reliable delivery and replay support.
@@ -179,7 +190,7 @@ func (w *NATSWatcher) Watch(ctx context.Context, scope storage.ScopeContext, fil
 		var err error
 		celFilter, err = cel.CompileActivityFilterProgram(filter.CELFilter)
 		if err != nil {
-			return nil, fmt.Errorf("invalid CEL filter: %w", err)
+			return nil, fmt.Errorf("%w: %v", ErrInvalidFilter, err)
 		}
 	}
 
@@ -208,10 +219,10 @@ func (w *NATSWatcher) Watch(ctx context.Context, scope storage.ScopeContext, fil
 	inbox := nats.NewInbox()
 
 	consumerConfig := &nats.ConsumerConfig{
-		Name:          consumerName,
-		FilterSubject: subject,
-		DeliverPolicy: deliverPolicy,
-		AckPolicy:     nats.AckExplicitPolicy,
+		Name:           consumerName,
+		FilterSubject:  subject,
+		DeliverPolicy:  deliverPolicy,
+		AckPolicy:      nats.AckExplicitPolicy,
 		DeliverSubject: inbox,
 		// Ephemeral consumer - no durable name
 		// Will be automatically cleaned up when subscription ends
@@ -263,48 +274,10 @@ func (w *NATSWatcher) Watch(ctx context.Context, scope storage.ScopeContext, fil
 
 // buildSubject constructs a NATS subject pattern based on scope and filters.
 // Subject format: activities.<tenant_type>.<tenant_name>.<api_group>.<source>.<kind>.<namespace>.<name>
+// Tokens are encoded exactly as the publishers encode them (see activitysubject).
 func (w *NATSWatcher) buildSubject(scope storage.ScopeContext, filter WatchFilter) string {
-	parts := []string{w.subjectPrefix}
-
-	// Tenant type and name
-	if scope.Type == "platform" {
-		parts = append(parts, ">") // Wildcard for all tenants
-		return strings.Join(parts, ".")
-	}
-
-	parts = append(parts, scope.Type)
-	parts = append(parts, scope.Name)
-
-	// API group - use wildcard or normalized name
-	if filter.APIGroup != "" {
-		// Replace dots with underscores for NATS compatibility
-		normalizedGroup := strings.ReplaceAll(filter.APIGroup, ".", "_")
-		parts = append(parts, normalizedGroup)
-	} else {
-		parts = append(parts, "*")
-	}
-
-	// Source (audit/event) - always wildcard for now
-	parts = append(parts, "*")
-
-	// Kind
-	if filter.ResourceKind != "" {
-		parts = append(parts, filter.ResourceKind)
-	} else {
-		parts = append(parts, "*")
-	}
-
-	// Namespace
-	if filter.Namespace != "" {
-		parts = append(parts, filter.Namespace)
-	} else {
-		parts = append(parts, "*")
-	}
-
-	// Name - always wildcard
-	parts = append(parts, ">")
-
-	return strings.Join(parts, ".")
+	return activitysubject.ForWatch(w.subjectPrefix, scope.Type, scope.Name,
+		filter.APIGroup, filter.ResourceKind, filter.Namespace)
 }
 
 // ActivityWatch implements watch.Interface for activity resources using JetStream.
@@ -318,6 +291,7 @@ type ActivityWatch struct {
 	cancel       context.CancelFunc
 	filter       WatchFilter
 	celFilter    *cel.CompiledActivityFilter // Pre-compiled CEL filter for advanced filtering
+	now          func() time.Time            // Clock for MaxAge; time.Now when nil
 
 	mu      sync.Mutex
 	stopped bool
@@ -425,6 +399,23 @@ func (w *ActivityWatch) matchesFilter(activity *v1alpha1.Activity) bool {
 	// Simple field checks
 	if w.filter.ChangeSource != "" && activity.Spec.ChangeSource != w.filter.ChangeSource {
 		return false
+	}
+
+	// Time bounds. creationTimestamp is serialized with second precision, so
+	// the cutoffs are truncated to the second to avoid dropping activities that
+	// happened in the same second as the cutoff.
+	created := activity.CreationTimestamp.Time
+	if !w.filter.StartTime.IsZero() && created.Before(w.filter.StartTime.Truncate(time.Second)) {
+		return false
+	}
+	if w.filter.MaxAge > 0 {
+		now := time.Now
+		if w.now != nil {
+			now = w.now
+		}
+		if created.Before(now().Add(-w.filter.MaxAge).Truncate(time.Second)) {
+			return false
+		}
 	}
 
 	// CEL filter evaluation

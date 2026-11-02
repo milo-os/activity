@@ -207,18 +207,25 @@ group, and resource:
 activities.<tenant_type>.<tenant_name>.<api_group>.<source>.<kind>.<namespace>.<name>
 ```
 
+`<name>` is the activity name. Each value is encoded as a single subject token
+(`internal/activitysubject`): `.`, `*`, `>` and whitespace become `_`, so the
+API group `networking.datumapis.com` is published as `networking_datumapis_com`.
+Empty values become `_`, except an empty tenant type (`platform`) and the core
+API group (`core`). The processors and the Watch API share this encoder.
+
 ### Subject Examples
 
 | Activity | Subject |
 |----------|---------|
-| User created HTTPProxy | `activities.project.prod.networking_datumapis_com.audit.HTTPProxy.default.api-gateway` |
-| Network programmed event | `activities.project.prod.networking_datumapis_com.event.Network.default.prod-network` |
+| User created HTTPProxy | `activities.Project.prod.networking_datumapis_com.audit.HTTPProxy.default.act-3f9a2c1b7d4e` |
+| Network programmed event | `activities.Project.prod.networking_datumapis_com.event.Network.default.act-8c1d0e5f2a6b` |
+| Namespace created (core group, cluster-scoped) | `activities.platform._.core.audit.Namespace._.act-1b2c3d4e5f6a` |
 
 ### Wildcard Subscriptions
 
 | Pattern | Use Case |
 |---------|----------|
-| `activities.project.prod.>` | Consumer: all activities in prod project |
+| `activities.Project.prod.>` | Consumer: all activities in prod project |
 | `activities.*.*.networking_datumapis_com.>` | Service provider: all networking activities |
 | `activities.*.*.*.audit.>` | All audit-sourced activities |
 

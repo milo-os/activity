@@ -7,6 +7,10 @@ Keeper is the modern replacement for ZooKeeper.
 Our configuration provides high availability (survives 1 node failure) with pod
 anti-affinity ensuring nodes are distributed across the cluster.
 
+The ClickHouse Operator creates the PodDisruptionBudget for these pods, allowing
+one down at a time. Do not add a second budget over them: Kubernetes refuses to
+evict a pod under more than one, so neither would apply.
+
 ## Usage
 
 Include in your overlay:

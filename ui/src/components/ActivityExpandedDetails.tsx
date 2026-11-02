@@ -1,4 +1,5 @@
 import type { Activity, TenantLinkResolver } from '../types/activity';
+import { STAFF_ACTOR_NAME } from '../types/activity';
 import { TooltipProvider } from './ui/tooltip';
 import { Timestamp } from './Timestamp';
 import { DetailGrid, DetailPanelShell, Field, Section } from './details';
@@ -25,7 +26,7 @@ export function ActivityExpandedDetails({
   const { actor, resource, origin, changes } = spec;
   const timestamp = metadata?.creationTimestamp;
 
-  const actorDisplay = actor.displayName || actor.name;
+  const actorDisplay = actor.type === 'staff' ? STAFF_ACTOR_NAME : actor.displayName || actor.name;
   const actorIsUser = actor.type === 'user';
 
   const body = (
@@ -87,7 +88,7 @@ export function ActivityExpandedDetails({
           {actorIsUser && actor.email ? (
             <Field label="Email" value={actor.email} copyValue={actor.email} mono />
           ) : null}
-          {actor.uid ? (
+          {actor.uid && actor.type !== 'staff' ? (
             <Field label="UID" value={actor.uid} copyValue={actor.uid} mono />
           ) : null}
         </Section>

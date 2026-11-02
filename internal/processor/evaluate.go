@@ -33,16 +33,34 @@ func EvaluateAuditRules(
 	audit *auditv1.Event,
 	resolveKind KindResolver,
 ) (*EvaluationResult, error) {
+	return EvaluateAuditRulesWithResolver(spec, audit, resolveKind, nil)
+}
+
+// EvaluateAuditRulesWithResolver is like EvaluateAuditRules but also enriches
+// the resulting Activity's actor and User-typed links via resolver. A nil
+// resolver disables enrichment.
+func EvaluateAuditRulesWithResolver(
+	spec *v1alpha1.ActivityPolicySpec,
+	audit *auditv1.Event,
+	resolveKind KindResolver,
+	resolver UserResolver,
+) (*EvaluationResult, error) {
+	return EvaluateAuditRulesWithEnrichment(spec, audit, resolveKind, Enrichment{Users: resolver})
+}
+
+// EvaluateAuditRulesWithEnrichment is like EvaluateAuditRules but also
+// enriches the actor and iam User links, and discloses staff actors as Datum
+// Support, using the given indexes.
+func EvaluateAuditRulesWithEnrichment(
+	spec *v1alpha1.ActivityPolicySpec,
+	audit *auditv1.Event,
+	resolveKind KindResolver,
+	enrichment Enrichment,
+) (*EvaluationResult, error) {
 	// Convert to map for CEL evaluation
 	auditMap, err := toMap(audit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert audit data: %w", err)
-	}
-
-	// Create activity builder
-	builder := &ActivityBuilder{
-		APIGroup: spec.Resource.APIGroup,
-		Kind:     spec.Resource.Kind,
 	}
 
 	// Try each audit rule in order
@@ -53,8 +71,12 @@ func EvaluateAuditRules(
 		}
 
 		if matched {
+			// Classify the actor before rendering, so a staff actor renders
+			// as Datum Support.
+			builder, render := enrichment.AuditBuilder(spec.Resource.APIGroup, spec.Resource.Kind, audit, auditMap)
+
 			// Generate summary
-			summary, links, err := cel.EvaluateAuditSummaryMap(rule.Summary, auditMap)
+			summary, links, err := render(rule.Summary)
 			if err != nil {
 				return nil, fmt.Errorf("failed to evaluate rule %d summary: %w", i, err)
 			}
@@ -88,6 +110,18 @@ func EvaluateEventRules(
 	eventData interface{},
 	resolveKind KindResolver,
 ) (*EvaluationResult, error) {
+	return EvaluateEventRulesWithResolver(spec, eventData, resolveKind, nil)
+}
+
+// EvaluateEventRulesWithResolver is like EvaluateEventRules but also enriches
+// the resulting Activity's User-typed links via resolver. A nil resolver
+// disables enrichment.
+func EvaluateEventRulesWithResolver(
+	spec *v1alpha1.ActivityPolicySpec,
+	eventData interface{},
+	resolveKind KindResolver,
+	resolver UserResolver,
+) (*EvaluationResult, error) {
 	// Convert event data to map if needed
 	eventMap, err := toMap(eventData)
 	if err != nil {
@@ -96,8 +130,9 @@ func EvaluateEventRules(
 
 	// Create activity builder
 	builder := &ActivityBuilder{
-		APIGroup: spec.Resource.APIGroup,
-		Kind:     spec.Resource.Kind,
+		APIGroup:     spec.Resource.APIGroup,
+		Kind:         spec.Resource.Kind,
+		UserResolver: resolver,
 	}
 
 	// Try each event rule in order

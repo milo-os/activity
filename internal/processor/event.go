@@ -29,6 +29,28 @@ type EventProcessor struct {
 	policyLookup   EventPolicyLookup
 	workers        int
 	dlqPublisher   DLQPublisher
+
+	// userResolver, when non-nil, enriches User-typed links with display
+	// names. Set with SetUserResolver before Run.
+	userResolver UserResolver
+
+	// staffResolver, when non-nil, keeps User-typed links from showing a
+	// staff member's display name outside their organization. Set with
+	// SetStaffResolver before Run.
+	staffResolver StaffResolver
+}
+
+// SetStaffResolver sets the resolver that keeps staff display names off
+// User-typed links in tenants the staff member does not belong to. It must be
+// called before Run.
+func (p *EventProcessor) SetStaffResolver(r StaffResolver) {
+	p.staffResolver = r
+}
+
+// SetUserResolver sets the resolver used to enrich User-typed links in
+// generated activities with display names. It must be called before Run.
+func (p *EventProcessor) SetUserResolver(r UserResolver) {
+	p.userResolver = r
 }
 
 // NewEventProcessor creates a new event processor.
@@ -301,20 +323,14 @@ func (p *EventProcessor) buildActivity(
 	// Generate activity name.
 	name := activityName("event", originID, matched.APIGroup, matched.Kind)
 
-	// Convert links.
-	var activityLinks []v1alpha1.ActivityLink
-	for _, link := range links {
-		activityLinks = append(activityLinks, v1alpha1.ActivityLink{
-			Marker: link.Marker,
-			Resource: v1alpha1.ActivityResource{
-				APIGroup:  getStringFromMap(link.Resource, "apiGroup"),
-				Kind:      getStringFromMap(link.Resource, "kind"),
-				Name:      getStringFromMap(link.Resource, "name"),
-				Namespace: getStringFromMap(link.Resource, "namespace"),
-				UID:       getStringFromMap(link.Resource, "uid"),
-			},
-		})
-	}
+	// Convert links with the same conversion BuildFromEvent (used by
+	// re-indexing) applies, so live and re-indexed activities carry identical
+	// links. Without a kind resolver ConvertLinks cannot fail.
+	activityLinks, _ := ConvertLinks(links, nil)
+
+	// Event actors are controllers, so only iam User links are enriched here.
+	tenant := ExtractTenantFromAnnotations(event)
+	activityLinks = enrichLinks("", nil, activityLinks, p.userResolver, staffLinkFilter(p.staffResolver, tenant))
 
 	activity := &v1alpha1.Activity{
 		TypeMeta: metav1.TypeMeta{
@@ -331,6 +347,7 @@ func (p *EventProcessor) buildActivity(
 			Summary:      summary,
 			ChangeSource: changeSource,
 			Actor:        actor,
+			Interface:    eventInterface(actor),
 			Resource: v1alpha1.ActivityResource{
 				APIGroup:   resourceAPIGroup,
 				APIVersion: apiVersion,
@@ -342,7 +359,7 @@ func (p *EventProcessor) buildActivity(
 			Links:   activityLinks,
 			Related: ResolveRelatedResources(event),
 			// Extract tenant from scope annotations; fall back to platform scope when absent.
-			Tenant: ExtractTenantFromAnnotations(event),
+			Tenant: tenant,
 			Origin: v1alpha1.ActivityOrigin{
 				Type: "event",
 				ID:   originID,

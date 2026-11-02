@@ -1,5 +1,5 @@
 import type { PolicyPreviewStatus, PreviewActivity, PolicyPreviewInputResult, PolicyPreviewInput } from '../types/policy';
-import type { ResourceRef, Activity } from '../types/activity';
+import type { ResourceRef, Activity, ActorType } from '../types/activity';
 import type { K8sEvent } from '../types/k8s-event';
 import { ActivityFeedSummary } from './ActivityFeedSummary';
 import { ActivityFeedItem } from './ActivityFeedItem';
@@ -53,7 +53,7 @@ function previewActivityToActivity(preview: PreviewActivity): Activity {
       summary: preview.spec.summary,
       changeSource: preview.spec.changeSource as 'human' | 'system',
       actor: {
-        type: preview.spec.actor.type as 'user' | 'machine account' | 'controller',
+        type: preview.spec.actor.type as ActorType,
         name: preview.spec.actor.name,
         uid: preview.spec.actor.uid || '',
         email: preview.spec.actor.email,

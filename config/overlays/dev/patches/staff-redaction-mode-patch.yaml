@@ -1,0 +1,47 @@
+# This cluster has no Milo, so there are no staff-users or organization
+# memberships to watch. Use the domain-only staff redaction mode: Datum staff
+# are recognised by email domain only, and nothing waits for memberships.
+# Never use this in a cluster customers can access; production-like bases and
+# overlays keep the default "required" mode.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: activity-processor
+  namespace: activity-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: processor
+        env:
+        - name: ACTIVITY_STAFF_REDACTION_MODE
+          value: domain-only
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: activity-apiserver
+  namespace: activity-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: apiserver
+        env:
+        - name: ACTIVITY_STAFF_REDACTION_MODE
+          value: domain-only
+---
+# The controller-manager passes the mode on to reindex Jobs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: activity-controller-manager
+  namespace: activity-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        env:
+        - name: ACTIVITY_STAFF_REDACTION_MODE
+          value: domain-only

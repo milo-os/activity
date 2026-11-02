@@ -18,6 +18,37 @@ rules:
   - get
   - list
   - watch
+# Watch Milo iam Users to enrich activities with actor display names and
+# avatars. Optional: without it activities are emitted unenriched.
+- apiGroups:
+  - iam.miloapis.com
+  resources:
+  - users
+  verbs:
+  - get
+  - list
+  - watch
+# Watch staff-users Group memberships (namespace milo-system), organization
+# memberships and projects to show Datum staff acting in customer
+# organizations as "Datum Support". Without them, staff are detected by email
+# domain (--staff-email-domains).
+- apiGroups:
+  - iam.miloapis.com
+  resources:
+  - groupmemberships
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - resourcemanager.miloapis.com
+  resources:
+  - organizationmemberships
+  - projects
+  verbs:
+  - get
+  - list
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

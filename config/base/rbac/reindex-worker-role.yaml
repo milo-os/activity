@@ -18,7 +18,24 @@ rules:
   resources: ["activitypolicies"]
   verbs: ["get", "list"]
 
-# Query audit logs and events via API
+# Query audit logs and events via API, and existing activities (to keep
+# activities already recorded as staff access redacted)
 - apiGroups: ["activity.miloapis.com"]
-  resources: ["auditlogqueries", "eventqueries"]
+  resources: ["auditlogqueries", "eventqueries", "activityqueries"]
   verbs: ["create"]
+
+# Watch Milo iam Users to enrich re-indexed activities with actor display
+# names and avatars. Optional: without it activities are re-indexed unenriched.
+- apiGroups: ["iam.miloapis.com"]
+  resources: ["users"]
+  verbs: ["get", "list", "watch"]
+
+# Watch staff-users Group memberships, organization memberships and projects
+# so re-indexed activities show Datum staff as "Datum Support", like the
+# processor does.
+- apiGroups: ["iam.miloapis.com"]
+  resources: ["groupmemberships"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["resourcemanager.miloapis.com"]
+  resources: ["organizationmemberships", "projects"]
+  verbs: ["get", "list", "watch"]

@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,11 +13,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
 
 	"go.miloapis.com/activity/internal/apierrors"
 	"go.miloapis.com/activity/internal/processor"
 	"go.miloapis.com/activity/internal/registry/activity/policy"
+	"go.miloapis.com/activity/internal/registry/scope"
 	"go.miloapis.com/activity/internal/storage"
 	"go.miloapis.com/activity/internal/timeutil"
 	"go.miloapis.com/activity/pkg/apis/activity"
@@ -92,13 +95,20 @@ func (s *PolicyPreviewStorage) Create(ctx context.Context, obj runtime.Object, c
 	var fetchedInputs []v1alpha1.PolicyPreviewInput
 
 	if preview.Spec.AutoFetch != nil {
-		// Extract scope context from the request (if any)
-		// For now, use platform scope since PolicyPreview is ephemeral and doesn't have tenant context
-		scope := storage.ScopeContext{
-			Type: "platform",
+		// Fetch samples in the caller's scope, exactly as AuditLogQuery and
+		// EventQuery would: an organization or project caller only sees that
+		// tenant's events, with Datum staff redacted. Platform callers keep
+		// platform-wide samples.
+		reqUser, ok := request.UserFrom(ctx)
+		if !ok {
+			return nil, errors.NewInternalError(fmt.Errorf("no user in context"))
 		}
+		scopeCtx := scope.ExtractScopeFromUser(reqUser)
 
-		fetched, err := s.autoFetchInputs(ctx, &preview.Spec, scope)
+		fetched, err := s.autoFetchInputs(ctx, &preview.Spec, scopeCtx)
+		if stderrors.Is(err, storage.ErrStaffRedactionNotReady) {
+			return nil, storage.StaffRedactionNotReadyError()
+		}
 		if err != nil {
 			return nil, errors.NewInternalError(fmt.Errorf("failed to auto-fetch sample inputs: %w", err))
 		}

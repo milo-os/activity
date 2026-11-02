@@ -27,6 +27,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityFacetQuery":        schema_pkg_apis_activity_v1alpha1_ActivityFacetQuery(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityFacetQuerySpec":    schema_pkg_apis_activity_v1alpha1_ActivityFacetQuerySpec(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityFacetQueryStatus":  schema_pkg_apis_activity_v1alpha1_ActivityFacetQueryStatus(ref),
+		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityInterface":         schema_pkg_apis_activity_v1alpha1_ActivityInterface(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityLink":              schema_pkg_apis_activity_v1alpha1_ActivityLink(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityList":              schema_pkg_apis_activity_v1alpha1_ActivityList(ref),
 		"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityOrigin":            schema_pkg_apis_activity_v1alpha1_ActivityOrigin(ref),
@@ -466,7 +467,7 @@ func schema_pkg_apis_activity_v1alpha1_ActivityActor(ref common.ReferenceCallbac
 				Properties: map[string]spec.Schema{
 					"type": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Type indicates the actor category. Values: \"user\", \"serviceaccount\", \"controller\"",
+							Description: "Type indicates the actor category. Values:\n  - \"user\": a person\n  - \"serviceaccount\": a Milo ServiceAccount\n    (\"<name>@<project>.identity.miloapis.com\")\n  - \"system\": a \"system:\" identity, such as a platform controller or a\n    Kubernetes service account\n  - \"controller\": the controller that reported a Kubernetes event\n  - \"staff\": a Datum staff member acting in an organization they do not\n    belong to; shown only as \"Datum Support\"",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -474,7 +475,7 @@ func schema_pkg_apis_activity_v1alpha1_ActivityActor(ref common.ReferenceCallbac
 					},
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name is the display name for the actor. For users, this is typically the email address. For service accounts, this is the full name (e.g., \"system:serviceaccount:default:my-sa\"). For controllers, this is the controller name.",
+							Description: "Name is the display name for the actor. For users, this is typically the email address. For Milo ServiceAccounts, this is the account's username (\"<name>@<project>.identity.miloapis.com\"). For system identities, this is the username without its \"system:\" prefix (e.g., \"serviceaccount:default:my-sa\"). For controllers, this is the controller name. For staff, this is always \"Datum Support\"; the staff member's identity, including their UID, is not recorded on the activity.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -482,7 +483,7 @@ func schema_pkg_apis_activity_v1alpha1_ActivityActor(ref common.ReferenceCallbac
 					},
 					"uid": {
 						SchemaProps: spec.SchemaProps{
-							Description: "UID is the unique identifier for the actor. Stable across username changes.",
+							Description: "UID is the unique identifier for the actor. Stable across username changes. Empty for staff actors, so individual staff members cannot be told apart or tracked.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -490,6 +491,20 @@ func schema_pkg_apis_activity_v1alpha1_ActivityActor(ref common.ReferenceCallbac
 					"email": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Email is the actor's email address. Only populated for user actors when available.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is the actor's human-readable name (e.g., \"Smith Nelson\"). For user actors, populated at processing time from the iam User's spec.givenName and spec.familyName, sanitized and capped at 64 characters. Empty if no User record is found, the User has no name set, or the actor is not a human user. These names are self-asserted; Name and Email remain the verified identity.\n\nUIs SHOULD prefer DisplayName for visible text and fall back to Name when DisplayName is empty.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"avatarUrl": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AvatarURL is the URL of the actor's avatar image. For user actors, populated at processing time from the iam User's status.avatarUrl when it is an https URL. Empty if no User record is found, the User has no usable avatar, or the actor is not a human user.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -666,6 +681,35 @@ func schema_pkg_apis_activity_v1alpha1_ActivityFacetQueryStatus(ref common.Refer
 	}
 }
 
+func schema_pkg_apis_activity_v1alpha1_ActivityInterface(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ActivityInterface describes how a change was made, as reported by the client. It is not verified and must never be used for authorization or alerting.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Type is the kind of interface the change came through. Values:\n  - \"console\": a web browser, i.e. the Datum console\n  - \"cli\": datumctl (including its plugins) or kubectl\n  - \"mcp\": one of Datum's MCP servers (datum-mcp, datum-<x>-mcp, compute-mcp)\n  - \"terraform\": Terraform or a Terraform provider\n  - \"controller\": a platform controller or Kubernetes component\n  - \"api\": any other client, including Milo ServiceAccounts\n  - \"unknown\": the client sent no user agent",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"client": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Client is a short name for the client, when known: for example \"datumctl\", \"kubectl\", \"datum-mcp\", \"terraform\", \"service-account\", or a controller's service such as \"compute\". Lowercase, limited to [a-z0-9._/-] and at most 64 characters.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"type"},
+			},
+		},
+	}
+}
+
 func schema_pkg_apis_activity_v1alpha1_ActivityLink(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -686,6 +730,13 @@ func schema_pkg_apis_activity_v1alpha1_ActivityLink(ref common.ReferenceCallback
 							Description: "Resource identifies what the marker links to.",
 							Default:     map[string]interface{}{},
 							Ref:         ref("go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityResource"),
+						},
+					},
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is the human-readable name of the linked entity, when one is available. Populated at processing time only for links whose resource is an iam User (apiGroup iam.miloapis.com, kind User), from the User's spec.givenName and spec.familyName, sanitized and capped at 64 characters. The summary text itself is never rewritten: UIs SHOULD render DisplayName in place of this link's Marker and fall back to the Marker when DisplayName is empty.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 				},
@@ -1106,7 +1157,7 @@ func schema_pkg_apis_activity_v1alpha1_ActivityQuerySpec(ref common.ReferenceCal
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ActivityQuerySpec defines the search parameters for activities.\n\nRequired: startTime and endTime define your search window. Optional: filter (CEL expression), search, limit, continue.\n\nCEL is the primary filtering mechanism. All dedicated filter fields have been removed in favor of the expressive filter field.\n\nAvailable CEL Fields:\n\n\tspec.changeSource      - \"human\" or \"system\"\n\tspec.actor.name        - who performed the action\n\tspec.actor.type        - \"user\", \"serviceaccount\", \"controller\"\n\tspec.actor.uid         - actor's unique identifier\n\tspec.resource.apiGroup - resource API group (empty for core)\n\tspec.resource.kind     - resource kind (Deployment, Pod, etc.)\n\tspec.resource.name     - resource name\n\tspec.resource.namespace - resource namespace\n\tspec.resource.uid      - resource UID\n\tspec.summary           - activity summary text\n\tspec.origin.type       - \"audit\" or \"event\"\n\tspec.source.planeType  - plane the record originated from (management, edge)\n\tspec.source.cluster    - cluster the record originated from\n\tspec.source.region     - region the record originated from\n\tspec.source.city       - city the record originated from\n\tspec.relatedUIDs       - UIDs of the resource, its related resources, and\n\t                         linked resources (list; use '<uid>' in spec.relatedUIDs)\n\tmetadata.namespace     - activity namespace\n\nCEL Filter Examples:\n\n\t\"spec.changeSource == 'human'\"\n\t\"spec.resource.kind == 'Deployment'\"\n\t\"spec.actor.name.contains('admin')\"\n\t\"spec.resource.kind in ['Deployment', 'StatefulSet']\"\n\t\"spec.resource.apiGroup == 'networking.datumapis.com'\"\n\t\"spec.actor.uid == 'abc123'\"\n\t\"'abc123' in spec.relatedUIDs && spec.source.region == 'us-east-1'\"",
+				Description: "ActivityQuerySpec defines the search parameters for activities.\n\nRequired: startTime and endTime define your search window. Optional: filter (CEL expression), search, limit, continue.\n\nCEL is the primary filtering mechanism. All dedicated filter fields have been removed in favor of the expressive filter field.\n\nAvailable CEL Fields:\n\n\tspec.changeSource      - \"human\" or \"system\"\n\tspec.actor.name        - who performed the action\n\tspec.actor.type        - \"user\", \"serviceaccount\", \"system\", \"controller\", \"staff\"\n\tspec.actor.uid         - actor's unique identifier\n\tspec.resource.apiGroup - resource API group (empty for core)\n\tspec.resource.kind     - resource kind (Deployment, Pod, etc.)\n\tspec.resource.name     - resource name\n\tspec.resource.namespace - resource namespace\n\tspec.resource.uid      - resource UID\n\tspec.summary           - activity summary text\n\tspec.origin.type       - \"audit\" or \"event\"\n\tspec.interface.type    - how the change was made, as reported by the client\n\t                         (console, cli, mcp, api, controller, terraform, unknown)\n\tspec.source.planeType  - plane the record originated from (management, edge)\n\tspec.source.cluster    - cluster the record originated from\n\tspec.source.region     - region the record originated from\n\tspec.source.city       - city the record originated from\n\tspec.relatedUIDs       - UIDs of the resource, its related resources, and\n\t                         linked resources (list; use '<uid>' in spec.relatedUIDs)\n\tmetadata.namespace     - activity namespace\n\nCEL Filter Examples:\n\n\t\"spec.changeSource == 'human'\"\n\t\"spec.resource.kind == 'Deployment'\"\n\t\"spec.actor.name.contains('admin')\"\n\t\"spec.resource.kind in ['Deployment', 'StatefulSet']\"\n\t\"spec.resource.apiGroup == 'networking.datumapis.com'\"\n\t\"spec.actor.uid == 'abc123'\"\n\t\"'abc123' in spec.relatedUIDs && spec.source.region == 'us-east-1'\"",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"startTime": {
@@ -1331,7 +1382,7 @@ func schema_pkg_apis_activity_v1alpha1_ActivitySpec(ref common.ReferenceCallback
 					},
 					"changeSource": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ChangeSource indicates who initiated the change. Used to filter human actions from system reconciliation noise.\n\nValues:\n  - \"human\": User action via kubectl, API, or UI\n  - \"system\": Controller reconciliation, operator actions, scheduled jobs",
+							Description: "ChangeSource indicates who initiated the change. Used to filter human actions from system reconciliation noise.\n\nValues:\n  - \"human\": A person's action via kubectl, datumctl, the API, or the\n    console, including Datum staff shown as \"Datum Support\"\n  - \"system\": Controller reconciliation, operator actions, scheduled jobs,\n    and Milo ServiceAccounts (automation such as CI or Terraform)",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -1342,6 +1393,12 @@ func schema_pkg_apis_activity_v1alpha1_ActivitySpec(ref common.ReferenceCallback
 							Description: "Actor identifies who performed the action.",
 							Default:     map[string]interface{}{},
 							Ref:         ref("go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityActor"),
+						},
+					},
+					"interface": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Interface describes how the change was made: the console, a CLI, an MCP server, Terraform, a controller, or the API directly.\n\nIt is derived from the request's user agent, which the client reports and nothing verifies. Treat it as a display hint only: never use it for authorization, auditing decisions or alerting.",
+							Ref:         ref("go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityInterface"),
 						},
 					},
 					"resource": {
@@ -1430,7 +1487,7 @@ func schema_pkg_apis_activity_v1alpha1_ActivitySpec(ref common.ReferenceCallback
 			},
 		},
 		Dependencies: []string{
-			"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityActor", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityChange", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityLink", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityOrigin", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityResource", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivitySource", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityTenant"},
+			"go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityActor", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityChange", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityInterface", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityLink", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityOrigin", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityResource", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivitySource", "go.miloapis.com/activity/pkg/apis/activity/v1alpha1.ActivityTenant"},
 	}
 }
 
@@ -1468,7 +1525,7 @@ func schema_pkg_apis_activity_v1alpha1_AuditLogFacetsQuery(ref common.ReferenceC
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AuditLogFacetsQuery is an ephemeral resource for getting distinct field values from audit logs. Use this to power autocomplete, filter dropdowns, and faceted search in UIs for audit log queries.\n\nThe query returns counts for each distinct value, allowing you to show both available options and their frequency.\n\nExample:\n\n\tapiVersion: activity.miloapis.com/v1alpha1\n\tkind: AuditLogFacetsQuery\n\tmetadata:\n\t  name: get-verbs\n\tspec:\n\t  timeRange:\n\t    start: \"now-7d\"\n\t  facets:\n\t    - field: verb\n\t      limit: 10\n\t    - field: objectRef.resource",
+				Description: "AuditLogFacetsQuery is an ephemeral resource for getting distinct field values from audit logs. Use this to power autocomplete, filter dropdowns, and faceted search in UIs for audit log queries.\n\nThe query returns counts for each distinct value, allowing you to show both available options and their frequency.\n\nExample:\n\n\tapiVersion: activity.miloapis.com/v1alpha1\n\tkind: AuditLogFacetsQuery\n\tmetadata:\n\t  name: get-verbs\n\tspec:\n\t  timeRange:\n\t    start: \"now-7d\"\n\t  facets:\n\t    - field: verb\n\t      limit: 10\n\t    - field: objectRef.resource\n\nIn organization and project scopes, Datum staff who are not members of the organization are counted under a single user.username value, \"Datum Support\" (and an empty user.uid), with the same redaction as AuditLogQuery.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -1597,7 +1654,7 @@ func schema_pkg_apis_activity_v1alpha1_AuditLogQuery(ref common.ReferenceCallbac
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AuditLogQuery searches your control plane's audit logs.\n\nUse this to investigate incidents, track resource changes, generate compliance reports, or analyze user activity. Results are returned in the Status field, ordered newest-first.\n\nQuick Start:\n\n\tapiVersion: activity.miloapis.com/v1alpha1\n\tkind: AuditLogQuery\n\tmetadata:\n\t  name: recent-deletions\n\tspec:\n\t  startTime: \"now-30d\"       # last 30 days\n\t  endTime: \"now\"\n\t  filter: \"verb == 'delete'\" # optional: narrow your search\n\t  limit: 100\n\nTime Formats: - Relative: \"now-30d\" (great for dashboards and recurring queries) - Absolute: \"2024-01-01T00:00:00Z\" (great for historical analysis)",
+				Description: "AuditLogQuery searches your control plane's audit logs.\n\nUse this to investigate incidents, track resource changes, generate compliance reports, or analyze user activity. Results are returned in the Status field, ordered newest-first.\n\nQuick Start:\n\n\tapiVersion: activity.miloapis.com/v1alpha1\n\tkind: AuditLogQuery\n\tmetadata:\n\t  name: recent-deletions\n\tspec:\n\t  startTime: \"now-30d\"       # last 30 days\n\t  endTime: \"now\"\n\t  filter: \"verb == 'delete'\" # optional: narrow your search\n\t  limit: 100\n\nTime Formats: - Relative: \"now-30d\" (great for dashboards and recurring queries) - Absolute: \"2024-01-01T00:00:00Z\" (great for historical analysis)\n\nDatum staff: in organization and project scopes, an event counts as staff access when its actor is a Datum staff member who is not a member of that organization, or when it produced an activity already recorded as staff access. Such events are returned as a minimal event with only apiVersion, kind, level, auditID, stage, verb, objectRef (apiGroup, apiVersion, resource, subresource, namespace, name, uid), responseStatus.code, requestReceivedTimestamp, stageTimestamp and user.username \"Datum Support\". Other events lose impersonatedUser when it is a staff identity. Filters on user.username and user.uid see the redacted values, so a staff member's identity matches nothing and \"Datum Support\" matches all such events. Until staff memberships are loaded, these queries return 503 with Retry-After. Platform and user scopes are not redacted.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -1750,7 +1807,7 @@ func schema_pkg_apis_activity_v1alpha1_AutoFetchSpec(ref common.ReferenceCallbac
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AutoFetchSpec configures automatic sample data retrieval.",
+				Description: "AutoFetchSpec configures automatic sample data retrieval. Samples are fetched in the caller's scope, as AuditLogQuery and EventQuery would return them (including Datum staff redaction); only platform-scoped callers get platform-wide samples.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"limit": {
@@ -2204,7 +2261,7 @@ func schema_pkg_apis_activity_v1alpha1_FacetSpec(ref common.ReferenceCallback) c
 				Properties: map[string]spec.Schema{
 					"field": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Field is the activity field path to get distinct values for.\n\nSupported fields:\n  - spec.actor.name: Actor display names\n  - spec.actor.type: Actor types (user, serviceaccount, controller)\n  - spec.resource.apiGroup: API groups\n  - spec.resource.kind: Resource kinds\n  - spec.resource.namespace: Namespaces\n  - spec.changeSource: Change sources (human, system)",
+							Description: "Field is the activity field path to get distinct values for.\n\nSupported fields:\n  - spec.actor.name: Actor display names\n  - spec.actor.type: Actor types (user, serviceaccount, system, controller, staff)\n  - spec.resource.apiGroup: API groups\n  - spec.resource.kind: Resource kinds\n  - spec.resource.namespace: Namespaces\n  - spec.changeSource: Change sources (human, system)\n  - spec.interface.type: How changes were made, as reported by the client",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",

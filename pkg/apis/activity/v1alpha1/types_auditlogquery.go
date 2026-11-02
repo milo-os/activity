@@ -31,6 +31,19 @@ import (
 // Time Formats:
 // - Relative: "now-30d" (great for dashboards and recurring queries)
 // - Absolute: "2024-01-01T00:00:00Z" (great for historical analysis)
+//
+// Datum staff: in organization and project scopes, an event counts as staff
+// access when its actor is a Datum staff member who is not a member of that
+// organization, or when it produced an activity already recorded as staff
+// access. Such events are returned as a minimal event with only apiVersion,
+// kind, level, auditID, stage, verb, objectRef (apiGroup, apiVersion,
+// resource, subresource, namespace, name, uid), responseStatus.code,
+// requestReceivedTimestamp, stageTimestamp and user.username "Datum
+// Support". Other events lose impersonatedUser when it is a staff identity.
+// Filters on user.username and user.uid see the redacted values, so a staff
+// member's identity matches nothing and "Datum Support" matches all such
+// events. Until staff memberships are loaded, these queries return 503 with
+// Retry-After. Platform and user scopes are not redacted.
 type AuditLogQuery struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

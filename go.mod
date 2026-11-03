@@ -2,6 +2,8 @@ module go.miloapis.com/activity
 
 go 1.26.0
 
+toolchain go1.27.3
+
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
 	github.com/google/cel-go v0.30.0
@@ -31,7 +33,7 @@ require (
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad
 	k8s.io/kubectl v0.37.1
-	k8s.io/utils v0.0.0-20260626114624-be93311217bd
+	k8s.io/utils v0.0.0-20261023123148-ca04ba58ecab
 	sigs.k8s.io/controller-runtime v0.25.2
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2
 	sigs.k8s.io/yaml v1.6.0

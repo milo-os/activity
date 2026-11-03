@@ -16,6 +16,8 @@ Deploys a highly-available ClickHouse cluster for storing audit events.
 2. ClickHouse Operator v0.25.6+
 3. S3-compatible storage for cold tier
 
+The ClickHouse Operator creates the PodDisruptionBudget for these pods, allowing one down at a time. Do not add a second budget over them: Kubernetes refuses to evict a pod under more than one, so neither would apply.
+
 ## Usage
 
 ```yaml

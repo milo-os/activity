@@ -3,7 +3,6 @@ kind: Component
 
 resources:
   - keeper-installation.yaml
-  - pod-disruption-budget.yaml
 
 # Component metadata
 metadata:

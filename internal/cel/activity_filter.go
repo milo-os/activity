@@ -201,6 +201,10 @@ func ActivityEnvironment() (*cel.Env, error) {
 	)
 }
 
+// activityFilterCostLimit matches the per-call CEL cost limit Kubernetes
+// applies to CRD validation rules.
+const activityFilterCostLimit = 1_000_000
+
 // activityValidFields defines the allowed fields for activity filtering
 var activityValidFields = map[string]map[string]bool{
 	"spec": {
@@ -314,8 +318,9 @@ func CompileActivityFilterProgram(filterExpr string) (*CompiledActivityFilter, e
 		return nil, fmt.Errorf("%s", formatActivityFilterError(err))
 	}
 
-	// Create program from compiled AST
-	program, err := env.Program(ast)
+	// The API only accepts filters ClickHouse can run, which stay far below this
+	// limit; it bounds evaluation if a caller ever passes richer CEL, e.g. macros.
+	program, err := env.Program(ast, cel.CostLimit(activityFilterCostLimit))
 	if err != nil {
 		return nil, fmt.Errorf("unable to process filter expression. Try again or contact support if the problem persists")
 	}

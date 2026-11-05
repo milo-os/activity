@@ -15,7 +15,7 @@ overrides:
   postcss-selector-parser@<7.1.6: ^7.1.6
   qs@<6.16.0: ^6.16.0
   react-router@<6.30.6: ^6.30.6
-  react-router-dom@<6.30.6: ^6.30.6
+  react-router-dom@<6.30.6: ^7.0.0
   valibot@<1.4.2: ^1.4.2
   vite@<6.4.4: ^6.4.4
   yaml@<2.8.3: ^2.8.3
@@ -46,7 +46,7 @@ importers:
     devDependencies:
       '@datum-cloud/datum-ui':
         specifier: 3.4.0
-        version: 3.4.0(c86054a1808487e24770939484fb2023)
+        version: 3.4.0(7a6174c4f33c051634f30bc842b98307)
       '@monaco-editor/react':
         specifier: ^4.6.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -118,7 +118,7 @@ importers:
         version: link:..
       '@datum-cloud/datum-ui':
         specifier: 3.4.0
-        version: 3.4.0(c86054a1808487e24770939484fb2023)
+        version: 3.4.0(7a6174c4f33c051634f30bc842b98307)
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -2237,6 +2237,10 @@ packages:
     resolution: {integrity: sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==}
     engines: {node: '>= 0.6'}
 
+  cookie@1.1.1:
+    resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
+    engines: {node: '>=18'}
+
   core-util-is@1.0.3:
     resolution: {integrity: sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ==}
 
@@ -3659,7 +3663,7 @@ packages:
       next: '>=14.2.0'
       react: '>=18.2.0 || ^19.0.0-0'
       react-router: ^6.30.6
-      react-router-dom: ^6.30.6
+      react-router-dom: ^7.0.0
     peerDependenciesMeta:
       '@remix-run/react':
         optional: true
@@ -4048,18 +4052,28 @@ packages:
       '@types/react':
         optional: true
 
-  react-router-dom@6.30.6:
-    resolution: {integrity: sha512-0RHKZz7wwffvkU+2MFVT2NnjK44ssLEV+m0CAJaS2Ksmorrwj7WxH00jO0SOCW26/tINUnJHToXblDs33I38YQ==}
-    engines: {node: '>=14.0.0'}
+  react-router-dom@7.18.5:
+    resolution: {integrity: sha512-9HcfDMU6JJ/fp6gJZYGwNE6RknVGS4kBjH1HkNw959mCJi70TVwdipQWv2FEol9uGpi+SZTFtVpJPtEQfayeOw==}
+    engines: {node: '>=20.0.0'}
     peerDependencies:
-      react: '>=16.8'
-      react-dom: '>=16.8'
+      react: '>=18'
+      react-dom: '>=18'
 
   react-router@6.30.6:
     resolution: {integrity: sha512-5HfK7k5im7LTOB0EqCQmfvy4C13G92Ssj1VTmouTK3AJvyjKTnFuCV0vcMAD/JS+JC4DvDIBRrlAeJIFjh5VWg==}
     engines: {node: '>=14.0.0'}
     peerDependencies:
       react: '>=16.8'
+
+  react-router@7.18.5:
+    resolution: {integrity: sha512-dTgvcXDOrLPrlLHrcZAqWveiK1hMSqN+rGAJzegP8HtmNkfRxOoshGWBNX3ZJ0cZjOHkRdlUJtaIhZMLLyGyPw==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
+    peerDependenciesMeta:
+      react-dom:
+        optional: true
 
   react-style-singleton@2.2.3:
     resolution: {integrity: sha512-b6jSvxvVnyptAiLjbkWLE/lOnR4lfTtDAl+eUC7RZy+QQWc6wRzIV2CE6xBuMmDxc2qIihtDCZD5NPOFl7fRBQ==}
@@ -5158,7 +5172,7 @@ snapshots:
 
   '@date-fns/tz@1.5.0': {}
 
-  '@datum-cloud/datum-ui@3.4.0(c86054a1808487e24770939484fb2023)':
+  '@datum-cloud/datum-ui@3.4.0(7a6174c4f33c051634f30bc842b98307)':
     dependencies:
       '@radix-ui/react-avatar': 1.2.6(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@radix-ui/react-checkbox': 1.3.11(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -5199,7 +5213,7 @@ snapshots:
       leaflet.markercluster: 1.5.3(leaflet@1.9.4)
       monaco-editor: 0.55.1
       motion: 13.2.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      nuqs: 2.8.9(@remix-run/react@2.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(react-router-dom@6.30.6(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-router@6.30.6(react@19.3.0))(react@19.3.0)
+      nuqs: 2.8.9(@remix-run/react@2.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(react-router-dom@7.18.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-router@6.30.6(react@19.3.0))(react@19.3.0)
       react-day-picker: 10.0.1(@types/react@18.3.28)(react@19.3.0)
       react-dropzone: 15.0.0(react@19.3.0)
       react-leaflet: 5.0.0(leaflet@1.9.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -6107,7 +6121,7 @@ snapshots:
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
       react-router: 6.30.6(react@19.3.0)
-      react-router-dom: 6.30.6(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      react-router-dom: 7.18.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       turbo-stream: 2.4.1
     optionalDependencies:
       typescript: 5.9.3
@@ -6972,6 +6986,8 @@ snapshots:
   cookie-signature@1.2.2: {}
 
   cookie@0.7.2: {}
+
+  cookie@1.1.1: {}
 
   core-util-is@1.0.3: {}
 
@@ -8702,14 +8718,14 @@ snapshots:
     dependencies:
       path-key: 3.1.1
 
-  nuqs@2.8.9(@remix-run/react@2.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(react-router-dom@6.30.6(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-router@6.30.6(react@19.3.0))(react@19.3.0):
+  nuqs@2.8.9(@remix-run/react@2.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(react-router-dom@7.18.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-router@6.30.6(react@19.3.0))(react@19.3.0):
     dependencies:
       '@standard-schema/spec': 1.0.0
       react: 19.3.0
     optionalDependencies:
       '@remix-run/react': 2.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       react-router: 6.30.6(react@19.3.0)
-      react-router-dom: 6.30.6(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      react-router-dom: 7.18.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
     optional: true
 
   object-assign@4.1.1: {}
@@ -9092,17 +9108,24 @@ snapshots:
     optionalDependencies:
       '@types/react': 18.3.28
 
-  react-router-dom@6.30.6(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+  react-router-dom@7.18.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
     dependencies:
-      '@remix-run/router': 1.23.4
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
-      react-router: 6.30.6(react@19.3.0)
+      react-router: 7.18.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
 
   react-router@6.30.6(react@19.3.0):
     dependencies:
       '@remix-run/router': 1.23.4
       react: 19.3.0
+
+  react-router@7.18.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+    dependencies:
+      cookie: 1.1.1
+      react: 19.3.0
+      set-cookie-parser: 2.7.2
+    optionalDependencies:
+      react-dom: 19.3.0(react@19.3.0)
 
   react-style-singleton@2.2.3(@types/react@18.3.28)(react@19.3.0):
     dependencies:

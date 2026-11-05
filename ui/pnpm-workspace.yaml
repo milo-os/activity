@@ -12,7 +12,7 @@ overrides:
   cacache>tar: ^7.5.21
   monaco-editor>dompurify: ^3.4.17
   remark-mdx-frontmatter>toml: ^5.0.1
-  '@babel/core@<7.29.6': ^7.29.6
+  '@babel/core@<7.29.6': ^8.0.0
   estree-util-value-to-estree@<3.3.3: ^3.3.3
   morgan@<1.12.1: ^1.12.1
   postcss-selector-parser@<7.1.6: ^7.1.6

@@ -20,6 +20,6 @@ overrides:
   react-router@<6.30.6: ^6.30.6
   react-router-dom@<6.30.6: ^6.30.6
   valibot@<1.4.2: ^1.4.2
-  vite@<6.4.4: ^6.4.4
+  vite@<6.4.4: ^8.0.0
   yaml@<2.8.3: ^2.8.3
   esbuild: ^0.25.0

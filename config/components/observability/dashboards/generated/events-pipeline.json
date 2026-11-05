@@ -365,7 +365,7 @@
                   "type": "prometheus",
                   "uid": "$datasource"
                },
-               "expr": "sum(vector_buffer_events{component_id=\"clickhouse_k8s_events\",namespace=\"activity-system\"}) or vector(0)",
+               "expr": "sum(vector_buffer_size_events{component_id=\"clickhouse_k8s_events\",namespace=\"activity-system\"}) or vector(0)",
                "legendFormat": "Buffered"
             }
          ],
@@ -859,7 +859,7 @@
                   "type": "prometheus",
                   "uid": "$datasource"
                },
-               "expr": "sum(vector_buffer_events{component_id=\"clickhouse_k8s_events\",namespace=\"activity-system\"}) or vector(0)",
+               "expr": "sum(vector_buffer_size_events{component_id=\"clickhouse_k8s_events\",namespace=\"activity-system\"}) or vector(0)",
                "legendFormat": "Buffered Events"
             }
          ],

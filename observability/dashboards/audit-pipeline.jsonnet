@@ -38,7 +38,7 @@ local queries = {
   vectorAggregatorClickhouseSent: 'activity:vector_writes:5m',
   vectorAggregatorErrors: 'sum(rate(vector_component_errors_total{namespace="activity-system",pod=~"vector-aggregator.*"}[5m])) by (component_id) or vector(0)',
   // Buffer depth for all ClickHouse sinks (audit_events, activities, k8s_events)
-  vectorAggregatorBufferDepth: 'sum(vector_buffer_events{component_id=~"clickhouse_.*",namespace="activity-system"})',
+  vectorAggregatorBufferDepth: 'sum(vector_buffer_size_events{component_id=~"clickhouse_.*",namespace="activity-system"})',
   vectorAggregatorClickhouseHttpErrors: 'sum(rate(vector_http_client_errors_total{component_id=~"clickhouse_.*",namespace="activity-system"}[5m])) or vector(0)',
   vectorAggregatorClickhouseComponentErrors: 'sum(rate(vector_component_errors_total{component_id=~"clickhouse_.*",namespace="activity-system"}[5m])) or vector(0)',
 

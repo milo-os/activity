@@ -39,7 +39,7 @@ spec:
             )
             AND ON()
             (
-              sum(nats_jetstream_consumer_num_pending{stream="AUDIT_EVENTS"}) > 100
+              max(nats_consumer_num_pending{stream_name="AUDIT_EVENTS"}) > 100
             )
           for: 5m
           labels:
@@ -75,7 +75,7 @@ spec:
             )
             AND ON()
             (
-              sum(nats_jetstream_consumer_num_pending{stream="ACTIVITIES"}) > 0
+              max(nats_consumer_num_pending{stream_name="ACTIVITIES"}) > 0
             )
           for: 15m
           labels:
@@ -97,7 +97,7 @@ spec:
             )
             AND ON()
             (
-              sum(nats_jetstream_consumer_num_pending{stream="EVENTS"}) > 0
+              max(nats_consumer_num_pending{stream_name="EVENTS"}) > 0
             )
           for: 15m
           labels:
@@ -149,3 +149,50 @@ spec:
             summary: "Vector aggregator pods not ready"
             description: "{{ $value }} vector-aggregator pods are not ready"
             impact: "Reduced pipeline capacity"
+
+    # =========================================================================
+    # Vector Sidecar Health - apiserver to NATS Pipeline
+    # =========================================================================
+    - name: vector-sidecar
+      interval: 30s
+      rules:
+        # Per-pod detection of a wedged NATS sink. One sidecar runs per apiserver
+        # replica, so a single stalled pod loses its share of audit events while
+        # aggregate rates stay non-zero. The transform-rate clause scopes this to
+        # pods actually receiving audit batches, which excludes sidecars on nodes
+        # with no apiserver replica.
+        - alert: VectorSidecarNATSPublishStalled
+          expr: |
+            (
+              sum by (pod) (rate(vector_component_sent_events_total{namespace="activity-system",component_id="set_event_timestamp"}[5m])) > 1
+            )
+            AND
+            (
+              sum by (pod) (rate(vector_component_received_events_total{namespace="activity-system",component_id="nats_jetstream"}[5m])) == 0
+            )
+          for: 5m
+          labels:
+            severity: critical
+            component: vector-sidecar
+            sli: data_freshness
+          annotations:
+            summary: "Audit sidecar {{ $labels.pod }} has stopped publishing to NATS"
+            description: "{{ $labels.pod }} is still transforming audit events but its NATS sink has consumed none for 5+ minutes. The sink is wedged and events are accumulating on disk."
+            impact: "Audit events from this apiserver replica are not reaching ClickHouse — silent partial loss of the audit trail"
+            runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/vector/sidecar-nats-publish-stalled.md"
+
+        # Independent backstop: a stalled sink fills the on-disk buffer even if the
+        # rate-based signal is missed. Healthy max over 6 days is 3,208 events.
+        - alert: VectorSidecarBufferBacklog
+          expr: |
+            vector_buffer_events{namespace="activity-system",pod=~"vector-sidecar.*",component_id="nats_jetstream"} > 25000
+          for: 15m
+          labels:
+            severity: warning
+            component: vector-sidecar
+            sli: data_freshness
+          annotations:
+            summary: "Audit sidecar {{ $labels.pod }} is backing up on disk"
+            description: "{{ $value }} audit events buffered on {{ $labels.pod }} for 15+ minutes (healthy peak is ~3,200). The NATS sink is not draining."
+            impact: "Audit events delayed and at risk of being dropped when the buffer fills"
+            runbook_url: "https://github.com/milo-os/activity/blob/main/docs/runbooks/vector/sidecar-buffer-backlog.md"

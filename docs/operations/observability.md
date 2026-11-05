@@ -329,9 +329,16 @@ Translation engine health alerts:
 
 - **ActivityProcessorDown** - Processor unavailable for 5+ minutes (critical)
 - **ActivityProcessorNATSDisconnected** - Lost NATS connection for 2+ minutes (critical)
-- **ActivityGenerationStalled** - Receiving events but not generating activities for 10+ minutes (critical)
+- **ActivityGenerationStalled** - Receiving audit events but evaluating none against policies for 15+ minutes (warning)
 - **ActivityProcessorHighErrorRate** - >5% error rate for 10+ minutes (warning)
 - **ActivityProcessorNoPolicies** - No active policies for 15+ minutes (warning)
+
+#### Sidecar Alerts (vector-sidecar)
+
+Audit collection from milo-apiserver to NATS, evaluated per pod:
+
+- **VectorSidecarNATSPublishStalled** - A sidecar is transforming events but its NATS sink has consumed none for 5+ minutes (critical)
+- **VectorSidecarBufferBacklog** - A sidecar has >25k events buffered on disk for 15+ minutes (warning)
 
 #### Controller Alerts (activity-controller)
 

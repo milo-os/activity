@@ -464,3 +464,36 @@ func TestBuildActivityQuery_TieBreakMatchesCursor(t *testing.T) {
 		})
 	}
 }
+
+// A user's scope covers what they did plus platform events about their own account:
+// the platform records signup and passkey changes as events on the user's User with
+// itself as actor, so an actor-only filter would hide them from the user's feed.
+func TestBuildActivityQuery_UserScopeIncludesOwnAccount(t *testing.T) {
+	s := &ClickHouseStorage{config: ClickHouseConfig{Database: "audit", MaxPageSize: 1000}}
+	spec := ActivityQuerySpec{StartTime: "now-7d", Limit: 50}
+
+	query, args, err := s.buildActivityQuery(context.Background(), spec, ScopeContext{Type: "User", Name: "362926680773230861"})
+	if err != nil {
+		t.Fatalf("buildActivityQuery failed: %v", err)
+	}
+	// Event-origin only: audit entries about the user made by others (e.g. staff)
+	// must not leak into the user's feed.
+	want := "(actor_uid = ? OR (origin_type = 'event' AND api_group = 'iam.miloapis.com' AND resource_kind = 'User' AND resource_name = ?))"
+	if !strings.Contains(query, want) {
+		t.Errorf("user scope filter missing.\nwant substring: %s\nquery: %s", want, query)
+	}
+	if len(args) < 2 || args[0] != "362926680773230861" || args[1] != "362926680773230861" {
+		t.Errorf("user scope args = %v, want the user UID bound to both halves of the filter", args)
+	}
+
+	// Tenant scopes are unchanged: still filtered by tenant, never by the account clause.
+	for _, scope := range []ScopeContext{{Type: "Project", Name: "p"}, {Type: "Organization", Name: "o"}} {
+		q, _, err := s.buildActivityQuery(context.Background(), spec, scope)
+		if err != nil {
+			t.Fatalf("buildActivityQuery(%s) failed: %v", scope.Type, err)
+		}
+		if strings.Contains(q, "resource_kind = 'User'") || !strings.Contains(q, "tenant_type = ?") {
+			t.Errorf("%s scope query changed unexpectedly: %s", scope.Type, q)
+		}
+	}
+}

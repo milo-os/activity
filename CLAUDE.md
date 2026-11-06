@@ -266,7 +266,7 @@ Data is scoped by tenant:
 - **Platform**: All data across all tenants
 - **Organization**: Data within a specific organization
 - **Project**: Data within a specific project
-- **User**: Actions performed by a specific user
+- **User**: Actions performed by a specific user, plus (for activities) platform events about that user's own `User` account
 
 Scopes are NOT hierarchically inclusive - query each scope directly.
 

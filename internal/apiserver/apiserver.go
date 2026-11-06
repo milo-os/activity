@@ -3,6 +3,7 @@ package apiserver
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	eventsv1 "k8s.io/api/events/v1"
@@ -332,5 +333,29 @@ func (s *ActivityServer) Run(ctx context.Context) error {
 	if s.watcher != nil {
 		defer s.watcher.Close()
 	}
-	return s.GenericAPIServer.PrepareRun().RunWithContext(ctx)
+	return s.prepareRun().RunWithContext(ctx)
+}
+
+func (s *ActivityServer) prepareRun() interface{ RunWithContext(context.Context) error } {
+	prepared := s.GenericAPIServer.PrepareRun()
+	publishOnlyOwnedOpenAPIV3(s.GenericAPIServer)
+	return prepared
+}
+
+// publishOnlyOwnedOpenAPIV3 drops every group-version but activity.miloapis.com from /openapi/v3. The aggregator in
+// front of this server merges every group-version a backend lists there and serves each from one of the backends that
+// list it, chosen at random, so a listed core or events.k8s.io document would shadow the front server's own. Those
+// groups stay served here for the front server's events provider.
+func publishOnlyOwnedOpenAPIV3(server *genericapiserver.GenericAPIServer) {
+	if server.OpenAPIV3VersionedService == nil {
+		return
+	}
+	owned := "apis/" + v1alpha1.GroupName
+	for _, ws := range server.Handler.GoRestfulContainer.RegisteredWebServices() {
+		groupVersion := strings.TrimPrefix(ws.RootPath(), "/")
+		if groupVersion == owned || strings.HasPrefix(groupVersion, owned+"/") {
+			continue
+		}
+		server.OpenAPIV3VersionedService.DeleteGroupVersion(groupVersion)
+	}
 }

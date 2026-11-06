@@ -39,6 +39,14 @@ type ControllerManagerOptions struct {
 	NATSTLSKeyFile  string
 	NATSTLSCAFile   string
 
+	// StaffEmailDomains are passed to reindex workers (root
+	// --staff-email-domains flag).
+	StaffEmailDomains []string
+
+	// StaffRedactionMode is passed to reindex workers (root
+	// --staff-redaction-mode flag).
+	StaffRedactionMode string
+
 	// ReindexJob configuration
 	ReindexJobNamespace      string
 	ReindexServiceAccount    string
@@ -133,6 +141,12 @@ and ensuring consistent state across the cluster.`,
 				return fmt.Errorf("failed to apply logging configuration: %w", err)
 			}
 			ctrl.SetLogger(klog.NewKlogr())
+			options.StaffEmailDomains = staffEmailDomains(cmd)
+			mode, err := staffRedactionMode(cmd)
+			if err != nil {
+				return err
+			}
+			options.StaffRedactionMode = mode
 			return RunControllerManager(options)
 		},
 	}
@@ -228,6 +242,8 @@ func RunControllerManager(options *ControllerManagerOptions) error {
 		NATSTLSCertFile:          options.NATSTLSCertFile,
 		NATSTLSKeyFile:           options.NATSTLSKeyFile,
 		NATSTLSCAFile:            options.NATSTLSCAFile,
+		StaffEmailDomains:        options.StaffEmailDomains,
+		StaffRedactionMode:       options.StaffRedactionMode,
 	}
 
 	// Initialize NATS JetStream connection

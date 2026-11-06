@@ -55,6 +55,10 @@ Connects to ClickHouse to query historical audit events and exposes them as
 AuditLogQuery resources accessible through kubectl or any Kubernetes client.`,
 	}
 
+	addAllowUnenrichedFlag(cmd)
+	addStaffEmailDomainsFlag(cmd)
+	addStaffRedactionModeFlag(cmd)
+
 	cmd.AddCommand(NewServeCommand())
 	cmd.AddCommand(NewControllerManagerCommand())
 	cmd.AddCommand(NewProcessorCommand())
@@ -85,6 +89,12 @@ historical Kubernetes audit events through kubectl.`,
 			if err := options.Validate(); err != nil {
 				return err
 			}
+			options.StaffEmailDomains = staffEmailDomains(cmd)
+			mode, err := staffRedactionMode(cmd)
+			if err != nil {
+				return err
+			}
+			options.StaffRedactionMode = mode
 			return Run(options, cmd.Context())
 		},
 	}
@@ -139,6 +149,14 @@ type ActivityServerOptions struct {
 
 	MaxQueryWindow time.Duration // Maximum time range allowed for queries
 	MaxPageSize    int32         // Maximum number of results per page
+
+	// StaffEmailDomains are treated as Datum staff when redacting
+	// tenant-scoped audit logs (root --staff-email-domains flag).
+	StaffEmailDomains []string
+
+	// StaffRedactionMode is "required" or "domain-only" (root
+	// --staff-redaction-mode flag).
+	StaffRedactionMode string
 
 	// NATS configuration for activities watch
 	ActivitiesNATSURL           string
@@ -364,6 +382,8 @@ func (o *ActivityServerOptions) Config() (*activityapiserver.Config, error) {
 				TLSKeyFile:    o.EventsNATSTLSKeyFile,
 				TLSCAFile:     o.EventsNATSTLSCAFile,
 			},
+			StaffEmailDomains:  o.StaffEmailDomains,
+			StaffRedactionMode: o.StaffRedactionMode,
 		},
 	}
 

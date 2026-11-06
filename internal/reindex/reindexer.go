@@ -31,6 +31,17 @@ type Reindexer struct {
 
 	// OnProgress is called after each batch with updated progress information
 	OnProgress func(Progress)
+
+	// Enrichment enriches regenerated activities with iam User display names
+	// and avatars, and discloses staff actors as Datum Support, the same way
+	// the live processor does, so re-indexing backfills both for historical
+	// activities.
+	Enrichment processor.Enrichment
+
+	// staffActivities returns which of the named activities are already
+	// stored with a staff actor in [start, end]. Defaults to an ActivityQuery
+	// through the API server; replaceable in tests.
+	staffActivities func(ctx context.Context, names []string, start, end time.Time) (map[string]bool, error)
 }
 
 // Options configures a re-indexing operation.

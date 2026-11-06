@@ -51,7 +51,7 @@ type ActivityQuery struct {
 //
 //	spec.changeSource      - "human" or "system"
 //	spec.actor.name        - who performed the action
-//	spec.actor.type        - "user", "serviceaccount", "controller"
+//	spec.actor.type        - "user", "serviceaccount", "system", "controller", "staff"
 //	spec.actor.uid         - actor's unique identifier
 //	spec.resource.apiGroup - resource API group (empty for core)
 //	spec.resource.kind     - resource kind (Deployment, Pod, etc.)
@@ -60,6 +60,8 @@ type ActivityQuery struct {
 //	spec.resource.uid      - resource UID
 //	spec.summary           - activity summary text
 //	spec.origin.type       - "audit" or "event"
+//	spec.interface.type    - how the change was made, as reported by the client
+//	                         (console, cli, mcp, api, controller, terraform, unknown)
 //	spec.source.planeType  - plane the record originated from (management, edge)
 //	spec.source.cluster    - cluster the record originated from
 //	spec.source.region     - region the record originated from

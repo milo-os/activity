@@ -119,7 +119,10 @@ type PolicyPreviewInput struct {
 	Event *runtime.RawExtension `json:"event,omitempty"`
 }
 
-// AutoFetchSpec configures automatic sample data retrieval.
+// AutoFetchSpec configures automatic sample data retrieval. Samples are
+// fetched in the caller's scope, as AuditLogQuery and EventQuery would return
+// them (including Datum staff redaction); only platform-scoped callers get
+// platform-wide samples.
 type AutoFetchSpec struct {
 	// Limit is the maximum number of sample inputs to fetch (default: 10, max: 50).
 	// The API fetches up to this many audit logs and/or events.

@@ -59,6 +59,15 @@ type ManagerOptions struct {
 	NATSTLSKeyFile           string
 	NATSTLSCAFile            string
 
+	// StaffEmailDomains are passed to reindex workers as
+	// --staff-email-domains, so they apply the same staff rule as the
+	// processor and API server.
+	StaffEmailDomains []string
+
+	// StaffRedactionMode is passed to reindex workers as
+	// --staff-redaction-mode.
+	StaffRedactionMode string
+
 	// JobTemplate is the PodTemplateSpec for reindex worker Jobs.
 	// If nil, a default template is used.
 	JobTemplate *corev1.PodTemplateSpec
@@ -126,6 +135,8 @@ func NewManager(config *rest.Config, options ManagerOptions) (ctrl.Manager, erro
 		NATSTLSCertFile:       options.NATSTLSCertFile,
 		NATSTLSKeyFile:        options.NATSTLSKeyFile,
 		NATSTLSCAFile:         options.NATSTLSCAFile,
+		StaffEmailDomains:     options.StaffEmailDomains,
+		StaffRedactionMode:    options.StaffRedactionMode,
 	}
 
 	if err := reindexReconciler.SetupWithManager(mgr, options.Workers); err != nil {

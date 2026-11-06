@@ -19,6 +19,17 @@ performed **by** the user across all organizations and projects, not events
 **within** a user's namespace. This enables users to view their own activity
 across the platform.
 
+For activities, user scope also includes **platform events about the user's own
+account**: event-origin activities whose resource is the user's
+`iam.miloapis.com` `User`. The platform acts on a user's account on their behalf
+(signup creates the `User`, passkeys are managed by the identity provider), so
+those activities have a service as their actor and an actor-only filter would
+hide them from the user. A user's actor UID and their `User` name are the same
+identifier, the identity provider's subject.
+
+Audit-origin activities about the user's `User` made by someone else, such as a
+staff member editing the account, are not included.
+
 > [!NOTE]
 >
 > Scopes are not hierarchically inclusive. Organization-scoped queries return
@@ -101,7 +112,7 @@ The query builder adds appropriate WHERE clauses based on the resolved scope:
 | Platform | No scope filter (all data) |
 | Organization | `scope_type = 'organization' AND scope_name = ?` |
 | Project | `scope_type = 'project' AND scope_name = ?` |
-| User | `user_uid = ?` |
+| User | `user_uid = ?` (audit logs); `actor_uid = ? OR (origin_type = 'event' AND api_group = 'iam.miloapis.com' AND resource_kind = 'User' AND resource_name = ?)` (activities) |
 
 > [!IMPORTANT]
 >

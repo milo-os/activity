@@ -722,6 +722,28 @@ func (s *ClickHouseStorage) QueryActivities(ctx context.Context, spec ActivityQu
 }
 
 // buildActivityQuery constructs a ClickHouse SQL query for activities.
+// userScopeActivityCondition is the activity filter for a user's own scope: what
+// the user did (actor_uid), plus platform events about their own account.
+//
+// The second half exists because the platform acts on a user's account on their
+// behalf: signup and passkey changes happen in the identity provider, which records
+// them as Kubernetes Events on the user's iam.miloapis.com User with itself as the
+// actor, so an actor-only filter leaves them out of the user's feed. A user's actor
+// UID and their User's name are the same identifier (the identity provider's
+// subject).
+//
+// It is limited to event-origin activities on purpose. Audit entries about the
+// user's User made by someone else (staff editing an account, say) stay out of the
+// user's feed, as they did before, rather than exposing other people's actions.
+//
+// Performance: the OR spans columns with separate skip indexes, so ClickHouse may
+// not prune granules with either index and the actor_uid projection no longer
+// applies; queries stay bounded by the time-bucketed primary key.
+func userScopeActivityCondition(userUID string) (string, []interface{}) {
+	return "(actor_uid = ? OR (origin_type = 'event' AND api_group = 'iam.miloapis.com' AND resource_kind = 'User' AND resource_name = ?))",
+		[]interface{}{userUID, userUID}
+}
+
 func (s *ClickHouseStorage) buildActivityQuery(ctx context.Context, spec ActivityQuerySpec, scope ScopeContext) (string, []interface{}, error) {
 	var args []interface{}
 	query := fmt.Sprintf("SELECT activity_json FROM %s.activities", s.config.Database)
@@ -731,10 +753,9 @@ func (s *ClickHouseStorage) buildActivityQuery(ctx context.Context, spec Activit
 	// Scope filtering
 	if scope.Type != types.TenantTypePlatform {
 		if scope.Type == types.TenantTypeUser {
-			// For user scope, filter by actor_uid to show activities performed by this user
-			// across all organizations and projects
-			conditions = append(conditions, "actor_uid = ?")
-			args = append(args, scope.Name)
+			cond, condArgs := userScopeActivityCondition(scope.Name)
+			conditions = append(conditions, cond)
+			args = append(args, condArgs...)
 		} else {
 			// For organization/project scope, filter by tenant
 			conditions = append(conditions, "tenant_type = ?")
@@ -1160,10 +1181,9 @@ func (s *ClickHouseStorage) queryFacet(ctx context.Context, facet FacetFieldSpec
 	// Scope filtering
 	if scope.Type != types.TenantTypePlatform {
 		if scope.Type == types.TenantTypeUser {
-			// For user scope, filter by actor_uid to show activities performed by this user
-			// across all organizations and projects
-			conditions = append(conditions, "actor_uid = ?")
-			args = append(args, scope.Name)
+			cond, condArgs := userScopeActivityCondition(scope.Name)
+			conditions = append(conditions, cond)
+			args = append(args, condArgs...)
 		} else {
 			// For organization/project scope, filter by tenant
 			conditions = append(conditions, "tenant_type = ?")

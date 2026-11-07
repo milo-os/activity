@@ -54,7 +54,7 @@ local queries = {
   vectorNatsEventsReceived: 'sum(rate(vector_component_received_events_total{component_id="nats_events_consumer",namespace="activity-system"}[5m]))',
   vectorClickhouseEventsSent: 'sum(rate(vector_component_sent_events_total{component_id="clickhouse_k8s_events",namespace="activity-system"}[5m]))',
   vectorEventsErrors: 'sum(rate(vector_component_errors_total{component_id="clickhouse_k8s_events",namespace="activity-system"}[5m])) or vector(0)',
-  vectorEventsBufferDepth: 'sum(vector_buffer_events{component_id="clickhouse_k8s_events",namespace="activity-system"}) or vector(0)',
+  vectorEventsBufferDepth: 'sum(vector_buffer_size_events{component_id="clickhouse_k8s_events",namespace="activity-system"}) or vector(0)',
 
   // ClickHouse metrics (k8s_events table) - same in all environments
   clickhouseEventsWriteRate: 'activity:clickhouse_events_insert_rate:5m',

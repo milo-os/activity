@@ -32,8 +32,8 @@ The Vector aggregator exports pipeline metrics:
 | `activity_pipeline_end_to_end_latency_seconds` | Histogram | Latency from event generation to aggregator |
 | `vector_component_received_events_total` | Counter | Events received per component |
 | `vector_component_sent_events_total` | Counter | Events sent per component |
-| `vector_buffer_events` | Gauge | Events in buffer |
-| `vector_buffer_byte_size` | Gauge | Buffer size in bytes |
+| `vector_buffer_size_events` | Gauge | Events in buffer |
+| `vector_buffer_size_bytes` | Gauge | Buffer size in bytes |
 
 ### NATS JetStream
 
@@ -171,7 +171,7 @@ Recommended alerts for production deployments:
 |-------|-----------|-------------|
 | `HighQueryLatency` | `histogram_quantile(0.99, ...) > 5` | P99 query latency > 5s |
 | `NATSConsumerLag` | `jetstream_consumer_num_pending > 100000` | Consumer falling behind |
-| `BufferNearFull` | `vector_buffer_events / vector_buffer_max_events > 0.8` | Buffer 80% full |
+| `BufferNearFull` | `vector_buffer_size_events / vector_buffer_max_size_events > 0.8` | Buffer 80% full |
 | `HighErrorRate` | `rate(errors[5m]) / rate(requests[5m]) > 0.01` | Error rate > 1% |
 
 ## Logging

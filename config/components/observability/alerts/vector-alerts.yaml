@@ -125,7 +125,7 @@ spec:
         # ClickHouse sink backpressure - buffer filling up
         - alert: VectorClickHouseSinkBackpressure
           expr: |
-            vector_buffer_events{component_type="clickhouse"} > 50000
+            vector_buffer_size_events{component_type="clickhouse"} > 50000
           for: 10m
           labels:
             severity: warning

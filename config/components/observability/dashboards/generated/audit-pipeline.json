@@ -916,7 +916,7 @@
                   "type": "prometheus",
                   "uid": "$datasource"
                },
-               "expr": "sum(vector_buffer_events{component_id=~\"clickhouse_.*\",namespace=\"activity-system\"})",
+               "expr": "sum(vector_buffer_size_events{component_id=~\"clickhouse_.*\",namespace=\"activity-system\"})",
                "legendFormat": "Buffered Events"
             }
          ],

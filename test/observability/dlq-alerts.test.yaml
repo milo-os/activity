@@ -33,7 +33,8 @@ tests:
               error_type: cel_summary
               severity: warning
               component: activity-processor
-              team: sre
+              team: platform
+              service: control-plane
               subject: networking.datumapis.com-httpproxy
             exp_annotations:
               summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries
@@ -49,7 +50,8 @@ tests:
               error_type: cel_summary
               severity: warning
               component: activity-processor
-              team: sre
+              team: platform
+              service: control-plane
               subject: another-policy
             exp_annotations:
               summary: Activity policy another-policy keeps failing during retries
@@ -65,7 +67,8 @@ tests:
               error_type: cel_summary
               severity: warning
               component: activity-processor
-              team: sre
+              team: platform
+              service: control-plane
               subject: networking.datumapis.com-httpproxy
             exp_annotations:
               summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries
@@ -81,7 +84,8 @@ tests:
               error_type: cel_match
               severity: warning
               component: activity-processor
-              team: sre
+              team: platform
+              service: control-plane
               subject: networking.datumapis.com-httpproxy
             exp_annotations:
               summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries
@@ -120,7 +124,8 @@ tests:
               error_type: cel_summary
               severity: warning
               component: activity-processor
-              team: sre
+              team: platform
+              service: control-plane
               subject: networking.datumapis.com-httpproxy
             exp_annotations:
               summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries
@@ -169,7 +174,8 @@ tests:
               error_type: cel_summary
               severity: warning
               component: activity-processor
-              team: sre
+              team: platform
+              service: control-plane
               subject: networking.datumapis.com-httpproxy
             exp_annotations:
               summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries
@@ -230,7 +236,8 @@ tests:
           error_type: cel_summary
           severity: warning
           component: activity-processor
-          team: sre
+          team: platform
+          service: control-plane
           subject: another-policy
         exp_annotations:
           summary: Activity policy another-policy keeps failing during retries
@@ -246,7 +253,8 @@ tests:
           error_type: cel_summary
           severity: warning
           component: activity-processor
-          team: sre
+          team: platform
+          service: control-plane
           subject: networking.datumapis.com-httpproxy
         exp_annotations:
           summary: Activity policy networking.datumapis.com-httpproxy keeps failing during retries

@@ -3,6 +3,7 @@ package cel
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -147,8 +148,8 @@ func formatPolicyError(err error, context string) error {
 	// Check for common error patterns and provide helpful messages
 	if strings.Contains(errStr, "undeclared reference") {
 		return fmt.Errorf("invalid %s expression: %s. "+
-			"For audit rules: audit.verb, audit.objectRef, audit.user, audit.responseStatus, audit.responseObject, audit.requestObject, actor, actorRef, kind. "+
-			"For event rules: event.reason, event.type, event.regarding.name, actor, actorRef. "+
+			"For audit rules: audit.verb, audit.objectRef, audit.user, audit.responseStatus, audit.responseObject, audit.requestObject, actor, actorRef, kind, interface. "+
+			"For event rules: event.reason, event.type, event.regarding.name, actor, actorRef, source, interface. "+
 			"Also available: link(displayText, resourceRef)", context, errStr)
 	}
 
@@ -171,25 +172,32 @@ type linkCollector struct {
 	links []Link
 }
 
+// addLink records a link. A link identical to one already recorded (same
+// marker and same resource) is skipped, so a template that mentions the
+// actor both as {{ actor }} and as {{ link(actor, actorRef) }} yields one
+// link rather than two.
 func (c *linkCollector) addLink(displayText string, resource interface{}) {
-	if resourceMap, ok := resource.(map[string]interface{}); ok {
-		c.links = append(c.links, Link{
-			Marker:   displayText,
-			Resource: resourceMap,
-		})
-	} else if resourceRef, ok := resource.(map[ref.Val]ref.Val); ok {
+	var resourceMap map[string]interface{}
+	switch r := resource.(type) {
+	case map[string]interface{}:
+		resourceMap = r
+	case map[ref.Val]ref.Val:
 		// Convert CEL map to Go map
-		goMap := make(map[string]interface{})
-		for k, v := range resourceRef {
+		resourceMap = make(map[string]interface{}, len(r))
+		for k, v := range r {
 			if keyStr, ok := k.Value().(string); ok {
-				goMap[keyStr] = v.Value()
+				resourceMap[keyStr] = v.Value()
 			}
 		}
-		c.links = append(c.links, Link{
-			Marker:   displayText,
-			Resource: goMap,
-		})
+	default:
+		return
 	}
+	for _, l := range c.links {
+		if l.Marker == displayText && reflect.DeepEqual(l.Resource, resourceMap) {
+			return
+		}
+	}
+	c.links = append(c.links, Link{Marker: displayText, Resource: resourceMap})
 }
 
 // EvaluateAuditMatch evaluates a match expression against an audit log entry.
@@ -242,13 +250,20 @@ func EvaluateAuditSummary(template string, audit interface{}) (string, []Link, e
 
 // EvaluateAuditSummaryMap evaluates a summary template against an audit log entry map.
 func EvaluateAuditSummaryMap(template string, auditMap map[string]interface{}) (string, []Link, error) {
+	return EvaluateAuditSummaryVars(template, BuildAuditVars(auditMap))
+}
+
+// EvaluateAuditSummaryVars evaluates a summary template against prebuilt
+// audit variables (see BuildAuditVars). Callers use it to render with
+// variables they have adjusted, for example to hide a staff actor's identity.
+func EvaluateAuditSummaryVars(template string, vars map[string]interface{}) (string, []Link, error) {
 	collector := &linkCollector{}
 	env, err := auditEnvironment(collector)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create audit environment: %w", err)
 	}
 
-	result, err := evaluateSummaryTemplate(env, template, BuildAuditVars(auditMap))
+	result, err := evaluateSummaryTemplate(env, template, vars, collector)
 	if err != nil {
 		return "", nil, err
 	}
@@ -293,7 +308,7 @@ func EvaluateEventSummary(template string, event map[string]interface{}) (string
 		return "", nil, fmt.Errorf("failed to create event environment: %w", err)
 	}
 
-	result, err := evaluateSummaryTemplate(env, template, BuildEventVars(event))
+	result, err := evaluateSummaryTemplate(env, template, BuildEventVars(event), collector)
 	if err != nil {
 		return "", nil, err
 	}
@@ -304,7 +319,13 @@ func EvaluateEventSummary(template string, event map[string]interface{}) (string
 // Links are captured by the linkCollector in the CEL environment during evaluation.
 // If any CEL expression in the template fails to compile or evaluate, an error is
 // returned so the caller can route the event to the dead-letter queue for retry.
-func evaluateSummaryTemplate(env *cel.Env, template string, vars map[string]interface{}) (string, error) {
+//
+// A bare {{ actor }} for a human user also registers a link to actorRef, with
+// the exact inserted text as its marker, exactly as if the template had said
+// {{ link(actor, actorRef) }}. That makes every actor mention a precise link
+// that consumers can enrich (for example with a display name) without
+// searching the summary text.
+func evaluateSummaryTemplate(env *cel.Env, template string, vars map[string]interface{}, collector *linkCollector) (string, error) {
 	var evalErrors []error
 	result := summaryTemplateRegex.ReplaceAllStringFunc(template, func(match string) string {
 		// Extract the expression from {{ expression }}
@@ -335,7 +356,11 @@ func evaluateSummaryTemplate(env *cel.Env, template string, vars map[string]inte
 			return fmt.Sprintf("[ERROR: %v]", err)
 		}
 
-		return fmt.Sprintf("%v", out.Value())
+		text := fmt.Sprintf("%v", out.Value())
+		if expr == "actor" {
+			registerActorLink(collector, text, vars)
+		}
+		return text
 	})
 
 	if len(evalErrors) > 0 {
@@ -343,6 +368,20 @@ func evaluateSummaryTemplate(env *cel.Env, template string, vars map[string]inte
 	}
 
 	return result, nil
+}
+
+// registerActorLink records a link from a bare {{ actor }} mention to the
+// human actor's actorRef. Non-human actors (system, service accounts,
+// controllers) are left as plain text.
+func registerActorLink(collector *linkCollector, text string, vars map[string]interface{}) {
+	if collector == nil || text == "" {
+		return
+	}
+	actorRef, ok := vars["actorRef"].(map[string]interface{})
+	if !ok || actorRef["type"] != "user" {
+		return
+	}
+	collector.addLink(text, actorRef)
 }
 
 // toMap converts an interface to a map[string]interface{}.

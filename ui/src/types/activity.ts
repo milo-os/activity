@@ -14,9 +14,18 @@ import type { ObjectMeta } from './index';
 export type ChangeSource = 'human' | 'system';
 
 /**
- * Actor types in the activity system
+ * Actor types in the activity system.
+ * - user: a person
+ * - serviceaccount: a Milo ServiceAccount
+ * - system: a `system:` identity (platform controller, Kubernetes service account)
+ * - controller: the controller that reported a Kubernetes event
+ * - staff: Datum staff acting in a customer's organization, shown only as "Datum Support"
+ * - machine account: legacy value
  */
-export type ActorType = 'user' | 'machine account' | 'controller';
+export type ActorType = 'user' | 'serviceaccount' | 'system' | 'controller' | 'staff' | 'machine account';
+
+/** Display name for staff actors; the backend records no other identity for them. */
+export const STAFF_ACTOR_NAME = 'Datum Support';
 
 /**
  * Origin types for activity records
@@ -75,15 +84,12 @@ export interface ActivityLink {
   /** The resource to link to when the marker is clicked */
   resource: ResourceRef;
   /**
-   * Human-readable name for the linked entity. Populated server-side for
-   * User-typed links so the UI can render names instead of opaque UIDs.
+   * Human-readable (self-asserted) name of the linked user. Populated
+   * server-side only for links to iam Users (and the actor's own link). The
+   * UI renders it in place of `marker` and shows `marker`, the verified
+   * identity, on hover.
    */
   displayName?: string;
-  /**
-   * Email address of the linked entity, when applicable (User links). The
-   * UI surfaces this in a hover tooltip alongside the UID.
-   */
-  email?: string;
 }
 
 /**
@@ -461,7 +467,7 @@ export const ACTIVITY_FILTER_FIELDS: ActivityFilterField[] = [
     name: 'spec.actor.type',
     type: 'enum',
     description: 'Actor type',
-    enumValues: ['user', 'machine account', 'controller'],
+    enumValues: ['user', 'serviceaccount', 'system', 'controller', 'staff'],
     examples: [
       'spec.actor.type == "user"',
       'spec.actor.type == "controller"',

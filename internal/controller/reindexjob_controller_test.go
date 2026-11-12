@@ -349,3 +349,30 @@ func TestCheckJobStatus(t *testing.T) {
 		assert.Equal(t, int64(0), result.RequeueAfter.Nanoseconds(), "should not requeue for completed job")
 	})
 }
+
+// The controller passes its staff email domains to reindex workers so all
+// components apply the same staff rule.
+func TestBuildJobForReindexJob_PassesStaffEmailDomains(t *testing.T) {
+	t.Parallel()
+
+	reconciler := &ReindexJobReconciler{
+		JobNamespace:       "activity-system",
+		ActivityImage:      "ghcr.io/milo-os/activity:test",
+		NATSURL:            "nats://nats:4222",
+		StaffEmailDomains:  []string{"datum.net", "example.org"},
+		StaffRedactionMode: "domain-only",
+	}
+	job, err := reconciler.buildJobForReindexJob(&v1alpha1.ReindexJob{ObjectMeta: metav1.ObjectMeta{Name: "r"}})
+	require.NoError(t, err)
+	assert.Contains(t, job.Spec.Template.Spec.Containers[0].Args, "--staff-email-domains=datum.net,example.org")
+	assert.Contains(t, job.Spec.Template.Spec.Containers[0].Args, "--staff-redaction-mode=domain-only")
+
+	reconciler.StaffEmailDomains = nil
+	reconciler.StaffRedactionMode = ""
+	job, err = reconciler.buildJobForReindexJob(&v1alpha1.ReindexJob{ObjectMeta: metav1.ObjectMeta{Name: "r"}})
+	require.NoError(t, err)
+	for _, a := range job.Spec.Template.Spec.Containers[0].Args {
+		assert.NotContains(t, a, "--staff-email-domains")
+		assert.NotContains(t, a, "--staff-redaction-mode")
+	}
+}

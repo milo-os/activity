@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -21,6 +24,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"go.miloapis.com/activity/internal/activityprocessor"
 	"go.miloapis.com/activity/internal/controller"
 	"go.miloapis.com/activity/internal/processor"
 	"go.miloapis.com/activity/internal/reindex"
@@ -30,6 +34,11 @@ import (
 
 const (
 	retentionWindow = 60 * 24 * time.Hour
+
+	// reindexUserIndexSyncTimeout bounds how long a re-index waits for the iam
+	// User index to sync. Unless unenriched re-indexing is allowed, the job
+	// fails if the index has not synced by then.
+	reindexUserIndexSyncTimeout = 60 * time.Second
 )
 
 // ReindexWorkerOptions contains configuration for the reindex worker.
@@ -42,21 +51,61 @@ type ReindexWorkerOptions struct {
 	Kubeconfig string
 
 	// NATS configuration (required for publishing activities)
-	NATSURL        string
-	NATSTLSEnabled bool
+	NATSURL         string
+	NATSTLSEnabled  bool
 	NATSTLSCertFile string
 	NATSTLSKeyFile  string
 	NATSTLSCAFile   string
+
+	// AllowUnenriched lets the job run without actor display names when the
+	// iam User index cannot sync. Off by default, so a re-index never
+	// silently replaces enriched history with unenriched activities. Set by
+	// the ACTIVITY_ALLOW_UNENRICHED environment variable or the root-level
+	// --allow-unenriched flag (see addAllowUnenrichedFlag).
+	AllowUnenriched bool
+
+	// StaffEmailDomains are treated as Datum staff while staff membership
+	// cannot be checked (root --staff-email-domains flag).
+	StaffEmailDomains []string
+
+	// StaffRedactionMode is "required" or "domain-only" (root
+	// --staff-redaction-mode flag).
+	StaffRedactionMode string
 
 	Logs *logsapi.LoggingConfiguration
 }
 
 // NewReindexWorkerOptions creates options with default values.
 func NewReindexWorkerOptions() *ReindexWorkerOptions {
+	allow, _ := strconv.ParseBool(os.Getenv(allowUnenrichedEnv))
 	return &ReindexWorkerOptions{
-		Logs: logsapi.NewLoggingConfiguration(),
+		AllowUnenriched: allow,
+		Logs:            logsapi.NewLoggingConfiguration(),
 	}
 }
+
+const (
+	// allowUnenrichedFlag and allowUnenrichedEnv opt a re-index into running
+	// without actor display names.
+	allowUnenrichedFlag = "allow-unenriched"
+	allowUnenrichedEnv  = "ACTIVITY_ALLOW_UNENRICHED"
+)
+
+// addAllowUnenrichedFlag registers --allow-unenriched as a persistent flag on
+// the root command. The controller places job template args before the
+// reindex-worker subcommand, and cobra can only tell that a bare flag in that
+// position takes no value if the root command knows it is a bool; registered
+// on the subcommand alone, "--allow-unenriched reindex-worker" would consume
+// "reindex-worker" as the flag's value.
+func addAllowUnenrichedFlag(root *cobra.Command) {
+	root.PersistentFlags().Bool(allowUnenrichedFlag, false,
+		"reindex-worker only: re-index without actor display names if the iam User index cannot sync. "+
+			"By default the job fails instead, so enriched history is never overwritten with unenriched activities. "+
+			"Also settable with "+allowUnenrichedEnv+"=true.")
+}
+
+// runReindexWorker is RunReindexWorker, replaceable in tests.
+var runReindexWorker = RunReindexWorker
 
 // AddFlags adds reindex worker flags to the command.
 func (o *ReindexWorkerOptions) AddFlags(fs *pflag.FlagSet) {
@@ -92,7 +141,20 @@ It should not be run manually.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.JobName = args[0]
-			return RunReindexWorker(cmd.Context(), options)
+			if f := cmd.Flags().Lookup(allowUnenrichedFlag); f != nil && f.Changed {
+				v, err := strconv.ParseBool(f.Value.String())
+				if err != nil {
+					return fmt.Errorf("invalid --%s: %w", allowUnenrichedFlag, err)
+				}
+				options.AllowUnenriched = v
+			}
+			options.StaffEmailDomains = staffEmailDomains(cmd)
+			mode, err := staffRedactionMode(cmd)
+			if err != nil {
+				return err
+			}
+			options.StaffRedactionMode = mode
+			return runReindexWorker(cmd.Context(), options)
 		},
 	}
 
@@ -143,12 +205,42 @@ func RunReindexWorker(ctx context.Context, options *ReindexWorkerOptions) error 
 	}
 
 	// Fetch the ReindexJob resource
-	var job v1alpha1.ReindexJob
-	if err := cl.Get(ctx, types.NamespacedName{Name: options.JobName}, &job); err != nil {
-		return fmt.Errorf("failed to fetch ReindexJob %s: %w", options.JobName, err)
+	loaded, finished, err := fetchActiveReindexJob(ctx, cl, options.JobName)
+	if err != nil {
+		return err
 	}
+	if finished {
+		return nil
+	}
+	job := *loaded
 
-	klog.InfoS("Loaded ReindexJob", "name", job.Name, "generation", job.Generation)
+	// Start the enrichment indexes now so they sync while NATS connects.
+	// Re-indexed activities get the same actor display names as live ones,
+	// taken from each user's current User record, and staff membership is
+	// evaluated as it is now.
+	var enrichment processor.Enrichment
+	var indexes enrichmentWaiters
+	if userIndex, err := activityprocessor.NewUserIndex(config); err != nil {
+		indexes.users = failedIndex{err: err}
+	} else {
+		userIndex.Start(ctx)
+		enrichment.Users = userIndex
+		indexes.users = userIndex
+	}
+	var staffIndex *activityprocessor.StaffIndex
+	if options.StaffRedactionMode == activityprocessor.StaffRedactionDomainOnly {
+		activityprocessor.WarnDomainOnlyStaffRedaction("reindex-worker", activityprocessor.ResolveStaffEmailDomains(options.StaffEmailDomains))
+		staffIndex = activityprocessor.NewDomainOnlyStaffIndex(options.StaffEmailDomains)
+		indexes.staff = staffIndex
+	} else if staffIndex, err = activityprocessor.NewStaffIndex(config, options.StaffEmailDomains); err != nil {
+		staffIndex = activityprocessor.NewUnavailableStaffIndex(options.StaffEmailDomains)
+		indexes.staff = failedIndex{err: err}
+	} else {
+		staffIndex.Start(ctx)
+		indexes.staff = staffIndex
+	}
+	// Even unsynced, the staff index fails closed by email domain.
+	enrichment.Staff = staffIndex
 
 	// Initialize NATS JetStream connection
 	klog.InfoS("Connecting to NATS", "url", options.NATSURL)
@@ -168,6 +260,14 @@ func RunReindexWorker(ctx context.Context, options *ReindexWorkerOptions) error 
 		return fmt.Errorf("failed to get JetStream context: %w", err)
 	}
 
+	// Activities are replaced by name, so re-indexing without the User index
+	// would strip display names from history (allowed only with the opt-out),
+	// and re-indexing without the staff indexes could disclose staff (never
+	// allowed).
+	if err := enforceEnrichment(ctx, cl, &job, indexes, reindexUserIndexSyncTimeout, options.AllowUnenriched); err != nil {
+		return err
+	}
+
 	// Update status to Running
 	if err := updateJobPhase(ctx, cl, &job, v1alpha1.ReindexJobRunning, "Re-indexing in progress"); err != nil {
 		return fmt.Errorf("failed to update status to Running: %w", err)
@@ -184,6 +284,8 @@ func RunReindexWorker(ctx context.Context, options *ReindexWorkerOptions) error 
 
 	// Create reindexer
 	reindexer := reindex.NewReindexer(cl, js, kindResolver, resourceResolver)
+
+	reindexer.Enrichment = enrichment
 
 	// Set up progress callback to update ReindexJob status
 	reindexer.OnProgress = func(progress reindex.Progress) {
@@ -305,6 +407,105 @@ func RunReindexWorker(ctx context.Context, options *ReindexWorkerOptions) error 
 	}
 
 	return nil
+}
+
+// fetchActiveReindexJob loads the ReindexJob. finished is true when the job
+// has already Succeeded or Failed: the Job may restart this pod
+// (BackoffLimit, RestartPolicyOnFailure) after the worker finished, and a
+// terminal ReindexJob is final, so the worker must exit cleanly without
+// touching its status. That keeps a Failed job from flipping back to Running.
+func fetchActiveReindexJob(ctx context.Context, cl client.Client, name string) (job *v1alpha1.ReindexJob, finished bool, err error) {
+	job = &v1alpha1.ReindexJob{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: name}, job); err != nil {
+		return nil, false, fmt.Errorf("failed to fetch ReindexJob %s: %w", name, err)
+	}
+	klog.InfoS("Loaded ReindexJob", "name", job.Name, "generation", job.Generation)
+	if isTerminalReindexJob(job) {
+		klog.InfoS("ReindexJob already finished; exiting without changes", "name", job.Name, "phase", job.Status.Phase)
+		return job, true, nil
+	}
+	return job, false, nil
+}
+
+// isTerminalReindexJob reports whether the job has already Succeeded or Failed.
+func isTerminalReindexJob(job *v1alpha1.ReindexJob) bool {
+	return job.Status.Phase == v1alpha1.ReindexJobSucceeded || job.Status.Phase == v1alpha1.ReindexJobFailed
+}
+
+// indexWaiter is the part of the enrichment indexes the reindex worker
+// needs; an interface so the decision logic can be tested.
+type indexWaiter interface {
+	WaitForSync(ctx context.Context, timeout time.Duration) error
+}
+
+// enrichmentWaiters are the indexes a re-index waits for.
+type enrichmentWaiters struct {
+	// users is the iam User index (display names). Unenriched re-indexing
+	// may skip it.
+	users indexWaiter
+	// staff are the staff disclosure indexes. They are privacy-critical: a
+	// re-index always waits for them and fails if they do not sync.
+	staff indexWaiter
+}
+
+// waitForEnrichment waits for both index sets concurrently, each for up to
+// timeout. A staff index failure is always returned. A User index failure
+// is returned unless allowUnenriched is set, in which case activities are
+// re-indexed with whatever display names the User index provides.
+func waitForEnrichment(ctx context.Context, w enrichmentWaiters, timeout time.Duration, allowUnenriched bool) error {
+	var userErr, staffErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); userErr = w.users.WaitForSync(ctx, timeout) }()
+	go func() { defer wg.Done(); staffErr = w.staff.WaitForSync(ctx, timeout) }()
+	wg.Wait()
+
+	if staffErr != nil {
+		return fmt.Errorf("staff memberships are unavailable, and re-indexing cannot proceed without them even "+
+			"with unenriched re-indexing allowed: %w", staffErr)
+	}
+	if userErr != nil {
+		if allowUnenriched {
+			klog.InfoS("Re-indexing without actor display names (unenriched re-indexing allowed)", "reason", userErr.Error())
+			return nil
+		}
+		return fmt.Errorf("actor display names are unavailable: %w", userErr)
+	}
+	return nil
+}
+
+// enforceEnrichment waits for the enrichment indexes. When one cannot sync
+// (and, for the User index, unenriched re-indexing is not allowed), it marks
+// the ReindexJob Failed with a message explaining why and returns an error.
+func enforceEnrichment(ctx context.Context, cl client.Client, job *v1alpha1.ReindexJob, w enrichmentWaiters, timeout time.Duration, allowUnenriched bool) error {
+	err := waitForEnrichment(ctx, w, timeout, allowUnenriched)
+	if err == nil {
+		return nil
+	}
+	msg := unenrichedFailureMessage(err)
+	if uerr := updateJobPhase(ctx, cl, job, v1alpha1.ReindexJobFailed, msg); uerr != nil {
+		klog.ErrorS(uerr, "failed to update status to Failed")
+	}
+	return errors.New(msg)
+}
+
+// failedIndex stands in for an index that could not be created.
+type failedIndex struct {
+	err error
+}
+
+func (f failedIndex) WaitForSync(context.Context, time.Duration) error {
+	return fmt.Errorf("%w: %v", activityprocessor.ErrIndexUnavailable, f.err)
+}
+
+// unenrichedFailureMessage is the ReindexJob status message for a job that
+// stopped because actor display names were unavailable.
+func unenrichedFailureMessage(err error) string {
+	return fmt.Sprintf("The job was stopped because %v. Grant get, list and watch on users.iam.miloapis.com, "+
+		"groupmemberships.iam.miloapis.com, organizationmemberships.resourcemanager.miloapis.com and "+
+		"projects.resourcemanager.miloapis.com to the reindex worker. If only display names are unavailable, setting "+
+		allowUnenrichedEnv+"=true on the reindex container in the activity-reindex-job-template ConfigMap lets the job "+
+		"run without them; staff memberships are always required.", err)
 }
 
 // updateJobPhase updates the ReindexJob phase and message, setting CompletedAt for terminal phases.

@@ -34,6 +34,25 @@ the full history for the policies and time range you selected.
 The job runs once and cannot be re-run. To re-process the same time range
 again, create a new ReindexJob.
 
+Re-indexed activities replace the existing ones for the same events, including
+the actor's display name and avatar. These are taken from each user's iam User
+record as it is when the job runs, so a reindex also refreshes display names
+to users' current values. Whether an actor is shown as "Datum Support" is
+likewise decided by staff and organization memberships at the time the job
+runs, with one exception: an activity already recorded as staff access
+("Datum Support") stays redacted, even if the staff member has since joined
+the organization. Before replacing a batch, the job looks up which of its
+activities are already stored with a staff actor and keeps those redacted.
+The converse applies too: an actor not previously shown as staff but
+detected as staff now is redacted. Any over-redaction made while memberships
+were unknown is therefore preserved as well, which is intended. The controller passes
+its `--staff-email-domains` and `--staff-redaction-mode` to each job, so jobs
+apply the same staff rule as the processor; in the `domain-only` mode (dev and
+test-infra only) there are no membership indexes to wait for. If the worker cannot read iam Users, the
+job fails rather than
+replacing enriched activities with unenriched ones; if it cannot read the
+staff memberships, it always fails (see below).
+
 ## Creating a ReindexJob
 
 ### Minimal example
@@ -247,9 +266,38 @@ Common causes:
 - The time range extends beyond the 60-day retention window
 - A policy named in `policySelector.names` does not exist
 - Processing was interrupted due to resource pressure
+- Actor display names are unavailable: the worker could not list iam Users
+  (`get`, `list` and `watch` on `users.iam.miloapis.com` stayed denied for
+  more than about 10 seconds, or the list did not load within 60 seconds).
+  Fix the access, or opt out as described below
+- Staff memberships are unavailable: the worker could not list `staff-users`
+  group memberships, organization memberships or projects
+  (`groupmemberships` in `iam.miloapis.com`, `organizationmemberships` and
+  `projects` in `resourcemanager.miloapis.com`). Without them a re-index could
+  disclose staff identities, so there is no opt-out: fix the access
 
 Failed jobs are not retried automatically. Create a new ReindexJob to try
 again, adjusting the spec to address the root cause.
+
+### Re-indexing without display names
+
+To re-index even when actor display names are unavailable, set
+`ACTIVITY_ALLOW_UNENRICHED=true` on the `reindex` container in the
+`activity-reindex-job-template` ConfigMap:
+
+```yaml
+      containers:
+        - name: reindex
+          env:
+            - name: ACTIVITY_ALLOW_UNENRICHED
+              value: "true"
+```
+
+Adding `--allow-unenriched` to the container's `args` works too. This
+setting lives in the job template, so it applies to every ReindexJob in the
+cluster until you remove it, and activities re-indexed while names are
+unavailable lose any display names they had. The opt-out covers display
+names only: the staff membership indexes must still load, or the job fails.
 
 ## Known limitation: control plane events
 

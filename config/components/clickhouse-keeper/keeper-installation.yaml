@@ -50,19 +50,15 @@ spec:
             whenUnsatisfiable: ScheduleAnyway
             labelSelector:
               matchLabels:
-                clickhouse.altinity.com/chi: activity-clickhouse
-                app.kubernetes.io/part-of: activity.miloapis.com
-                clickhouse.altinity.com/cluster: activity
-                clickhouse.altinity.com/namespace: activity-system
+                clickhouse-keeper.altinity.com/chk: activity-keeper
+                clickhouse-keeper.altinity.com/cluster: activity-keeper
           - maxSkew: 1
             topologyKey: kubernetes.io/hostname
             whenUnsatisfiable: ScheduleAnyway
             labelSelector:
               matchLabels:
-                clickhouse.altinity.com/chi: activity-clickhouse
-                app.kubernetes.io/part-of: activity.miloapis.com
-                clickhouse.altinity.com/cluster: activity
-                clickhouse.altinity.com/namespace: activity-system
+                clickhouse-keeper.altinity.com/chk: activity-keeper
+                clickhouse-keeper.altinity.com/cluster: activity-keeper
     volumeClaimTemplates:
       - name: clickhouse-keeper
         spec:

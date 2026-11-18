@@ -104,7 +104,7 @@ tasks:
         fi
         BUILD_DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "unknown")
 
-        go build \
+        go build -trimpath \
           -ldflags="-X 'go.miloapis.com/activity/internal/version.Version=${VERSION}' \
                     -X 'go.miloapis.com/activity/internal/version.GitCommit=${GIT_COMMIT}' \
                     -X 'go.miloapis.com/activity/internal/version.GitTreeState=${GIT_TREE_STATE}' \
@@ -119,6 +119,22 @@ tasks:
       - build:activitytool
     cmds:
       - "{{.TOOL_DIR}}/activitytool test --policies examples/basic-kubernetes test/policies"
+
+  test:policies:docker:
+    desc: Run the example ActivityPolicy tests inside a locally built activitytool image, the way consumer repos and CI run them
+    deps:
+      - dev:build-activitytool
+    cmds:
+      - |
+        set -eu
+        root=$(git rev-parse --show-toplevel)
+        prefix=$(git rev-parse --show-prefix)
+        # Offline, read-only, non-root, repository root mounted at /work.
+        docker run --rm --pull never --network none --user 65532:65532 --read-only \
+          --cap-drop ALL --security-opt no-new-privileges \
+          --volume "$root:/work:ro" --workdir "/work/$prefix" \
+          "{{.ACTIVITYTOOL_IMAGE_NAME}}:{{.ACTIVITY_IMAGE_TAG}}" \
+          test --policies examples/basic-kubernetes test/policies
 
   # Development tasks
   dev:build:

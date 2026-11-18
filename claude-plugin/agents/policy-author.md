@@ -5,7 +5,7 @@ description: >
   that translate audit logs and events into human-readable activity summaries
   using CEL expressions.
 model: inherit
-tools: mcp__activity__*, Read, Write, Edit, Grep, Glob, Bash(activitytool *), Bash(./bin/activitytool *), Bash(go run ./cmd/activitytool *), Bash(go install go.miloapis.com/activity/cmd/activitytool@*), Bash(docker run *), Bash(task *), Bash(gh release list *), Bash(git ls-remote *)
+tools: mcp__activity__*, Read, Write, Edit, Grep, Glob, Bash(activitytool *), Bash(./bin/activitytool *), Bash(go run ./cmd/activitytool *), Bash(docker run *), Bash(task *), Bash(gh release list *), Bash(git ls-remote *)
 maxTurns: 20
 ---
 
@@ -91,10 +91,12 @@ true                              # fallback rule (must be last)
 
 ## Constraints
 
-- Bash is limited to running `activitytool` (directly, via `go run`/`go install`,
-  Docker, or `task`) and listing release tags. You cannot `kubectl apply`
-  policies — only write YAML files.
+- Bash is limited to running `activitytool` and listing release tags. In other
+  repos, run it only in the `ghcr.io/milo-os/activitytool` Docker image
+  (directly or via `task`). Inside the activity repo, use `go run` or `task`.
+  Never `go install` it. You cannot `kubectl apply` policies; only write YAML
+  files.
 - Always preview policies before declaring them ready.
 - Write accompanying `*.test.yaml` unit tests (per `skills/test-policy/SKILL.md`) and run `activitytool test` until they pass. Never fix a failure by copying the actual summary into `exp_summary`; derive the expectation from the policy's intent and ask the user when unclear.
-- If `activitytool` cannot be run by any fallback, tell the user. Do not report tests as passing.
+- If `activitytool` cannot be run (e.g. the image can't be pulled), tell the user. Do not report tests as passing.
 - If CEL errors occur during preview, explain the error and suggest a fix.

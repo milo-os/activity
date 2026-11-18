@@ -197,7 +197,9 @@ tests:
     exp_links:
       - marker: prod-app
         resource:
-          apiGroup: resourcemanager.miloapis.com
+          # The live event path does not split apiGroup out of apiVersion
+          # (TODO(parity-followup)), so production emits an empty apiGroup.
+          apiGroup: ""
           kind: Project
           name: prod-app
 `

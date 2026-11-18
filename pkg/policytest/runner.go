@@ -1,62 +1,60 @@
 package policytest
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
-	"github.com/gobuffalo/flect"
 	sigsyaml "sigs.k8s.io/yaml"
 
-	"go.miloapis.com/activity/internal/processor"
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 )
 
-// RunTestSuite validates policies from PolicyPaths and TestFiles, runs every
-// unit test case, and reports coverage gaps.
+// RunTestSuite validates policies from PolicyPaths and test files, runs every
+// unit test case, and reports policy and rule coverage.
 func RunTestSuite(opts SuiteOptions) (*SuiteResult, error) {
 	result := &SuiteResult{
-		FailOnUntested: opts.FailOnUntested,
+		FailOnUntested:      opts.FailOnUntested,
+		FailOnUntestedRules: opts.FailOnUntestedRules,
 	}
 
-	suitePolicies, suiteIssues := LoadPoliciesFromPaths(opts.PolicyPaths)
-	result.ValidationIssues = append(result.ValidationIssues, suiteIssues...)
+	// Issues are only ever deduplicated when identical (the same file loaded
+	// twice produces the same issue twice); nothing else is dropped.
+	seenIssues := make(map[ValidationIssue]bool)
+	addIssues := func(issues []ValidationIssue) {
+		for _, issue := range issues {
+			if seenIssues[issue] {
+				continue
+			}
+			seenIssues[issue] = true
+			result.ValidationIssues = append(result.ValidationIssues, issue)
+		}
+	}
+
+	set := newPolicySet()
+	register := func(loaded []LoadedPolicy) []LoadedPolicy {
+		canonical, added, dupIssues := set.add(loaded)
+		addIssues(dupIssues)
+		addIssues(ValidatePolicies(added))
+		return canonical
+	}
+
+	suiteLoaded, suiteIssues := LoadPoliciesFromPaths(opts.PolicyPaths)
+	addIssues(suiteIssues)
+	suitePolicies := register(suiteLoaded)
 
 	testFiles, err := DiscoverTestFiles(opts.TestPaths)
 	if err != nil {
 		return nil, err
 	}
 
-	// Track all unique policies seen across --policies and test file policy_files.
-	allPolicies := make([]LoadedPolicy, 0, len(suitePolicies))
-	seenPolicyKeys := make(map[string]struct{})
-	addUniquePolicies := func(items []LoadedPolicy) []LoadedPolicy {
-		var added []LoadedPolicy
-		for _, item := range items {
-			key := policyIdentityKey(item)
-			if _, ok := seenPolicyKeys[key]; ok {
-				continue
-			}
-			seenPolicyKeys[key] = struct{}{}
-			allPolicies = append(allPolicies, item)
-			added = append(added, item)
-		}
-		return added
-	}
-
-	addUniquePolicies(suitePolicies)
-	result.ValidationIssues = append(result.ValidationIssues, ValidatePolicies(suitePolicies)...)
-
-	testCounts := make(map[string]int)
-
+	cov := newCoverage()
 	for _, tfPath := range testFiles {
-		fileRes, filePolicies, fileIssues := runSingleTestFile(tfPath, suitePolicies, testCounts)
-		newlyAdded := addUniquePolicies(filePolicies)
-		result.ValidationIssues = append(result.ValidationIssues, deduplicateIssues(fileIssues, newlyAdded, filePolicies)...)
+		fileRes := runTestFile(tfPath, suitePolicies, set, addIssues, register, cov)
 		result.Files = append(result.Files, fileRes)
-
 		for _, tr := range fileRes.Results {
 			result.TotalTests++
 			if tr.Passed {
@@ -67,101 +65,154 @@ func RunTestSuite(opts SuiteOptions) (*SuiteResult, error) {
 		}
 	}
 
-	invalidPolicies := make(map[string]bool)
-	for _, issue := range result.ValidationIssues {
-		if issue.Severity == "error" && issue.PolicyName != "" {
-			invalidPolicies[issue.PolicyName] = true
-		}
-	}
-
-	for _, lp := range allPolicies {
+	result.Policies = BuildPolicyReports(set.all, result.ValidationIssues)
+	for i, lp := range set.all {
 		p := lp.Policy
-		count := testCounts[policyCoverageKey(p)]
-		tested := count > 0
-		if !tested {
-			result.UntestedPolicies = append(result.UntestedPolicies, p.Name)
+		report := &result.Policies[i]
+		report.TestCount = cov.tests[p.Name]
+		if p.Name == "" {
+			report.TestCount = 0
 		}
-		result.TotalRules += len(p.Spec.AuditRules) + len(p.Spec.EventRules)
-		result.Policies = append(result.Policies, PolicyReport{
-			Name:       p.Name,
-			Source:     lp.Source,
-			APIGroup:   p.Spec.Resource.APIGroup,
-			Kind:       p.Spec.Resource.Kind,
-			AuditRules: len(p.Spec.AuditRules),
-			EventRules: len(p.Spec.EventRules),
-			Tested:     tested,
-			TestCount:  count,
-			Valid:      !invalidPolicies[p.Name],
-		})
+		report.Tested = report.TestCount > 0
+		if !report.Tested {
+			result.UntestedPolicies = append(result.UntestedPolicies, lp.DisplayName())
+		}
+
+		ruleSets := []struct {
+			ruleType string
+			rules    []v1alpha1.ActivityPolicyRule
+		}{{"audit", p.Spec.AuditRules}, {"event", p.Spec.EventRules}}
+		for _, rs := range ruleSets {
+			for _, rule := range rs.rules {
+				result.TotalRules++
+				if p.Name != "" && cov.matched[p.Name][rs.ruleType+"/"+rule.Name] {
+					result.TestedRules++
+					continue
+				}
+				report.UntestedRules = append(report.UntestedRules, rs.ruleType+"/"+rule.Name)
+				result.UntestedRules = append(result.UntestedRules, UntestedRule{
+					Policy:   lp.DisplayName(),
+					RuleType: rs.ruleType,
+					Rule:     rule.Name,
+				})
+			}
+		}
 	}
-	result.TotalPolicies = len(allPolicies)
+	result.TotalPolicies = len(set.all)
 
 	return result, nil
 }
 
-func runSingleTestFile(
+// coverage counts, per policy name, the tests that evaluated the policy and
+// the rules that matched at least once.
+type coverage struct {
+	tests   map[string]int
+	matched map[string]map[string]bool
+}
+
+func newCoverage() *coverage {
+	return &coverage{
+		tests:   make(map[string]int),
+		matched: make(map[string]map[string]bool),
+	}
+}
+
+func (c *coverage) record(ev *Evaluation) {
+	seen := make(map[string]bool)
+	for _, name := range ev.Evaluated {
+		if !seen[name] {
+			seen[name] = true
+			c.tests[name]++
+		}
+	}
+	if ev.Matched {
+		if c.matched[ev.MatchedPolicy] == nil {
+			c.matched[ev.MatchedPolicy] = make(map[string]bool)
+		}
+		c.matched[ev.MatchedPolicy][ev.MatchedRuleType+"/"+ev.MatchedRule] = true
+	}
+}
+
+// parseTestDocuments splits a test file into its YAML documents and decodes
+// each non-empty one as a test group. Document indexes are 1-based.
+func parseTestDocuments(raw []byte) (groups []TestFile, docIndexes []int, errs []string) {
+	docs, err := splitYAMLDocuments(raw)
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("failed to read YAML: %v", err))
+	}
+	for i, doc := range docs {
+		if len(bytes.TrimSpace(doc)) == 0 {
+			continue
+		}
+		var probe any
+		if err := sigsyaml.Unmarshal(doc, &probe); err == nil && probe == nil {
+			continue // comment-only document
+		}
+		var tf TestFile
+		if err := sigsyaml.UnmarshalStrict(doc, &tf); err != nil {
+			errs = append(errs, fmt.Sprintf("document %d: failed to parse test file: %v", i+1, err))
+			continue
+		}
+		if len(tf.Tests) == 0 {
+			errs = append(errs, fmt.Sprintf("document %d: no tests defined", i+1))
+			continue
+		}
+		groups = append(groups, tf)
+		docIndexes = append(docIndexes, i+1)
+	}
+	return groups, docIndexes, errs
+}
+
+func runTestFile(
 	tfPath string,
 	suitePolicies []LoadedPolicy,
-	testCounts map[string]int,
-) (FileResult, []LoadedPolicy, []ValidationIssue) {
+	set *policySet,
+	addIssues func([]ValidationIssue),
+	register func([]LoadedPolicy) []LoadedPolicy,
+	cov *coverage,
+) FileResult {
 	fileRes := FileResult{File: tfPath}
 
 	raw, err := os.ReadFile(tfPath)
 	if err != nil {
 		fileRes.Error = fmt.Sprintf("failed to read test file: %v", err)
-		return fileRes, nil, nil
+		return fileRes
 	}
 
-	var tf TestFile
-	if err := sigsyaml.UnmarshalStrict(raw, &tf); err != nil {
-		fileRes.Error = fmt.Sprintf("failed to parse test file: %v", err)
-		return fileRes, nil, nil
+	groups, docIndexes, errs := parseTestDocuments(raw)
+	if len(groups) == 0 && len(errs) == 0 {
+		errs = append(errs, "test file contains no tests")
 	}
+	multiDoc := len(groups)+len(errs) > 1
 
-	policyRefPaths := resolveRelativePaths(filepath.Dir(tfPath), tf.AllPolicyFiles())
-	filePolicies, loadIssues := LoadPoliciesFromPaths(policyRefPaths)
-	valIssues := append(loadIssues, ValidatePolicies(filePolicies)...)
+	for gi, tf := range groups {
+		policyRefPaths := resolveRelativePaths(filepath.Dir(tfPath), tf.AllPolicyFiles())
+		loaded, loadIssues := LoadPoliciesFromPaths(policyRefPaths)
+		addIssues(loadIssues)
+		filePolicies := register(loaded)
 
-	// Prefer policies explicitly listed in the test file; fall back to --policies.
-	candidatePolicies := filePolicies
-	if len(candidatePolicies) == 0 {
-		candidatePolicies = suitePolicies
-	}
-
-	kindLookupPolicies := make([]LoadedPolicy, 0, len(filePolicies)+len(suitePolicies))
-	kindLookupPolicies = append(kindLookupPolicies, filePolicies...)
-	kindLookupPolicies = append(kindLookupPolicies, suitePolicies...)
-	kindResolver := newOfflineKindResolver(kindLookupPolicies)
-
-	for _, tc := range tf.Tests {
-		tr := executeTestCase(tc, candidatePolicies, kindResolver, testCounts)
-		fileRes.Results = append(fileRes.Results, tr)
-	}
-
-	return fileRes, filePolicies, valIssues
-}
-
-// deduplicateIssues avoids repeating policy validation errors when a test file's
-// policy_files loads the same policies already loaded from --policies.
-func deduplicateIssues(fileIssues []ValidationIssue, newlyAdded, filePolicies []LoadedPolicy) []ValidationIssue {
-	if len(newlyAdded) == len(filePolicies) {
-		return fileIssues
-	}
-	allowedNames := make(map[string]struct{}, len(newlyAdded))
-	for _, lp := range newlyAdded {
-		allowedNames[lp.Policy.Name] = struct{}{}
-	}
-	var filtered []ValidationIssue
-	for _, issue := range fileIssues {
-		if issue.PolicyName == "" {
-			filtered = append(filtered, issue)
-			continue
+		// Prefer policies explicitly listed in the test group; fall back to --policies.
+		candidates := filePolicies
+		if len(tf.AllPolicyFiles()) == 0 {
+			candidates = suitePolicies
 		}
-		if _, ok := allowedNames[issue.PolicyName]; ok {
-			filtered = append(filtered, issue)
+
+		evaluator := NewEvaluator(candidates, EvaluatorOptions{
+			ResourceKinds: tf.ResourceKinds,
+			KindHints:     set.all,
+		})
+
+		for _, tc := range tf.Tests {
+			tr := executeTestCase(tc, evaluator, cov)
+			if multiDoc {
+				tr.Document = docIndexes[gi]
+			}
+			fileRes.Results = append(fileRes.Results, tr)
 		}
 	}
-	return filtered
+
+	fileRes.Error = strings.Join(errs, "; ")
+	return fileRes
 }
 
 func resolveRelativePaths(baseDir string, refs []string) []string {
@@ -176,70 +227,152 @@ func resolveRelativePaths(baseDir string, refs []string) []string {
 	return resolved
 }
 
-func executeTestCase(
-	tc TestCase,
-	policies []LoadedPolicy,
-	kindResolver processor.KindResolver,
-	testCounts map[string]int,
-) TestResult {
+// testResultBuilder accumulates failures in both text and structured form.
+type testResultBuilder struct {
+	tr *TestResult
+}
+
+func (b testResultBuilder) fail(field, expected, actual, message string) {
+	b.tr.Failures = append(b.tr.Failures, message)
+	b.tr.FailureDetails = append(b.tr.FailureDetails, FailureDetail{
+		Field:    field,
+		Expected: expected,
+		Actual:   actual,
+		Message:  message,
+	})
+}
+
+func (b testResultBuilder) mismatch(field, expected, actual string) {
+	b.fail(field, expected, actual, fmt.Sprintf("%s mismatch: exp %q, got %q", field, expected, actual))
+}
+
+func executeTestCase(tc TestCase, ev *Evaluator, cov *coverage) TestResult {
 	tr := TestResult{
 		Name:   tc.Name,
 		Policy: tc.Policy,
 	}
+	b := testResultBuilder{tr: &tr}
+	finish := func() TestResult {
+		tr.Passed = len(tr.Failures) == 0
+		return tr
+	}
 
 	if strings.TrimSpace(tc.Name) == "" {
-		tr.Failures = append(tr.Failures, "test case is missing required 'name' field")
-		return tr
+		b.fail("test", "", "", "test case is missing required 'name' field")
+		return finish()
 	}
-
 	if tc.Audit == nil && len(tc.Event) == 0 {
-		tr.Failures = append(tr.Failures, "test case must specify either 'audit' or 'event'")
-		return tr
+		b.fail("test", "", "", "test case must specify either 'audit' or 'event'")
+		return finish()
 	}
 	if tc.Audit != nil && len(tc.Event) > 0 {
-		tr.Failures = append(tr.Failures, "test case must not specify both 'audit' and 'event'")
-		return tr
+		b.fail("test", "", "", "test case must not specify both 'audit' and 'event'")
+		return finish()
 	}
 
 	exp := normalizeExpectations(tc)
-	if !exp.NoMatch && !hasPositiveAssertion(exp) {
-		tr.Failures = append(tr.Failures, "test case has no assertions (set exp_summary, exp_rule, exp_links, ..., or exp_no_match: true)")
-		return tr
+	positive := positiveAssertionFields(exp)
+	if exp.NoMatch && len(positive) > 0 {
+		b.fail("test", "", "", fmt.Sprintf(
+			"exp_no_match: true cannot be combined with positive assertions (%s); remove one or the other",
+			strings.Join(positive, ", ")))
+		return finish()
+	}
+	if !exp.NoMatch && len(positive) == 0 {
+		b.fail("test", "", "", "test case has no assertions (set exp_summary, exp_rule, exp_links, ..., or exp_no_match: true)")
+		return finish()
 	}
 
-	target, err := selectTargetPolicy(tc, policies)
-	if err != nil {
-		tr.Failures = append(tr.Failures, err.Error())
-		return tr
+	var summaryRegex *regexp.Regexp
+	if exp.SummaryRegex != "" {
+		re, err := regexp.Compile(exp.SummaryRegex)
+		if err != nil {
+			b.fail("summary_regex", exp.SummaryRegex, "", fmt.Sprintf("invalid exp_summary_regex %q: %v", exp.SummaryRegex, err))
+			return finish()
+		}
+		summaryRegex = re
 	}
-	tr.Policy = target.Name
-	testCounts[policyCoverageKey(target)]++
 
-	var evalRes *processor.EvaluationResult
+	available := ev.PolicyNames()
+	if len(available) == 0 {
+		b.fail("routing", "", "", "no policies available (add policy_files to test file or pass --policies)")
+		return finish()
+	}
+
+	only := ""
+	if tc.Policy != "" {
+		matches := ev.ResolvePolicy(tc.Policy)
+		switch {
+		case len(matches) == 0:
+			b.fail("routing", tc.Policy, "", fmt.Sprintf("policy %q not found (available: %s)", tc.Policy, strings.Join(available, ", ")))
+			return finish()
+		case len(matches) > 1:
+			names := make([]string, 0, len(matches))
+			for _, m := range matches {
+				names = append(names, m.Policy.Name)
+			}
+			b.fail("routing", tc.Policy, "", fmt.Sprintf("policy reference %q is ambiguous (%s); use the policy's metadata.name", tc.Policy, strings.Join(names, ", ")))
+			return finish()
+		}
+		only = matches[0].Policy.Name
+		tr.Policy = only
+	}
+
+	var res *Evaluation
+	var err error
 	if tc.Audit != nil {
-		evalRes, err = processor.EvaluateAuditRules(&target.Spec, tc.Audit, kindResolver)
+		res, err = ev.EvaluateAudit(tc.Audit, only)
 	} else {
-		evalRes, err = processor.EvaluateEventRules(&target.Spec, tc.Event, kindResolver)
+		res, err = ev.EvaluateEvent(tc.Event, only)
 	}
 	if err != nil {
-		tr.Failures = append(tr.Failures, fmt.Sprintf("evaluation error: %v", err))
-		return tr
+		b.fail("routing", only, "", err.Error())
+		return finish()
+	}
+	tr.Warnings = append(tr.Warnings, res.Warnings...)
+
+	if res.Ignored != "" || len(res.Candidates) == 0 {
+		msg := res.Ignored
+		if msg == "" {
+			msg = fmt.Sprintf("no loaded policy targets %s (loaded policies: %s); production ignores this input",
+				res.Target, strings.Join(available, ", "))
+		}
+		if exp.NoMatch {
+			tr.Warnings = append(tr.Warnings, TestWarning{Type: WarningNoTarget, Message: msg})
+		} else {
+			b.fail("routing", "", res.Target, msg)
+		}
+		return finish()
 	}
 
-	tr.Matched = evalRes.MatchedRuleIndex >= 0
-	tr.MatchedRule = evalRes.MatchedRuleName
-	if evalRes.Activity != nil {
-		tr.ActualSummary = evalRes.Activity.Spec.Summary
+	cov.record(res)
+	tr.EvaluatedPolicies = res.Evaluated
+	tr.Matched = res.Matched
+	tr.MatchedPolicy = res.MatchedPolicy
+	tr.MatchedRule = res.MatchedRule
+	if tr.Policy == "" {
+		tr.Policy = res.MatchedPolicy
+	}
+	if res.Activity != nil {
+		tr.ActualSummary = res.Activity.Spec.Summary
 	}
 
-	tr.Failures = verifyExpectations(exp, evalRes)
-	tr.Passed = len(tr.Failures) == 0
-	return tr
+	for _, e := range res.Errors {
+		msg := "evaluation error: " + e.String()
+		if e.Expression != "" {
+			msg += "\nexpression: " + e.Expression
+		}
+		b.fail("evaluation", "", "", msg)
+	}
+
+	verifyExpectations(b, exp, summaryRegex, res)
+	return finish()
 }
 
 func normalizeExpectations(tc TestCase) ExpectedActivity {
 	exp := ExpectedActivity{
 		NoMatch:         tc.ExpNoMatch,
+		Policy:          tc.ExpPolicy,
 		Rule:            tc.ExpRule,
 		Summary:         tc.ExpSummary,
 		SummaryContains: tc.ExpSummaryContains,
@@ -258,6 +391,9 @@ func normalizeExpectations(tc TestCase) ExpectedActivity {
 	ea := tc.ExpActivity
 	if ea.NoMatch {
 		exp.NoMatch = true
+	}
+	if exp.Policy == "" {
+		exp.Policy = ea.Policy
 	}
 	if exp.Rule == "" {
 		exp.Rule = ea.Rule
@@ -290,298 +426,138 @@ func normalizeExpectations(tc TestCase) ExpectedActivity {
 	return exp
 }
 
-func hasPositiveAssertion(exp ExpectedActivity) bool {
-	return exp.Rule != "" ||
-		exp.Summary != nil ||
-		exp.SummaryContains != "" ||
-		exp.SummaryRegex != "" ||
-		exp.ChangeSource != "" ||
-		exp.Actor != nil ||
-		exp.Resource != nil ||
-		exp.Tenant != nil ||
-		exp.Links != nil
+// positiveAssertionFields lists the match assertions that are set, by their
+// top-level key name (the same fields may also come from exp_activity).
+func positiveAssertionFields(exp ExpectedActivity) []string {
+	var fields []string
+	add := func(set bool, name string) {
+		if set {
+			fields = append(fields, name)
+		}
+	}
+	add(exp.Policy != "", "exp_policy")
+	add(exp.Rule != "", "exp_rule")
+	add(exp.Summary != nil, "exp_summary")
+	add(exp.SummaryContains != "", "exp_summary_contains")
+	add(exp.SummaryRegex != "", "exp_summary_regex")
+	add(exp.ChangeSource != "", "exp_change_source")
+	add(exp.Actor != nil, "exp_actor")
+	add(exp.Resource != nil, "exp_resource")
+	add(exp.Tenant != nil, "exp_tenant")
+	add(exp.Links != nil, "exp_links")
+	return fields
 }
 
-func selectTargetPolicy(tc TestCase, policies []LoadedPolicy) (*v1alpha1.ActivityPolicy, error) {
-	if len(policies) == 0 {
-		return nil, fmt.Errorf("no policies available (add policy_files to test file or pass --policies)")
-	}
-
-	if tc.Policy != "" {
-		for _, lp := range policies {
-			p := lp.Policy
-			if p.Name == tc.Policy ||
-				formatGroupKind(p.Spec.Resource.APIGroup, p.Spec.Resource.Kind) == tc.Policy ||
-				(p.Spec.Resource.APIGroup == "" && p.Spec.Resource.Kind == tc.Policy) {
-				return p, nil
-			}
-		}
-		available := make([]string, 0, len(policies))
-		for _, lp := range policies {
-			available = append(available, lp.Policy.Name)
-		}
-		return nil, fmt.Errorf("policy %q not found (available: %s)", tc.Policy, strings.Join(available, ", "))
-	}
-
-	if len(policies) == 1 {
-		return policies[0].Policy, nil
-	}
-
-	var matches []*v1alpha1.ActivityPolicy
-	if tc.Audit != nil {
-		if tc.Audit.ObjectRef == nil || tc.Audit.ObjectRef.Resource == "" {
-			return nil, fmt.Errorf("multiple policies loaded; set 'policy' or 'audit.objectRef.resource' to select target policy")
-		}
-		apiGroup := tc.Audit.ObjectRef.APIGroup
-		resName := tc.Audit.ObjectRef.Resource
-		for _, lp := range policies {
-			p := lp.Policy
-			if p.Spec.Resource.APIGroup == apiGroup && matchesResourceKind(p.Spec.Resource.Kind, resName) {
-				matches = append(matches, p)
-			}
-		}
-	} else {
-		involved := processor.ResolveInvolvedObject(tc.Event)
-		if involved == nil {
-			return nil, fmt.Errorf("multiple policies loaded; set 'policy' or 'event.regarding' to select target policy")
-		}
-		kind, _ := involved["kind"].(string)
-		apiGroup, _ := involved["apiGroup"].(string)
-		if apiGroup == "" {
-			if apiVersion, ok := involved["apiVersion"].(string); ok {
-				if idx := strings.LastIndex(apiVersion, "/"); idx != -1 {
-					apiGroup = apiVersion[:idx]
-				}
-			}
-		}
-		if kind == "" {
-			return nil, fmt.Errorf("multiple policies loaded; set 'policy' or 'event.regarding.kind' to select target policy")
-		}
-		for _, lp := range policies {
-			p := lp.Policy
-			if p.Spec.Resource.APIGroup == apiGroup && strings.EqualFold(p.Spec.Resource.Kind, kind) {
-				matches = append(matches, p)
-			}
-		}
-	}
-
-	if len(matches) > 1 {
-		var byRuleType []*v1alpha1.ActivityPolicy
-		for _, m := range matches {
-			if tc.Audit != nil && len(m.Spec.AuditRules) > 0 {
-				byRuleType = append(byRuleType, m)
-			} else if tc.Event != nil && len(m.Spec.EventRules) > 0 {
-				byRuleType = append(byRuleType, m)
-			}
-		}
-		if len(byRuleType) == 1 {
-			return byRuleType[0], nil
-		}
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	if len(matches) > 1 {
-		names := make([]string, 0, len(matches))
-		for _, m := range matches {
-			names = append(names, m.Name)
-		}
-		return nil, fmt.Errorf("ambiguous target policy (%s); set 'policy' explicitly", strings.Join(names, ", "))
-	}
-
-	return nil, fmt.Errorf("no loaded policy matches input resource; set 'policy' explicitly")
-}
-
-func formatGroupKind(apiGroup, kind string) string {
-	if apiGroup == "" {
-		return kind
-	}
-	return apiGroup + "/" + kind
-}
-
-func matchesResourceKind(kind, resource string) bool {
-	if kind == "" || resource == "" {
-		return false
-	}
-	lowerKind := strings.ToLower(kind)
-	lowerRes := strings.ToLower(resource)
-	if lowerKind == lowerRes {
-		return true
-	}
-	if strings.ToLower(flect.Pluralize(lowerKind)) == lowerRes {
-		return true
-	}
-	if strings.ToLower(flect.Singularize(lowerRes)) == lowerKind {
-		return true
-	}
-	// Handle PascalCase compounds (e.g. HTTPProxy -> httpproxies) where flect
-	// works better on the original casing before lowercasing.
-	if strings.EqualFold(flect.Pluralize(kind), resource) {
-		return true
-	}
-	return false
-}
-
-func verifyExpectations(exp ExpectedActivity, evalRes *processor.EvaluationResult) []string {
-	matched := evalRes.MatchedRuleIndex >= 0
-
+func verifyExpectations(b testResultBuilder, exp ExpectedActivity, summaryRegex *regexp.Regexp, res *Evaluation) {
 	if exp.NoMatch {
-		if matched {
-			summary := ""
-			if evalRes.Activity != nil {
-				summary = evalRes.Activity.Spec.Summary
-			}
-			return []string{
-				fmt.Sprintf("expected no rule to match, but rule %q matched with summary %q",
-					evalRes.MatchedRuleName, summary),
-			}
+		if res.Matched {
+			b.fail("match", "no match", fmt.Sprintf("%s/%s", res.MatchedPolicy, res.MatchedRule),
+				fmt.Sprintf("expected no rule to match, but policy %q rule %q matched with summary %q",
+					res.MatchedPolicy, res.MatchedRule, res.Activity.Spec.Summary))
 		}
-		return nil
+		return
 	}
 
-	if !matched {
-		return []string{"expected a rule to match, but no rule matched"}
+	if !res.Matched {
+		b.fail("match", "a rule to match", "no match",
+			fmt.Sprintf("expected a rule to match, but no rule matched (evaluated policies: %s)", strings.Join(res.Evaluated, ", ")))
+		return
 	}
 
-	act := evalRes.Activity
-	var failures []string
+	act := res.Activity
 
-	if exp.Rule != "" && evalRes.MatchedRuleName != exp.Rule {
-		failures = append(failures, fmt.Sprintf("rule mismatch:\n  exp: %q\n  got: %q", exp.Rule, evalRes.MatchedRuleName))
+	if exp.Policy != "" && res.MatchedPolicy != exp.Policy {
+		b.fail("policy", exp.Policy, res.MatchedPolicy, fmt.Sprintf("policy mismatch:\n  exp: %q\n  got: %q", exp.Policy, res.MatchedPolicy))
+	}
+
+	if exp.Rule != "" && res.MatchedRule != exp.Rule {
+		b.fail("rule", exp.Rule, res.MatchedRule, fmt.Sprintf("rule mismatch:\n  exp: %q\n  got: %q", exp.Rule, res.MatchedRule))
 	}
 
 	if exp.Summary != nil && act.Spec.Summary != *exp.Summary {
-		failures = append(failures, fmt.Sprintf("summary mismatch:\n  exp: %q\n  got: %q", *exp.Summary, act.Spec.Summary))
+		b.fail("summary", *exp.Summary, act.Spec.Summary, fmt.Sprintf("summary mismatch:\n  exp: %q\n  got: %q", *exp.Summary, act.Spec.Summary))
 	}
 
 	if exp.SummaryContains != "" && !strings.Contains(act.Spec.Summary, exp.SummaryContains) {
-		failures = append(failures, fmt.Sprintf("summary missing substring:\n  exp substring: %q\n  got summary:   %q", exp.SummaryContains, act.Spec.Summary))
+		b.fail("summary_contains", exp.SummaryContains, act.Spec.Summary,
+			fmt.Sprintf("summary missing substring:\n  exp substring: %q\n  got summary:   %q", exp.SummaryContains, act.Spec.Summary))
 	}
 
-	if exp.SummaryRegex != "" {
-		re, err := regexp.Compile(exp.SummaryRegex)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("invalid exp_summary_regex %q: %v", exp.SummaryRegex, err))
-		} else if !re.MatchString(act.Spec.Summary) {
-			failures = append(failures, fmt.Sprintf("summary did not match regex:\n  exp regex:   %q\n  got summary: %q", exp.SummaryRegex, act.Spec.Summary))
-		}
+	if summaryRegex != nil && !summaryRegex.MatchString(act.Spec.Summary) {
+		b.fail("summary_regex", exp.SummaryRegex, act.Spec.Summary,
+			fmt.Sprintf("summary did not match regex:\n  exp regex:   %q\n  got summary: %q", exp.SummaryRegex, act.Spec.Summary))
 	}
 
 	if exp.ChangeSource != "" && act.Spec.ChangeSource != exp.ChangeSource {
-		failures = append(failures, fmt.Sprintf("change_source mismatch: exp %q, got %q", exp.ChangeSource, act.Spec.ChangeSource))
+		b.mismatch("change_source", exp.ChangeSource, act.Spec.ChangeSource)
 	}
 
 	if exp.Actor != nil {
-		failures = append(failures, verifyActor(*exp.Actor, act.Spec.Actor)...)
+		verifyActor(b, *exp.Actor, act.Spec.Actor)
 	}
 
 	if exp.Resource != nil {
-		failures = append(failures, verifyResource("resource", *exp.Resource, act.Spec.Resource)...)
+		verifyResource(b, "resource", *exp.Resource, act.Spec.Resource)
 	}
 
 	if exp.Tenant != nil {
 		if exp.Tenant.Type != "" && act.Spec.Tenant.Type != exp.Tenant.Type {
-			failures = append(failures, fmt.Sprintf("tenant.type mismatch: exp %q, got %q", exp.Tenant.Type, act.Spec.Tenant.Type))
+			b.mismatch("tenant.type", exp.Tenant.Type, act.Spec.Tenant.Type)
 		}
 		if exp.Tenant.Name != nil && act.Spec.Tenant.Name != *exp.Tenant.Name {
-			failures = append(failures, fmt.Sprintf("tenant.name mismatch: exp %q, got %q", *exp.Tenant.Name, act.Spec.Tenant.Name))
+			b.mismatch("tenant.name", *exp.Tenant.Name, act.Spec.Tenant.Name)
 		}
 	}
 
 	if exp.Links != nil {
-		failures = append(failures, verifyLinks(exp.Links, act.Spec.Links)...)
+		verifyLinks(b, exp.Links, act.Spec.Links)
 	}
-
-	return failures
 }
 
-func verifyActor(exp ExpectedActor, got v1alpha1.ActivityActor) []string {
-	var failures []string
-	if exp.Type != "" && got.Type != exp.Type {
-		failures = append(failures, fmt.Sprintf("actor.type mismatch: exp %q, got %q", exp.Type, got.Type))
+func verifyActor(b testResultBuilder, exp ExpectedActor, got v1alpha1.ActivityActor) {
+	check := func(field, want, have string) {
+		if want != "" && have != want {
+			b.mismatch(field, want, have)
+		}
 	}
-	if exp.Name != "" && got.Name != exp.Name {
-		failures = append(failures, fmt.Sprintf("actor.name mismatch: exp %q, got %q", exp.Name, got.Name))
-	}
-	if exp.UID != "" && got.UID != exp.UID {
-		failures = append(failures, fmt.Sprintf("actor.uid mismatch: exp %q, got %q", exp.UID, got.UID))
-	}
-	if exp.Email != "" && got.Email != exp.Email {
-		failures = append(failures, fmt.Sprintf("actor.email mismatch: exp %q, got %q", exp.Email, got.Email))
-	}
-	return failures
+	check("actor.type", exp.Type, got.Type)
+	check("actor.name", exp.Name, got.Name)
+	check("actor.uid", exp.UID, got.UID)
+	check("actor.email", exp.Email, got.Email)
 }
 
-func verifyResource(label string, exp ExpectedResource, got v1alpha1.ActivityResource) []string {
-	var failures []string
+func verifyResource(b testResultBuilder, label string, exp ExpectedResource, got v1alpha1.ActivityResource) {
 	if exp.APIGroup != nil && got.APIGroup != *exp.APIGroup {
-		failures = append(failures, fmt.Sprintf("%s.apiGroup mismatch: exp %q, got %q", label, *exp.APIGroup, got.APIGroup))
+		b.mismatch(label+".apiGroup", *exp.APIGroup, got.APIGroup)
 	}
 	if exp.APIVersion != "" && got.APIVersion != exp.APIVersion {
-		failures = append(failures, fmt.Sprintf("%s.apiVersion mismatch: exp %q, got %q", label, exp.APIVersion, got.APIVersion))
+		b.mismatch(label+".apiVersion", exp.APIVersion, got.APIVersion)
 	}
 	if exp.Kind != "" && got.Kind != exp.Kind {
-		failures = append(failures, fmt.Sprintf("%s.kind mismatch: exp %q, got %q", label, exp.Kind, got.Kind))
+		b.mismatch(label+".kind", exp.Kind, got.Kind)
 	}
 	if exp.Name != "" && got.Name != exp.Name {
-		failures = append(failures, fmt.Sprintf("%s.name mismatch: exp %q, got %q", label, exp.Name, got.Name))
+		b.mismatch(label+".name", exp.Name, got.Name)
 	}
 	if exp.Namespace != nil && got.Namespace != *exp.Namespace {
-		failures = append(failures, fmt.Sprintf("%s.namespace mismatch: exp %q, got %q", label, *exp.Namespace, got.Namespace))
+		b.mismatch(label+".namespace", *exp.Namespace, got.Namespace)
 	}
 	if exp.UID != "" && got.UID != exp.UID {
-		failures = append(failures, fmt.Sprintf("%s.uid mismatch: exp %q, got %q", label, exp.UID, got.UID))
+		b.mismatch(label+".uid", exp.UID, got.UID)
 	}
-	return failures
 }
 
-func verifyLinks(expLinks []ExpectedLink, gotLinks []v1alpha1.ActivityLink) []string {
+func verifyLinks(b testResultBuilder, expLinks []ExpectedLink, gotLinks []v1alpha1.ActivityLink) {
 	if len(expLinks) != len(gotLinks) {
-		return []string{fmt.Sprintf("links count mismatch: exp %d, got %d (%+v)", len(expLinks), len(gotLinks), gotLinks)}
+		b.fail("links", fmt.Sprintf("%d", len(expLinks)), fmt.Sprintf("%d", len(gotLinks)),
+			fmt.Sprintf("links count mismatch: exp %d, got %d (%+v)", len(expLinks), len(gotLinks), gotLinks))
+		return
 	}
-	var failures []string
 	for i, exp := range expLinks {
 		got := gotLinks[i]
 		if exp.Marker != "" && got.Marker != exp.Marker {
-			failures = append(failures, fmt.Sprintf("links[%d].marker mismatch: exp %q, got %q", i, exp.Marker, got.Marker))
+			b.mismatch(fmt.Sprintf("links[%d].marker", i), exp.Marker, got.Marker)
 		}
-		resExp := exp.normalizedResource()
-		failures = append(failures, verifyResource(fmt.Sprintf("links[%d].resource", i), resExp, got.Resource)...)
+		verifyResource(b, fmt.Sprintf("links[%d].resource", i), exp.normalizedResource(), got.Resource)
 	}
-	return failures
-}
-
-func newOfflineKindResolver(policies []LoadedPolicy) processor.KindResolver {
-	byGroupResource := make(map[string]string, len(policies)*2)
-	for _, lp := range policies {
-		p := lp.Policy
-		if p == nil || p.Spec.Resource.Kind == "" {
-			continue
-		}
-		group := strings.ToLower(p.Spec.Resource.APIGroup)
-		kind := p.Spec.Resource.Kind
-		plural := strings.ToLower(flect.Pluralize(kind))
-		byGroupResource[group+"/"+plural] = kind
-		byGroupResource[group+"/"+strings.ToLower(kind)] = kind
-	}
-
-	return func(apiGroup, resource string) (string, error) {
-		key := strings.ToLower(apiGroup) + "/" + strings.ToLower(resource)
-		if kind, ok := byGroupResource[key]; ok {
-			return kind, nil
-		}
-		// Fallback for linked resources not in the loaded policy set (e.g., actorRef or cross-resource links).
-		return flect.Pascalize(flect.Singularize(resource)), nil
-	}
-}
-
-func policyIdentityKey(lp LoadedPolicy) string {
-	return policyCoverageKey(lp.Policy)
-}
-
-func policyCoverageKey(p *v1alpha1.ActivityPolicy) string {
-	if p.Name != "" {
-		return p.Name
-	}
-	return formatGroupKind(p.Spec.Resource.APIGroup, p.Spec.Resource.Kind)
 }

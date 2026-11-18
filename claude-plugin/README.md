@@ -13,9 +13,8 @@ claude plugin install milo-activity@datum-claude-code-plugins
 The `activity` binary must be on your PATH and configured as an MCP server
 separately for live cluster tools; see [docs/guides/mcp-server.md](../docs/guides/mcp-server.md).
 Offline policy validation and unit testing use `activitytool` (see
-[docs/guides/testing-policies.md](../docs/guides/testing-policies.md)), available
-as the `ghcr.io/milo-os/activitytool` container image or via
-`go install go.miloapis.com/activity/cmd/activitytool@latest`.
+[docs/guides/testing-policies.md](../docs/guides/testing-policies.md)), which
+other repositories run as the `ghcr.io/milo-os/activitytool` container image.
 
 ## Skills
 

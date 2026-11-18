@@ -3,19 +3,33 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 
 	"go.miloapis.com/activity/internal/version"
 	"go.miloapis.com/activity/pkg/policytest"
 )
 
 func main() {
+	silenceKlog()
 	os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// silenceKlog stops production packages (policy compilation) from logging to
+// stderr; everything relevant is reported through the tool's own output.
+func silenceKlog() {
+	fs := flag.NewFlagSet("klog", flag.ContinueOnError)
+	klog.InitFlags(fs)
+	_ = fs.Set("logtostderr", "false")
+	_ = fs.Set("alsologtostderr", "false")
+	_ = fs.Set("stderrthreshold", "FATAL")
+	klog.SetOutput(io.Discard)
 }
 
 type exitError struct {
@@ -130,35 +144,16 @@ Examples:
 				return &exitError{code: 2, err: fmt.Errorf("at least one policy path is required")}
 			}
 
-			policies, loadIssues := policytest.LoadPoliciesFromPaths(paths)
-			valIssues := policytest.ValidatePolicies(policies)
-			allIssues := append(loadIssues, valIssues...)
+			loaded, loadIssues := policytest.LoadPoliciesFromPaths(paths)
+			policies, dupIssues := policytest.DeduplicatePolicies(loaded)
+			allIssues := append(loadIssues, dupIssues...)
+			allIssues = append(allIssues, policytest.ValidatePolicies(policies)...)
 
-			invalidPolicies := make(map[string]bool)
-			hasErrors := false
-			for _, issue := range allIssues {
-				if issue.Severity == "error" {
-					hasErrors = true
-					if issue.PolicyName != "" {
-						invalidPolicies[issue.PolicyName] = true
-					}
-				}
-			}
-
+			hasErrors := countErrors(allIssues) > 0
+			reports := policytest.BuildPolicyReports(policies, allIssues)
 			totalRules := 0
-			reports := make([]policytest.PolicyReport, 0, len(policies))
-			for _, lp := range policies {
-				p := lp.Policy
-				totalRules += len(p.Spec.AuditRules) + len(p.Spec.EventRules)
-				reports = append(reports, policytest.PolicyReport{
-					Name:       p.Name,
-					Source:     lp.Source,
-					APIGroup:   p.Spec.Resource.APIGroup,
-					Kind:       p.Spec.Resource.Kind,
-					AuditRules: len(p.Spec.AuditRules),
-					EventRules: len(p.Spec.EventRules),
-					Valid:      !invalidPolicies[p.Name],
-				})
+			for _, r := range reports {
+				totalRules += r.AuditRules + r.EventRules
 			}
 
 			if len(policies) == 0 && !hasErrors && !allowEmpty {
@@ -207,6 +202,7 @@ type testOutput struct {
 func newTestCommand(stdout, stderr io.Writer) *cobra.Command {
 	var policyPaths []string
 	var failOnUntested bool
+	var failOnUntestedRules bool
 	var allowEmpty bool
 	var outputFormat string
 
@@ -238,9 +234,10 @@ Examples:
 			}
 
 			res, err := policytest.RunTestSuite(policytest.SuiteOptions{
-				TestPaths:      testPaths,
-				PolicyPaths:    policyPaths,
-				FailOnUntested: failOnUntested,
+				TestPaths:           testPaths,
+				PolicyPaths:         policyPaths,
+				FailOnUntested:      failOnUntested,
+				FailOnUntestedRules: failOnUntestedRules,
 			})
 			if err != nil {
 				return &exitError{code: 2, err: err}
@@ -279,15 +276,20 @@ Examples:
 
 	cmd.Flags().StringSliceVar(&policyPaths, "policies", nil, "Policy files, directories, or kustomizations to validate and include in coverage")
 	cmd.Flags().BoolVar(&failOnUntested, "fail-on-untested", false, "Fail if any loaded policy has no unit tests")
+	cmd.Flags().BoolVar(&failOnUntestedRules, "fail-on-untested-rules", false, "Fail if any rule of a loaded policy is never matched by a unit test")
 	cmd.Flags().BoolVar(&allowEmpty, "allow-empty", false, "Exit 0 when no policies or tests are found")
 	cmd.Flags().StringVarP(&outputFormat, "output", "o", "text", "Output format: text or json")
 
 	return cmd
 }
 
+// stripOptionalNoun drops a leading "policies"/"rules" noun (promtool style),
+// unless a file or directory with that name exists, in which case it is a path.
 func stripOptionalNoun(args []string) []string {
 	if len(args) > 1 && (args[0] == "policies" || args[0] == "rules") {
-		return args[1:]
+		if _, err := os.Stat(args[0]); err != nil {
+			return args[1:]
+		}
 	}
 	return args
 }
@@ -309,8 +311,12 @@ func writeCheckText(w io.Writer, paths []string, out checkOutput, allowEmpty boo
 		if group == "" {
 			group = "core"
 		}
+		source := p.Source
+		if p.Document > 0 {
+			source = fmt.Sprintf("%s, document %d", p.Source, p.Document)
+		}
 		fmt.Fprintf(w, "  %s: %s (%s/%s: %d audit, %d event) [%s]\n",
-			status, p.Name, group, p.Kind, p.AuditRules, p.EventRules, p.Source)
+			status, p.DisplayName(), group, p.Kind, p.AuditRules, p.EventRules, source)
 	}
 
 	writeValidationIssues(w, out.ValidationIssues)
@@ -342,20 +348,26 @@ func writeTestText(w io.Writer, out testOutput, emptyAllowed bool) {
 		}
 
 		for _, tr := range file.Results {
+			name := tr.Name
+			if tr.Document > 0 {
+				name = fmt.Sprintf("%s [document %d]", tr.Name, tr.Document)
+			}
 			if tr.Passed {
 				outcome := "no-match"
 				if tr.Matched {
 					outcome = fmt.Sprintf("rule=%s", tr.MatchedRule)
 				}
-				fmt.Fprintf(w, "  PASS: %s (%s, %s)\n", tr.Name, tr.Policy, outcome)
-				continue
-			}
-
-			fmt.Fprintf(w, "  FAIL: %s (%s)\n", tr.Name, tr.Policy)
-			for _, failure := range tr.Failures {
-				for _, line := range strings.Split(failure, "\n") {
-					fmt.Fprintf(w, "    %s\n", line)
+				fmt.Fprintf(w, "  PASS: %s (%s, %s)\n", name, tr.Policy, outcome)
+			} else {
+				fmt.Fprintf(w, "  FAIL: %s (%s)\n", name, describeOutcome(tr))
+				for _, failure := range tr.Failures {
+					for _, line := range strings.Split(failure, "\n") {
+						fmt.Fprintf(w, "    %s\n", line)
+					}
 				}
+			}
+			for _, warning := range tr.Warnings {
+				fmt.Fprintf(w, "    WARNING: %s\n", formatTestWarning(warning))
 			}
 		}
 	}
@@ -371,6 +383,17 @@ func writeTestText(w io.Writer, out testOutput, emptyAllowed bool) {
 		}
 	}
 
+	if len(res.UntestedRules) > 0 {
+		label := "WARNING"
+		if res.FailOnUntestedRules {
+			label = "FAILED"
+		}
+		fmt.Fprintf(w, "\n%s: %d rule(s) never matched by a test:\n", label, len(res.UntestedRules))
+		for _, r := range res.UntestedRules {
+			fmt.Fprintf(w, "  - %s: %s/%s\n", r.Policy, r.RuleType, r.Rule)
+		}
+	}
+
 	if emptyAllowed {
 		fmt.Fprintln(w, "WARNING: no ActivityPolicy resources or test files found (--allow-empty)")
 		return
@@ -380,15 +403,50 @@ func writeTestText(w io.Writer, out testOutput, emptyAllowed bool) {
 	if !out.Passed {
 		status = "FAILED"
 	}
-	fmt.Fprintf(w, "\n%s: %d/%d tests passed, %d policies validated (%d untested)\n",
-		status, res.PassedTests, res.TotalTests, res.TotalPolicies, len(res.UntestedPolicies))
+	fmt.Fprintf(w, "\n%s: %d/%d tests passed, %d policies validated (%d untested), %d/%d rules matched by tests\n",
+		status, res.PassedTests, res.TotalTests, res.TotalPolicies, len(res.UntestedPolicies), res.TestedRules, res.TotalRules)
+}
+
+// describeOutcome summarizes what actually happened for a failed test.
+func describeOutcome(tr policytest.TestResult) string {
+	switch {
+	case tr.Matched:
+		return fmt.Sprintf("matched policy=%s rule=%s", tr.MatchedPolicy, tr.MatchedRule)
+	case len(tr.EvaluatedPolicies) > 0:
+		return fmt.Sprintf("no match; evaluated %s", strings.Join(tr.EvaluatedPolicies, ", "))
+	case tr.Policy != "":
+		return fmt.Sprintf("policy=%s, not evaluated", tr.Policy)
+	default:
+		return "not evaluated"
+	}
+}
+
+func formatTestWarning(w policytest.TestWarning) string {
+	var parts []string
+	if w.Policy != "" {
+		parts = append(parts, "policy="+w.Policy)
+	}
+	if w.Rule != "" {
+		parts = append(parts, fmt.Sprintf("rule=%s:%s", w.RuleType, w.Rule))
+	}
+	msg := w.Message
+	if len(parts) > 0 {
+		msg = strings.Join(parts, " ") + ": " + msg
+	}
+	if w.Expression != "" {
+		msg += "\n      expression: " + w.Expression
+	}
+	return msg
 }
 
 func writeValidationIssues(w io.Writer, issues []policytest.ValidationIssue) {
 	for _, issue := range issues {
 		loc := issue.Source
+		if issue.Document > 0 {
+			loc = fmt.Sprintf("%s, document %d", issue.Source, issue.Document)
+		}
 		if issue.PolicyName != "" {
-			loc = fmt.Sprintf("%s (%s)", issue.PolicyName, issue.Source)
+			loc = fmt.Sprintf("%s (%s)", issue.PolicyName, loc)
 		}
 		rulePart := ""
 		if issue.RuleType != "" || issue.RuleName != "" {

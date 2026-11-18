@@ -4,6 +4,9 @@ import { defineConfig } from "vite";
 import { resolve } from "path";
 
 export default defineConfig({
+  build: {
+    target: ["chrome107", "edge107", "firefox104", "safari16"],
+  },
   plugins: [
     tailwindcss(),
     remix({
@@ -22,6 +25,9 @@ export default defineConfig({
     noExternal: ["@datum-cloud/activity-ui"],
   },
   optimizeDeps: {
+    esbuildOptions: {
+      target: ["chrome107", "edge107", "firefox104", "safari16"],
+    },
     exclude: ["@remix-run/react", "monaco-editor"],
   },
   worker: {

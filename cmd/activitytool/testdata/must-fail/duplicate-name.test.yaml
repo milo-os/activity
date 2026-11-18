@@ -1,0 +1,8 @@
+# want: duplicate ActivityPolicy name "duplicated"
+policy_files:
+  - policies/dup-a.yaml
+  - policies/dup-b.yaml
+tests:
+  - name: two different policies with one name fail the run
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: example.com, resource: widgets, name: w}}
+    exp_rule: create

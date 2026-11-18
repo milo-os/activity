@@ -1,0 +1,7 @@
+# want: policy mismatch
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: pod audit does not go to pod-events
+    audit: {verb: delete, user: {username: alice@example.com}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: p}}
+    exp_policy: pod-events

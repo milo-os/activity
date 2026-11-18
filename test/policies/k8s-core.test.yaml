@@ -1,0 +1,383 @@
+# Unit tests for the example ActivityPolicies in examples/basic-kubernetes.
+# Every rule is covered; run with `task test:policies`.
+policy_files:
+  - ../../examples/basic-kubernetes
+
+tests:
+  - name: "core-pods: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod}}
+    exp_policy: core-pods
+    exp_rule: create
+    exp_summary: "alice@example.com started debug-pod"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: debug-pod, apiGroup: "", kind: Pod, name: debug-pod, namespace: default}]
+
+  - name: "core-pods: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod}}
+    exp_policy: core-pods
+    exp_rule: delete
+    exp_summary: "alice@example.com stopped debug-pod"
+    exp_change_source: human
+
+  - name: "core-pods: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod}}
+    exp_policy: core-pods
+    exp_rule: update
+    exp_summary: "alice@example.com updated debug-pod"
+    exp_change_source: human
+
+  - name: "core-pods: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated debug-pod"
+
+  - name: "core-pods: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod}}
+    exp_rule: create
+    exp_summary: "System started debug-pod"
+    exp_change_source: system
+    exp_links: [{marker: debug-pod, apiGroup: "", kind: Pod, name: debug-pod, namespace: default}]
+
+  - name: "core-pods: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: pods, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com started pod"
+
+  - name: "core-pods: get is not an activity"
+    policy: core-pods
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod}}
+    exp_no_match: true
+
+  - name: "core-pods: eviction by a user matches evict before create"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod, subresource: eviction}}
+    exp_rule: evict
+    exp_summary: "alice@example.com evicted debug-pod"
+    exp_change_source: human
+
+  - name: "core-pods: eviction by the node controller"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:node-controller"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod, subresource: eviction}}
+    exp_rule: evict
+    exp_summary: "System evicted debug-pod"
+    exp_change_source: system
+
+  - name: "core-pods: kubelet status patch matches update"
+    audit: {verb: patch, user: {username: "system:node:worker-1"}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod, subresource: status}}
+    exp_rule: update
+    exp_summary: "System updated debug-pod"
+    exp_change_source: system
+
+  - name: "core-services: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: services, namespace: default, name: public-api}}
+    exp_policy: core-services
+    exp_rule: create
+    exp_summary: "alice@example.com exposed public-api"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: public-api, apiGroup: "", kind: Service, name: public-api, namespace: default}]
+
+  - name: "core-services: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: services, namespace: default, name: public-api}}
+    exp_policy: core-services
+    exp_rule: delete
+    exp_summary: "alice@example.com removed public-api"
+    exp_change_source: human
+
+  - name: "core-services: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: services, namespace: default, name: public-api}}
+    exp_policy: core-services
+    exp_rule: update
+    exp_summary: "alice@example.com updated public-api"
+    exp_change_source: human
+
+  - name: "core-services: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: services, namespace: default, name: public-api}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated public-api"
+
+  - name: "core-services: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "", resource: services, namespace: default, name: public-api}}
+    exp_rule: create
+    exp_summary: "System exposed public-api"
+    exp_change_source: system
+    exp_links: [{marker: public-api, apiGroup: "", kind: Service, name: public-api, namespace: default}]
+
+  - name: "core-services: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: services, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com exposed service"
+
+  - name: "core-services: get is not an activity"
+    policy: core-services
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: services, namespace: default, name: public-api}}
+    exp_no_match: true
+
+  - name: "core-configmaps: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: configmaps, namespace: default, name: app-config}}
+    exp_policy: core-configmaps
+    exp_rule: create
+    exp_summary: "alice@example.com added configuration app-config"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: app-config, apiGroup: "", kind: ConfigMap, name: app-config, namespace: default}]
+
+  - name: "core-configmaps: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: configmaps, namespace: default, name: app-config}}
+    exp_policy: core-configmaps
+    exp_rule: delete
+    exp_summary: "alice@example.com removed configuration app-config"
+    exp_change_source: human
+
+  - name: "core-configmaps: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: configmaps, namespace: default, name: app-config}}
+    exp_policy: core-configmaps
+    exp_rule: update
+    exp_summary: "alice@example.com changed configuration app-config"
+    exp_change_source: human
+
+  - name: "core-configmaps: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: configmaps, namespace: default, name: app-config}}
+    exp_rule: update
+    exp_summary: "alice@example.com changed configuration app-config"
+
+  - name: "core-configmaps: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "", resource: configmaps, namespace: default, name: app-config}}
+    exp_rule: create
+    exp_summary: "System added configuration app-config"
+    exp_change_source: system
+    exp_links: [{marker: app-config, apiGroup: "", kind: ConfigMap, name: app-config, namespace: default}]
+
+  - name: "core-configmaps: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: configmaps, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com added configuration"
+
+  - name: "core-configmaps: get is not an activity"
+    policy: core-configmaps
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: configmaps, namespace: default, name: app-config}}
+    exp_no_match: true
+
+  - name: "core-secrets: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: secrets, namespace: default, name: db-credentials}}
+    exp_policy: core-secrets
+    exp_rule: create
+    exp_summary: "alice@example.com added secret db-credentials"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: db-credentials, apiGroup: "", kind: Secret, name: db-credentials, namespace: default}]
+
+  - name: "core-secrets: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: secrets, namespace: default, name: db-credentials}}
+    exp_policy: core-secrets
+    exp_rule: delete
+    exp_summary: "alice@example.com removed secret db-credentials"
+    exp_change_source: human
+
+  - name: "core-secrets: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: secrets, namespace: default, name: db-credentials}}
+    exp_policy: core-secrets
+    exp_rule: update
+    exp_summary: "alice@example.com changed secret db-credentials"
+    exp_change_source: human
+
+  - name: "core-secrets: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: secrets, namespace: default, name: db-credentials}}
+    exp_rule: update
+    exp_summary: "alice@example.com changed secret db-credentials"
+
+  - name: "core-secrets: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "", resource: secrets, namespace: default, name: db-credentials}}
+    exp_rule: create
+    exp_summary: "System added secret db-credentials"
+    exp_change_source: system
+    exp_links: [{marker: db-credentials, apiGroup: "", kind: Secret, name: db-credentials, namespace: default}]
+
+  - name: "core-secrets: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: secrets, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com added secret"
+
+  - name: "core-secrets: get is not an activity"
+    policy: core-secrets
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: secrets, namespace: default, name: db-credentials}}
+    exp_no_match: true
+
+  - name: "core-namespaces: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: namespaces, name: team-a}}
+    exp_policy: core-namespaces
+    exp_rule: create
+    exp_summary: "alice@example.com created workspace team-a"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: team-a, apiGroup: "", kind: Namespace, name: team-a}]
+
+  - name: "core-namespaces: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: namespaces, name: team-a}}
+    exp_policy: core-namespaces
+    exp_rule: delete
+    exp_summary: "alice@example.com removed workspace team-a"
+    exp_change_source: human
+
+  - name: "core-namespaces: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: namespaces, name: team-a}}
+    exp_policy: core-namespaces
+    exp_rule: update
+    exp_summary: "alice@example.com updated workspace team-a"
+    exp_change_source: human
+
+  - name: "core-namespaces: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: namespaces, name: team-a}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated workspace team-a"
+
+  - name: "core-namespaces: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "", resource: namespaces, name: team-a}}
+    exp_rule: create
+    exp_summary: "System created workspace team-a"
+    exp_change_source: system
+    exp_links: [{marker: team-a, apiGroup: "", kind: Namespace, name: team-a}]
+
+  - name: "core-namespaces: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: namespaces}}
+    exp_rule: create
+    exp_summary: "alice@example.com created workspace"
+
+  - name: "core-namespaces: get is not an activity"
+    policy: core-namespaces
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: namespaces, name: team-a}}
+    exp_no_match: true
+
+  - name: "core-serviceaccounts: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: serviceaccounts, namespace: default, name: ci-deployer}}
+    exp_policy: core-serviceaccounts
+    exp_rule: create
+    exp_summary: "alice@example.com created identity ci-deployer"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: ci-deployer, apiGroup: "", kind: ServiceAccount, name: ci-deployer, namespace: default}]
+
+  - name: "core-serviceaccounts: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: serviceaccounts, namespace: default, name: ci-deployer}}
+    exp_policy: core-serviceaccounts
+    exp_rule: delete
+    exp_summary: "alice@example.com removed identity ci-deployer"
+    exp_change_source: human
+
+  - name: "core-serviceaccounts: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: serviceaccounts, namespace: default, name: ci-deployer}}
+    exp_policy: core-serviceaccounts
+    exp_rule: update
+    exp_summary: "alice@example.com updated identity ci-deployer"
+    exp_change_source: human
+
+  - name: "core-serviceaccounts: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: serviceaccounts, namespace: default, name: ci-deployer}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated identity ci-deployer"
+
+  - name: "core-serviceaccounts: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "", resource: serviceaccounts, namespace: default, name: ci-deployer}}
+    exp_rule: create
+    exp_summary: "System created identity ci-deployer"
+    exp_change_source: system
+    exp_links: [{marker: ci-deployer, apiGroup: "", kind: ServiceAccount, name: ci-deployer, namespace: default}]
+
+  - name: "core-serviceaccounts: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: serviceaccounts, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com created identity"
+
+  - name: "core-serviceaccounts: get is not an activity"
+    policy: core-serviceaccounts
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: serviceaccounts, namespace: default, name: ci-deployer}}
+    exp_no_match: true
+
+  - name: "core-persistentvolumeclaims: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumeclaims, namespace: default, name: data-postgres-0}}
+    exp_policy: core-persistentvolumeclaims
+    exp_rule: create
+    exp_summary: "alice@example.com requested storage data-postgres-0"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: data-postgres-0, apiGroup: "", kind: PersistentVolumeClaim, name: data-postgres-0, namespace: default}]
+
+  - name: "core-persistentvolumeclaims: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumeclaims, namespace: default, name: data-postgres-0}}
+    exp_policy: core-persistentvolumeclaims
+    exp_rule: delete
+    exp_summary: "alice@example.com released storage data-postgres-0"
+    exp_change_source: human
+
+  - name: "core-persistentvolumeclaims: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumeclaims, namespace: default, name: data-postgres-0}}
+    exp_policy: core-persistentvolumeclaims
+    exp_rule: update
+    exp_summary: "alice@example.com updated storage data-postgres-0"
+    exp_change_source: human
+
+  - name: "core-persistentvolumeclaims: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumeclaims, namespace: default, name: data-postgres-0}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated storage data-postgres-0"
+
+  - name: "core-persistentvolumeclaims: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "", resource: persistentvolumeclaims, namespace: default, name: data-postgres-0}}
+    exp_rule: create
+    exp_summary: "System requested storage data-postgres-0"
+    exp_change_source: system
+    exp_links: [{marker: data-postgres-0, apiGroup: "", kind: PersistentVolumeClaim, name: data-postgres-0, namespace: default}]
+
+  - name: "core-persistentvolumeclaims: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumeclaims, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com requested storage"
+
+  - name: "core-persistentvolumeclaims: get is not an activity"
+    policy: core-persistentvolumeclaims
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumeclaims, namespace: default, name: data-postgres-0}}
+    exp_no_match: true
+
+  - name: "core-persistentvolumes: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumes, name: pv-ssd-001}}
+    exp_policy: core-persistentvolumes
+    exp_rule: create
+    exp_summary: "alice@example.com provisioned storage pv-ssd-001"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: pv-ssd-001, apiGroup: "", kind: PersistentVolume, name: pv-ssd-001}]
+
+  - name: "core-persistentvolumes: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumes, name: pv-ssd-001}}
+    exp_policy: core-persistentvolumes
+    exp_rule: delete
+    exp_summary: "alice@example.com removed storage pv-ssd-001"
+    exp_change_source: human
+
+  - name: "core-persistentvolumes: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumes, name: pv-ssd-001}}
+    exp_policy: core-persistentvolumes
+    exp_rule: update
+    exp_summary: "alice@example.com updated storage pv-ssd-001"
+    exp_change_source: human
+
+  - name: "core-persistentvolumes: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumes, name: pv-ssd-001}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated storage pv-ssd-001"
+
+  - name: "core-persistentvolumes: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "", resource: persistentvolumes, name: pv-ssd-001}}
+    exp_rule: create
+    exp_summary: "System provisioned storage pv-ssd-001"
+    exp_change_source: system
+    exp_links: [{marker: pv-ssd-001, apiGroup: "", kind: PersistentVolume, name: pv-ssd-001}]
+
+  - name: "core-persistentvolumes: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumes}}
+    exp_rule: create
+    exp_summary: "alice@example.com provisioned storage"
+
+  - name: "core-persistentvolumes: get is not an activity"
+    policy: core-persistentvolumes
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "", resource: persistentvolumes, name: pv-ssd-001}}
+    exp_no_match: true

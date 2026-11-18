@@ -118,7 +118,7 @@ tasks:
     deps:
       - build:activitytool
     cmds:
-      - "{{.TOOL_DIR}}/activitytool test --policies examples/basic-kubernetes test/policies"
+      - "{{.TOOL_DIR}}/activitytool test --fail-on-untested --fail-on-untested-rules --policies examples/basic-kubernetes test/policies"
 
   test:policies:docker:
     desc: Run the example ActivityPolicy tests inside a locally built activitytool image, the way consumer repos and CI run them
@@ -134,7 +134,7 @@ tasks:
           --cap-drop ALL --security-opt no-new-privileges \
           --volume "$root:/work:ro" --workdir "/work/$prefix" \
           "{{.ACTIVITYTOOL_IMAGE_NAME}}:{{.ACTIVITY_IMAGE_TAG}}" \
-          test --policies examples/basic-kubernetes test/policies
+          test --fail-on-untested --fail-on-untested-rules --policies examples/basic-kubernetes test/policies
 
   # Development tasks
   dev:build:

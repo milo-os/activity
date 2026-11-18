@@ -1,0 +1,7 @@
+# want: invalid exp_summary_regex
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: regex does not compile
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default, name: web}}
+    exp_summary_regex: "deployed (web"

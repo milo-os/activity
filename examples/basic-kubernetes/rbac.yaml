@@ -16,13 +16,13 @@ spec:
   auditRules:
     - name: create
       match: "audit.verb == 'create'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} defined cluster-wide permissions {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} defined cluster-wide permissions{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: delete
       match: "audit.verb == 'delete'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} removed cluster-wide permissions {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} removed cluster-wide permissions{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: update
       match: "audit.verb in ['update', 'patch']"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} changed cluster-wide permissions {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} changed cluster-wide permissions{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
 
 ---
 apiVersion: activity.miloapis.com/v1alpha1
@@ -36,13 +36,13 @@ spec:
   auditRules:
     - name: create
       match: "audit.verb == 'create'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} granted cluster-wide access {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} granted cluster-wide access{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: delete
       match: "audit.verb == 'delete'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} revoked cluster-wide access {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} revoked cluster-wide access{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: update
       match: "audit.verb in ['update', 'patch']"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} changed cluster-wide access {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} changed cluster-wide access{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
 
 ---
 apiVersion: activity.miloapis.com/v1alpha1
@@ -56,13 +56,13 @@ spec:
   auditRules:
     - name: create
       match: "audit.verb == 'create'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} defined permissions {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} defined permissions{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: delete
       match: "audit.verb == 'delete'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} removed permissions {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} removed permissions{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: update
       match: "audit.verb in ['update', 'patch']"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} changed permissions {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} changed permissions{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
 
 ---
 apiVersion: activity.miloapis.com/v1alpha1
@@ -76,10 +76,10 @@ spec:
   auditRules:
     - name: create
       match: "audit.verb == 'create'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} granted access {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} granted access{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: delete
       match: "audit.verb == 'delete'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} revoked access {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} revoked access{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: update
       match: "audit.verb in ['update', 'patch']"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} changed access {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} changed access{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"

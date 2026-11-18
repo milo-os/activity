@@ -1,0 +1,50 @@
+# Unit tests for the example ActivityPolicies in examples/basic-kubernetes.
+# Every rule is covered; run with `task test:policies`.
+policy_files:
+  - ../../examples/basic-kubernetes
+
+tests:
+  - name: "networking-ingresses: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "networking.k8s.io", resource: ingresses, namespace: default, name: public-api}}
+    exp_policy: networking-ingresses
+    exp_rule: create
+    exp_summary: "alice@example.com exposed route public-api"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: public-api, apiGroup: "networking.k8s.io", kind: Ingress, name: public-api, namespace: default}]
+
+  - name: "networking-ingresses: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "networking.k8s.io", resource: ingresses, namespace: default, name: public-api}}
+    exp_policy: networking-ingresses
+    exp_rule: delete
+    exp_summary: "alice@example.com removed route public-api"
+    exp_change_source: human
+
+  - name: "networking-ingresses: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "networking.k8s.io", resource: ingresses, namespace: default, name: public-api}}
+    exp_policy: networking-ingresses
+    exp_rule: update
+    exp_summary: "alice@example.com updated route public-api"
+    exp_change_source: human
+
+  - name: "networking-ingresses: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "networking.k8s.io", resource: ingresses, namespace: default, name: public-api}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated route public-api"
+
+  - name: "networking-ingresses: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "networking.k8s.io", resource: ingresses, namespace: default, name: public-api}}
+    exp_rule: create
+    exp_summary: "System exposed route public-api"
+    exp_change_source: system
+    exp_links: [{marker: public-api, apiGroup: "networking.k8s.io", kind: Ingress, name: public-api, namespace: default}]
+
+  - name: "networking-ingresses: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "networking.k8s.io", resource: ingresses, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com exposed route"
+
+  - name: "networking-ingresses: get is not an activity"
+    policy: networking-ingresses
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "networking.k8s.io", resource: ingresses, namespace: default, name: public-api}}
+    exp_no_match: true

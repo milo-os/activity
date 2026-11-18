@@ -1,0 +1,7 @@
+# want: summary mismatch
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: wrong summary
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default, name: web}}
+    exp_summary: "alice@example.com created web"

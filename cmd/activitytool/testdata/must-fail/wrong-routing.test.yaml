@@ -1,0 +1,8 @@
+# want: production never evaluates this policy for this input
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: a pod never reaches apps-deployments
+    policy: apps-deployments
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: p}}
+    exp_rule: create

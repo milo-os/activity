@@ -1,0 +1,185 @@
+# Unit tests for the example ActivityPolicies in examples/basic-kubernetes.
+# Every rule is covered; run with `task test:policies`.
+policy_files:
+  - ../../examples/basic-kubernetes
+
+tests:
+  - name: "rbac-clusterroles: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterroles, name: view-logs}}
+    exp_policy: rbac-clusterroles
+    exp_rule: create
+    exp_summary: "alice@example.com defined cluster-wide permissions view-logs"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: view-logs, apiGroup: "rbac.authorization.k8s.io", kind: ClusterRole, name: view-logs}]
+
+  - name: "rbac-clusterroles: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterroles, name: view-logs}}
+    exp_policy: rbac-clusterroles
+    exp_rule: delete
+    exp_summary: "alice@example.com removed cluster-wide permissions view-logs"
+    exp_change_source: human
+
+  - name: "rbac-clusterroles: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterroles, name: view-logs}}
+    exp_policy: rbac-clusterroles
+    exp_rule: update
+    exp_summary: "alice@example.com changed cluster-wide permissions view-logs"
+    exp_change_source: human
+
+  - name: "rbac-clusterroles: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterroles, name: view-logs}}
+    exp_rule: update
+    exp_summary: "alice@example.com changed cluster-wide permissions view-logs"
+
+  - name: "rbac-clusterroles: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterroles, name: view-logs}}
+    exp_rule: create
+    exp_summary: "System defined cluster-wide permissions view-logs"
+    exp_change_source: system
+    exp_links: [{marker: view-logs, apiGroup: "rbac.authorization.k8s.io", kind: ClusterRole, name: view-logs}]
+
+  - name: "rbac-clusterroles: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterroles}}
+    exp_rule: create
+    exp_summary: "alice@example.com defined cluster-wide permissions"
+
+  - name: "rbac-clusterroles: get is not an activity"
+    policy: rbac-clusterroles
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterroles, name: view-logs}}
+    exp_no_match: true
+
+  - name: "rbac-clusterrolebindings: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterrolebindings, name: view-logs-oncall}}
+    exp_policy: rbac-clusterrolebindings
+    exp_rule: create
+    exp_summary: "alice@example.com granted cluster-wide access view-logs-oncall"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: view-logs-oncall, apiGroup: "rbac.authorization.k8s.io", kind: ClusterRoleBinding, name: view-logs-oncall}]
+
+  - name: "rbac-clusterrolebindings: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterrolebindings, name: view-logs-oncall}}
+    exp_policy: rbac-clusterrolebindings
+    exp_rule: delete
+    exp_summary: "alice@example.com revoked cluster-wide access view-logs-oncall"
+    exp_change_source: human
+
+  - name: "rbac-clusterrolebindings: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterrolebindings, name: view-logs-oncall}}
+    exp_policy: rbac-clusterrolebindings
+    exp_rule: update
+    exp_summary: "alice@example.com changed cluster-wide access view-logs-oncall"
+    exp_change_source: human
+
+  - name: "rbac-clusterrolebindings: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterrolebindings, name: view-logs-oncall}}
+    exp_rule: update
+    exp_summary: "alice@example.com changed cluster-wide access view-logs-oncall"
+
+  - name: "rbac-clusterrolebindings: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterrolebindings, name: view-logs-oncall}}
+    exp_rule: create
+    exp_summary: "System granted cluster-wide access view-logs-oncall"
+    exp_change_source: system
+    exp_links: [{marker: view-logs-oncall, apiGroup: "rbac.authorization.k8s.io", kind: ClusterRoleBinding, name: view-logs-oncall}]
+
+  - name: "rbac-clusterrolebindings: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterrolebindings}}
+    exp_rule: create
+    exp_summary: "alice@example.com granted cluster-wide access"
+
+  - name: "rbac-clusterrolebindings: get is not an activity"
+    policy: rbac-clusterrolebindings
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: clusterrolebindings, name: view-logs-oncall}}
+    exp_no_match: true
+
+  - name: "rbac-roles: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: roles, namespace: default, name: pod-reader}}
+    exp_policy: rbac-roles
+    exp_rule: create
+    exp_summary: "alice@example.com defined permissions pod-reader"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: pod-reader, apiGroup: "rbac.authorization.k8s.io", kind: Role, name: pod-reader, namespace: default}]
+
+  - name: "rbac-roles: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: roles, namespace: default, name: pod-reader}}
+    exp_policy: rbac-roles
+    exp_rule: delete
+    exp_summary: "alice@example.com removed permissions pod-reader"
+    exp_change_source: human
+
+  - name: "rbac-roles: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: roles, namespace: default, name: pod-reader}}
+    exp_policy: rbac-roles
+    exp_rule: update
+    exp_summary: "alice@example.com changed permissions pod-reader"
+    exp_change_source: human
+
+  - name: "rbac-roles: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: roles, namespace: default, name: pod-reader}}
+    exp_rule: update
+    exp_summary: "alice@example.com changed permissions pod-reader"
+
+  - name: "rbac-roles: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: roles, namespace: default, name: pod-reader}}
+    exp_rule: create
+    exp_summary: "System defined permissions pod-reader"
+    exp_change_source: system
+    exp_links: [{marker: pod-reader, apiGroup: "rbac.authorization.k8s.io", kind: Role, name: pod-reader, namespace: default}]
+
+  - name: "rbac-roles: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: roles, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com defined permissions"
+
+  - name: "rbac-roles: get is not an activity"
+    policy: rbac-roles
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: roles, namespace: default, name: pod-reader}}
+    exp_no_match: true
+
+  - name: "rbac-rolebindings: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: rolebindings, namespace: default, name: pod-reader-dev}}
+    exp_policy: rbac-rolebindings
+    exp_rule: create
+    exp_summary: "alice@example.com granted access pod-reader-dev"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: pod-reader-dev, apiGroup: "rbac.authorization.k8s.io", kind: RoleBinding, name: pod-reader-dev, namespace: default}]
+
+  - name: "rbac-rolebindings: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: rolebindings, namespace: default, name: pod-reader-dev}}
+    exp_policy: rbac-rolebindings
+    exp_rule: delete
+    exp_summary: "alice@example.com revoked access pod-reader-dev"
+    exp_change_source: human
+
+  - name: "rbac-rolebindings: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: rolebindings, namespace: default, name: pod-reader-dev}}
+    exp_policy: rbac-rolebindings
+    exp_rule: update
+    exp_summary: "alice@example.com changed access pod-reader-dev"
+    exp_change_source: human
+
+  - name: "rbac-rolebindings: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: rolebindings, namespace: default, name: pod-reader-dev}}
+    exp_rule: update
+    exp_summary: "alice@example.com changed access pod-reader-dev"
+
+  - name: "rbac-rolebindings: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: rolebindings, namespace: default, name: pod-reader-dev}}
+    exp_rule: create
+    exp_summary: "System granted access pod-reader-dev"
+    exp_change_source: system
+    exp_links: [{marker: pod-reader-dev, apiGroup: "rbac.authorization.k8s.io", kind: RoleBinding, name: pod-reader-dev, namespace: default}]
+
+  - name: "rbac-rolebindings: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: rolebindings, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com granted access"
+
+  - name: "rbac-rolebindings: get is not an activity"
+    policy: rbac-rolebindings
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "rbac.authorization.k8s.io", resource: rolebindings, namespace: default, name: pod-reader-dev}}
+    exp_no_match: true

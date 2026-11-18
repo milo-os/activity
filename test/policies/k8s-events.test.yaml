@@ -1,0 +1,143 @@
+# Unit tests for the example event ActivityPolicies (pod-events, node-events,
+# deployment-events) in examples/basic-kubernetes. Every rule is covered.
+policy_files:
+  - ../../examples/basic-kubernetes
+
+tests:
+  # pod-events
+  - name: "pod-events: Scheduled renders the scheduler note and links the pod"
+    event:
+      reason: Scheduled
+      type: Normal
+      note: Successfully assigned default/debug-pod to worker-1
+      reportingController: default-scheduler
+      regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}
+    exp_policy: pod-events
+    exp_rule: scheduled
+    exp_summary: "debug-pod scheduled to node Successfully assigned default/debug-pod to worker-1"
+    exp_change_source: system
+    exp_actor: {type: controller, name: default-scheduler}
+    exp_links:
+      - {marker: debug-pod, apiGroup: "", kind: Pod, namespace: default, name: debug-pod}
+
+  - name: "pod-events: Pulling"
+    event: {reason: Pulling, type: Normal, reportingController: kubelet, regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}}
+    exp_rule: pulling
+    exp_summary: "Pulling image for debug-pod"
+    exp_actor: {type: controller, name: kubelet}
+
+  - name: "pod-events: Pulled"
+    event: {reason: Pulled, type: Normal, reportingController: kubelet, regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}}
+    exp_rule: pulled
+    exp_summary: "Successfully pulled image for debug-pod"
+
+  - name: "pod-events: Created"
+    event: {reason: Created, type: Normal, reportingController: kubelet, regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}}
+    exp_rule: created
+    exp_summary: "Created container in debug-pod"
+
+  - name: "pod-events: Started"
+    event: {reason: Started, type: Normal, reportingController: kubelet, regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}}
+    exp_rule: started
+    exp_summary: "Started container in debug-pod"
+
+  - name: "pod-events: Killing"
+    event: {reason: Killing, type: Normal, reportingController: kubelet, regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}}
+    exp_rule: killing
+    exp_summary: "Stopping container in debug-pod"
+
+  - name: "pod-events: BackOff includes the kubelet note"
+    event:
+      reason: BackOff
+      type: Warning
+      note: Back-off restarting failed container app
+      reportingController: kubelet
+      regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}
+    exp_rule: backoff
+    exp_summary: "debug-pod failed to start: Back-off restarting failed container app"
+
+  - name: "pod-events: FailedScheduling includes the scheduler note"
+    event:
+      reason: FailedScheduling
+      type: Warning
+      note: 0/3 nodes are available
+      reportingController: default-scheduler
+      regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}
+    exp_rule: failed-scheduling
+    exp_summary: "Failed to schedule debug-pod: 0/3 nodes are available"
+
+  - name: "pod-events: legacy core/v1 involvedObject is routed like regarding"
+    event:
+      reason: Started
+      type: Normal
+      source: {component: kubelet}
+      involvedObject: {apiVersion: v1, kind: Pod, namespace: default, name: legacy-pod}
+    exp_policy: pod-events
+    exp_rule: started
+    exp_summary: "Started container in legacy-pod"
+
+  - name: "pod-events: an unknown reason is not an activity"
+    policy: pod-events
+    event: {reason: SandboxChanged, type: Normal, reportingController: kubelet, regarding: {apiVersion: v1, kind: Pod, namespace: default, name: debug-pod}}
+    exp_no_match: true
+
+  # node-events
+  - name: "node-events: NodeReady links the node"
+    event: {reason: NodeReady, type: Normal, reportingController: kubelet, regarding: {apiVersion: v1, kind: Node, name: worker-1}}
+    exp_policy: node-events
+    exp_rule: node-ready
+    exp_summary: "Node worker-1 is ready"
+    exp_change_source: system
+    exp_links:
+      - {marker: worker-1, apiGroup: "", kind: Node, name: worker-1}
+
+  - name: "node-events: NodeNotReady"
+    event: {reason: NodeNotReady, type: Normal, reportingController: node-controller, regarding: {apiVersion: v1, kind: Node, name: worker-1}}
+    exp_rule: node-not-ready
+    exp_summary: "Node worker-1 is not ready"
+
+  - name: "node-events: NodeSchedulable"
+    event: {reason: NodeSchedulable, type: Normal, reportingController: kubelet, regarding: {apiVersion: v1, kind: Node, name: worker-1}}
+    exp_rule: node-schedulable
+    exp_summary: "Node worker-1 is now schedulable"
+
+  - name: "node-events: RegisteredNode"
+    event: {reason: RegisteredNode, type: Normal, reportingController: node-controller, regarding: {apiVersion: v1, kind: Node, name: worker-2}}
+    exp_rule: registered-node
+    exp_summary: "Node worker-2 joined the cluster"
+
+  - name: "node-events: a pod reason on a node is not an activity"
+    policy: node-events
+    event: {reason: Scheduled, type: Normal, reportingController: default-scheduler, regarding: {apiVersion: v1, kind: Node, name: worker-1}}
+    exp_no_match: true
+
+  # deployment-events
+  - name: "deployment-events: ScalingReplicaSet"
+    event:
+      reason: ScalingReplicaSet
+      type: Normal
+      note: Scaled up replica set web-frontend-7d9c to 3
+      reportingController: deployment-controller
+      regarding: {apiVersion: apps/v1, kind: Deployment, namespace: default, name: web-frontend}
+    exp_policy: deployment-events
+    exp_rule: scaling-replicaset
+    exp_summary: "Scaling replica set for web-frontend"
+    exp_actor: {type: controller, name: deployment-controller}
+
+  - name: "deployment-events: SuccessfulCreate"
+    event: {reason: SuccessfulCreate, type: Normal, reportingController: deployment-controller, regarding: {apiVersion: apps/v1, kind: Deployment, namespace: default, name: web-frontend}}
+    exp_rule: successful-create
+    exp_summary: "Created replica set for web-frontend"
+
+  # Production copies only apiGroup/kind/name/namespace/uid into event links, so
+  # an apps/v1 object gets an empty apiGroup today. This test pins that and must
+  # change with the parity follow-up that switches events to ConvertLinks.
+  - name: "deployment-events: link apiGroup matches what production stores today"
+    event: {reason: SuccessfulCreate, type: Normal, reportingController: deployment-controller, regarding: {apiVersion: apps/v1, kind: Deployment, namespace: default, name: web-frontend}}
+    exp_links:
+      - {marker: web-frontend, apiGroup: "", kind: Deployment, namespace: default, name: web-frontend}
+
+  # routing
+  - name: "an event about a kind with no event policy is not an activity"
+    event: {reason: Created, type: Normal, reportingController: endpoint-controller, regarding: {apiVersion: v1, kind: Service, namespace: default, name: public-api}}
+    exp_no_match: true

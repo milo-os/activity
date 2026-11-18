@@ -1,0 +1,42 @@
+# Routing and edge cases across the example ActivityPolicies in
+# examples/basic-kubernetes: which inputs never become activities.
+policy_files:
+  - ../../examples/basic-kubernetes
+
+tests:
+  - name: list is not an activity
+    audit: {verb: list, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default}}
+    exp_no_match: true
+
+  - name: watch is not an activity
+    audit: {verb: watch, user: {username: alice@example.com}, objectRef: {apiGroup: "", resource: pods, namespace: default}}
+    exp_no_match: true
+
+  - name: deletecollection is not an activity
+    audit: {verb: deletecollection, user: {username: alice@example.com}, objectRef: {apiGroup: "", resource: configmaps, namespace: default}}
+    exp_no_match: true
+
+  - name: a resource with no policy is not an activity
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: controllerrevisions, namespace: default, name: web-frontend-1}}
+    exp_no_match: true
+
+  - name: deployments in another API group are not routed to apps-deployments
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: extensions, resource: deployments, namespace: default, name: web-frontend}}
+    exp_no_match: true
+
+  - name: daemonsets have no scale rule, so a scale patch is an update
+    audit: {verb: patch, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: daemonsets, namespace: default, name: log-agent, subresource: scale}}
+    exp_policy: apps-daemonsets
+    exp_rule: update
+    exp_summary: "alice@example.com updated cluster-wide service log-agent"
+
+  - name: a pod eviction is not mistaken for a plain create
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: worker-0, subresource: eviction}}
+    exp_policy: core-pods
+    exp_rule: evict
+
+  - name: pod audit and pod events route to different policies
+    audit: {verb: delete, user: {username: alice@example.com}, objectRef: {apiGroup: "", resource: pods, namespace: default, name: debug-pod}}
+    exp_policy: core-pods
+    exp_rule: delete
+    exp_summary: "alice@example.com stopped debug-pod"

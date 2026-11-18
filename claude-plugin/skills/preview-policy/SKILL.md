@@ -33,4 +33,8 @@ Test and validate an ActivityPolicy.
 
 6. **Re-preview**: After making changes, preview again to verify fixes.
 
+7. **Lock in behavior with offline unit tests**: Follow [test-policy](../test-policy/SKILL.md)
+   to capture sample inputs and expected English summaries in a `*.test.yaml`
+   suite and verify with `activitytool test` so regressions fail in CI.
+
 $ARGUMENTS

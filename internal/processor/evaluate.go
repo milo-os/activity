@@ -94,6 +94,10 @@ func EvaluateEventRules(
 		return nil, fmt.Errorf("failed to convert event data: %w", err)
 	}
 
+	// Normalize legacy core/v1 involvedObject to regarding so CEL expressions
+	// using event.regarding work identically to the live EventProcessor.
+	eventMap = normalizeEventMap(eventMap, ResolveInvolvedObject(eventMap))
+
 	// Create activity builder
 	builder := &ActivityBuilder{
 		APIGroup: spec.Resource.APIGroup,

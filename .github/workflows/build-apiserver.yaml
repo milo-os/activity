@@ -51,6 +51,24 @@ jobs:
       registry-organization: milo-os
     secrets: inherit
 
+  publish-activitytool-container-image:
+    # Build and publish the activitytool CLI container image
+    needs:
+      - validate-kustomize
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+      attestations: write
+    uses: datum-cloud/actions/.github/workflows/publish-docker.yaml@v1.28.0
+    with:
+      image-name: activitytool
+      context: .
+      dockerfile-path: cmd/activitytool/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      registry-organization: milo-os
+    secrets: inherit
+
   publish-kustomize-bundles:
     # Ensure the kustomize manifests are valid and the container is published
     # before we publish the kustomize manifests. We expect publishing the

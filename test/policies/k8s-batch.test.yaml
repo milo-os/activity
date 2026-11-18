@@ -1,0 +1,95 @@
+# Unit tests for the example ActivityPolicies in examples/basic-kubernetes.
+# Every rule is covered; run with `task test:policies`.
+policy_files:
+  - ../../examples/basic-kubernetes
+
+tests:
+  - name: "batch-jobs: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: jobs, namespace: default, name: db-migrate}}
+    exp_policy: batch-jobs
+    exp_rule: create
+    exp_summary: "alice@example.com started job db-migrate"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: db-migrate, apiGroup: "batch", kind: Job, name: db-migrate, namespace: default}]
+
+  - name: "batch-jobs: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: jobs, namespace: default, name: db-migrate}}
+    exp_policy: batch-jobs
+    exp_rule: delete
+    exp_summary: "alice@example.com deleted job db-migrate"
+    exp_change_source: human
+
+  - name: "batch-jobs: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: jobs, namespace: default, name: db-migrate}}
+    exp_policy: batch-jobs
+    exp_rule: update
+    exp_summary: "alice@example.com updated job db-migrate"
+    exp_change_source: human
+
+  - name: "batch-jobs: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: jobs, namespace: default, name: db-migrate}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated job db-migrate"
+
+  - name: "batch-jobs: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "batch", resource: jobs, namespace: default, name: db-migrate}}
+    exp_rule: create
+    exp_summary: "System started job db-migrate"
+    exp_change_source: system
+    exp_links: [{marker: db-migrate, apiGroup: "batch", kind: Job, name: db-migrate, namespace: default}]
+
+  - name: "batch-jobs: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: jobs, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com started job"
+
+  - name: "batch-jobs: get is not an activity"
+    policy: batch-jobs
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: jobs, namespace: default, name: db-migrate}}
+    exp_no_match: true
+
+  - name: "batch-cronjobs: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: cronjobs, namespace: default, name: nightly-backup}}
+    exp_policy: batch-cronjobs
+    exp_rule: create
+    exp_summary: "alice@example.com created scheduled job nightly-backup"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: nightly-backup, apiGroup: "batch", kind: CronJob, name: nightly-backup, namespace: default}]
+
+  - name: "batch-cronjobs: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: cronjobs, namespace: default, name: nightly-backup}}
+    exp_policy: batch-cronjobs
+    exp_rule: delete
+    exp_summary: "alice@example.com deleted scheduled job nightly-backup"
+    exp_change_source: human
+
+  - name: "batch-cronjobs: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: cronjobs, namespace: default, name: nightly-backup}}
+    exp_policy: batch-cronjobs
+    exp_rule: update
+    exp_summary: "alice@example.com updated scheduled job nightly-backup"
+    exp_change_source: human
+
+  - name: "batch-cronjobs: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: cronjobs, namespace: default, name: nightly-backup}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated scheduled job nightly-backup"
+
+  - name: "batch-cronjobs: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "batch", resource: cronjobs, namespace: default, name: nightly-backup}}
+    exp_rule: create
+    exp_summary: "System created scheduled job nightly-backup"
+    exp_change_source: system
+    exp_links: [{marker: nightly-backup, apiGroup: "batch", kind: CronJob, name: nightly-backup, namespace: default}]
+
+  - name: "batch-cronjobs: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: cronjobs, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com created scheduled job"
+
+  - name: "batch-cronjobs: get is not an activity"
+    policy: batch-cronjobs
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "batch", resource: cronjobs, namespace: default, name: nightly-backup}}
+    exp_no_match: true

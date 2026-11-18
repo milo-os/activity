@@ -1,0 +1,7 @@
+# want: expected no rule to match
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: create is an activity
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default, name: web}}
+    exp_no_match: true

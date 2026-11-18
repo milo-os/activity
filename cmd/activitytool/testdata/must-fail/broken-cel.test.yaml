@@ -1,0 +1,7 @@
+# want: invalid match expression
+policy_files:
+  - policies/broken-cel.yaml
+tests:
+  - name: a policy that does not compile fails the run
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: example.com, resource: widgets, name: w}}
+    exp_no_match: true

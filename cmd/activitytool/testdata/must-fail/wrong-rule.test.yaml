@@ -1,0 +1,7 @@
+# want: rule mismatch
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: scale is not update
+    audit: {verb: patch, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default, name: web, subresource: scale}}
+    exp_rule: update

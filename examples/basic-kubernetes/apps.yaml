@@ -62,16 +62,16 @@ spec:
   auditRules:
     - name: create
       match: "audit.verb == 'create'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} deployed stateful app {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} deployed stateful app{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: delete
       match: "audit.verb == 'delete'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} removed stateful app {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} removed stateful app{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: scale
       match: "audit.verb in ['update', 'patch'] && has(audit.objectRef.subresource) && audit.objectRef.subresource == 'scale'"
       summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} scaled {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : 'stateful app' }}"
     - name: update
       match: "audit.verb in ['update', 'patch']"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} updated stateful app {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} updated stateful app{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
 
 ---
 apiVersion: activity.miloapis.com/v1alpha1
@@ -85,10 +85,10 @@ spec:
   auditRules:
     - name: create
       match: "audit.verb == 'create'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} deployed cluster-wide service {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} deployed cluster-wide service{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: delete
       match: "audit.verb == 'delete'"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} removed cluster-wide service {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} removed cluster-wide service{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"
     - name: update
       match: "audit.verb in ['update', 'patch']"
-      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} updated cluster-wide service {{ has(audit.objectRef.name) ? link(audit.objectRef.name, audit.objectRef) : '' }}"
+      summary: "{{ actor.startsWith('system:') ? 'System' : link(actor, actorRef) }} updated cluster-wide service{{ has(audit.objectRef.name) ? ' ' + link(audit.objectRef.name, audit.objectRef) : '' }}"

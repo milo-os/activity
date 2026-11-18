@@ -1,0 +1,9 @@
+# want: links[1].resource.kind mismatch: exp "StatefulSet", got "Deployment"
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: link kind is Deployment
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default, name: web}}
+    exp_links:
+      - {marker: alice@example.com, kind: user, name: alice@example.com}
+      - {marker: web, apiGroup: apps, kind: StatefulSet, namespace: default, name: web}

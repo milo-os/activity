@@ -1,0 +1,12 @@
+apiVersion: activity.miloapis.com/v1alpha1
+kind: ActivityPolicy
+metadata:
+  name: broken-cel
+spec:
+  resource:
+    apiGroup: example.com
+    kind: Widget
+  auditRules:
+    - name: create
+      match: "audit.verb == 'create' &&"
+      summary: "{{ actor }} created a widget"

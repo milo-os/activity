@@ -1,0 +1,230 @@
+# Unit tests for the example ActivityPolicies in examples/basic-kubernetes.
+# Every rule is covered; run with `task test:policies`.
+policy_files:
+  - ../../examples/basic-kubernetes
+
+tests:
+  - name: "apps-deployments: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, name: web-frontend}}
+    exp_policy: apps-deployments
+    exp_rule: create
+    exp_summary: "alice@example.com deployed web-frontend"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: web-frontend, apiGroup: "apps", kind: Deployment, name: web-frontend, namespace: default}]
+
+  - name: "apps-deployments: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, name: web-frontend}}
+    exp_policy: apps-deployments
+    exp_rule: delete
+    exp_summary: "alice@example.com removed web-frontend"
+    exp_change_source: human
+
+  - name: "apps-deployments: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, name: web-frontend}}
+    exp_policy: apps-deployments
+    exp_rule: update
+    exp_summary: "alice@example.com updated web-frontend"
+    exp_change_source: human
+
+  - name: "apps-deployments: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, name: web-frontend}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated web-frontend"
+
+  - name: "apps-deployments: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, name: web-frontend}}
+    exp_rule: create
+    exp_summary: "System deployed web-frontend"
+    exp_change_source: system
+    exp_links: [{marker: web-frontend, apiGroup: "apps", kind: Deployment, name: web-frontend, namespace: default}]
+
+  - name: "apps-deployments: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com deployed application"
+
+  - name: "apps-deployments: get is not an activity"
+    policy: apps-deployments
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, name: web-frontend}}
+    exp_no_match: true
+
+  - name: "apps-deployments: patch on the scale subresource matches scale before update"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, name: web-frontend, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled web-frontend"
+
+  - name: "apps-deployments: update on the scale subresource matches scale before update"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, name: web-frontend, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled web-frontend"
+
+  - name: "apps-deployments: scale without a name uses the scale fallback"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: deployments, namespace: default, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled application"
+
+  - name: "apps-replicasets: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, name: web-frontend-7d9c}}
+    exp_policy: apps-replicasets
+    exp_rule: create
+    exp_summary: "alice@example.com created replicas for web-frontend-7d9c"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: web-frontend-7d9c, apiGroup: "apps", kind: ReplicaSet, name: web-frontend-7d9c, namespace: default}]
+
+  - name: "apps-replicasets: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, name: web-frontend-7d9c}}
+    exp_policy: apps-replicasets
+    exp_rule: delete
+    exp_summary: "alice@example.com removed replicas for web-frontend-7d9c"
+    exp_change_source: human
+
+  - name: "apps-replicasets: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, name: web-frontend-7d9c}}
+    exp_policy: apps-replicasets
+    exp_rule: update
+    exp_summary: "alice@example.com updated replicas for web-frontend-7d9c"
+    exp_change_source: human
+
+  - name: "apps-replicasets: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, name: web-frontend-7d9c}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated replicas for web-frontend-7d9c"
+
+  - name: "apps-replicasets: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, name: web-frontend-7d9c}}
+    exp_rule: create
+    exp_summary: "System created replicas for web-frontend-7d9c"
+    exp_change_source: system
+    exp_links: [{marker: web-frontend-7d9c, apiGroup: "apps", kind: ReplicaSet, name: web-frontend-7d9c, namespace: default}]
+
+  - name: "apps-replicasets: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com created replicas for application"
+
+  - name: "apps-replicasets: get is not an activity"
+    policy: apps-replicasets
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, name: web-frontend-7d9c}}
+    exp_no_match: true
+
+  - name: "apps-replicasets: patch on the scale subresource matches scale before update"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, name: web-frontend-7d9c, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled web-frontend-7d9c"
+
+  - name: "apps-replicasets: update on the scale subresource matches scale before update"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, name: web-frontend-7d9c, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled web-frontend-7d9c"
+
+  - name: "apps-replicasets: scale without a name uses the scale fallback"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: replicasets, namespace: default, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled replicas"
+
+  - name: "apps-statefulsets: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, name: postgres}}
+    exp_policy: apps-statefulsets
+    exp_rule: create
+    exp_summary: "alice@example.com deployed stateful app postgres"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: postgres, apiGroup: "apps", kind: StatefulSet, name: postgres, namespace: default}]
+
+  - name: "apps-statefulsets: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, name: postgres}}
+    exp_policy: apps-statefulsets
+    exp_rule: delete
+    exp_summary: "alice@example.com removed stateful app postgres"
+    exp_change_source: human
+
+  - name: "apps-statefulsets: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, name: postgres}}
+    exp_policy: apps-statefulsets
+    exp_rule: update
+    exp_summary: "alice@example.com updated stateful app postgres"
+    exp_change_source: human
+
+  - name: "apps-statefulsets: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, name: postgres}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated stateful app postgres"
+
+  - name: "apps-statefulsets: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, name: postgres}}
+    exp_rule: create
+    exp_summary: "System deployed stateful app postgres"
+    exp_change_source: system
+    exp_links: [{marker: postgres, apiGroup: "apps", kind: StatefulSet, name: postgres, namespace: default}]
+
+  - name: "apps-statefulsets: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com deployed stateful app"
+
+  - name: "apps-statefulsets: get is not an activity"
+    policy: apps-statefulsets
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, name: postgres}}
+    exp_no_match: true
+
+  - name: "apps-statefulsets: patch on the scale subresource matches scale before update"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, name: postgres, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled postgres"
+
+  - name: "apps-statefulsets: update on the scale subresource matches scale before update"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, name: postgres, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled postgres"
+
+  - name: "apps-statefulsets: scale without a name uses the scale fallback"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: statefulsets, namespace: default, subresource: scale}}
+    exp_rule: scale
+    exp_summary: "alice@example.com scaled stateful app"
+
+  - name: "apps-daemonsets: create by a user"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: daemonsets, namespace: default, name: log-agent}}
+    exp_policy: apps-daemonsets
+    exp_rule: create
+    exp_summary: "alice@example.com deployed cluster-wide service log-agent"
+    exp_change_source: human
+    exp_actor: {type: user, name: alice@example.com, email: alice@example.com}
+    exp_links: [{marker: "alice@example.com", kind: user, name: "alice@example.com"}, {marker: log-agent, apiGroup: "apps", kind: DaemonSet, name: log-agent, namespace: default}]
+
+  - name: "apps-daemonsets: delete by a user"
+    audit: {verb: delete, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: daemonsets, namespace: default, name: log-agent}}
+    exp_policy: apps-daemonsets
+    exp_rule: delete
+    exp_summary: "alice@example.com removed cluster-wide service log-agent"
+    exp_change_source: human
+
+  - name: "apps-daemonsets: update by a user"
+    audit: {verb: update, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: daemonsets, namespace: default, name: log-agent}}
+    exp_policy: apps-daemonsets
+    exp_rule: update
+    exp_summary: "alice@example.com updated cluster-wide service log-agent"
+    exp_change_source: human
+
+  - name: "apps-daemonsets: patch matches the update rule"
+    audit: {verb: patch, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: daemonsets, namespace: default, name: log-agent}}
+    exp_rule: update
+    exp_summary: "alice@example.com updated cluster-wide service log-agent"
+
+  - name: "apps-daemonsets: create by a controller renders System"
+    audit: {verb: create, user: {username: "system:serviceaccount:kube-system:generic-controller"}, objectRef: {apiGroup: "apps", resource: daemonsets, namespace: default, name: log-agent}}
+    exp_rule: create
+    exp_summary: "System deployed cluster-wide service log-agent"
+    exp_change_source: system
+    exp_links: [{marker: log-agent, apiGroup: "apps", kind: DaemonSet, name: log-agent, namespace: default}]
+
+  - name: "apps-daemonsets: create without a name uses the fallback"
+    audit: {verb: create, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: daemonsets, namespace: default}}
+    exp_rule: create
+    exp_summary: "alice@example.com deployed cluster-wide service"
+
+  - name: "apps-daemonsets: get is not an activity"
+    policy: apps-daemonsets
+    audit: {verb: get, user: {username: "alice@example.com"}, objectRef: {apiGroup: "apps", resource: daemonsets, namespace: default, name: log-agent}}
+    exp_no_match: true

@@ -21,6 +21,23 @@ jobs:
         run: go mod download
       - name: Execute golang tests
         run: go test -timeout 5m ./...
+      - name: Validate and test example ActivityPolicies
+        run: go run ./cmd/activitytool test --fail-on-untested --fail-on-untested-rules --policies examples/basic-kubernetes test/policies
+  activitytool-image:
+    name: Policy tests in the activitytool image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Build the activitytool image
+        run: docker build -f cmd/activitytool/Dockerfile -t activitytool:ci .
+      - name: Run the example policy tests the way other repos do
+        run: |
+          docker run --rm --network none --user 65532:65532 --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --volume "$PWD:/work:ro" --workdir /work \
+            activitytool:ci \
+            test --fail-on-untested --fail-on-untested-rules --policies examples/basic-kubernetes test/policies
   ui-tests:
     name: UI lint, typecheck, build, e2e
     runs-on: ubuntu-24.04

@@ -1,0 +1,7 @@
+# want: change_source mismatch: exp "system", got "human"
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: a user is not system
+    audit: {verb: create, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default, name: web}}
+    exp_change_source: system

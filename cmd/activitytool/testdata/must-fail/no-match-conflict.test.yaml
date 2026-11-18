@@ -1,0 +1,8 @@
+# want: exp_no_match
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: contradictory expectations
+    audit: {verb: get, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default, name: web}}
+    exp_no_match: true
+    exp_rule: create

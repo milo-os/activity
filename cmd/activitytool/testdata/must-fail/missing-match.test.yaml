@@ -1,0 +1,7 @@
+# want: expected a rule to match
+policy_files:
+  - ../../../../examples/basic-kubernetes
+tests:
+  - name: get is not an activity
+    audit: {verb: get, user: {username: alice@example.com}, objectRef: {apiGroup: apps, resource: deployments, namespace: default, name: web}}
+    exp_rule: create

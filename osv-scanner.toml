@@ -1,0 +1,39 @@
+# Scanner ignores for ui/pnpm-lock.yaml. Every entry has no in-range fix
+# and expires 2027-02-28 so it gets re-checked.
+
+# react-router and turbo-stream: Remix 2.17.5 (latest 2.x) pins
+# react-router 6.30.x and turbo-stream 2.4.1. The fixes exist only in
+# React Router 7 (7.18.0) and turbo-stream 3.0.0, so clearing them means
+# migrating ui/example off Remix 2. The published @datum-cloud/activity-ui
+# package does not depend on either. Only ui/example, which ships as the
+# activity-ui container running remix-serve, resolves them.
+[[IgnoredVulns]]
+id = "GHSA-337j-9hxr-rhxg"
+ignoreUntil = 2027-02-28
+reason = "react-router 6.30.6 is the last 6.x release; fix is 7.18.0 and needs a Remix 2 to React Router 7 migration of ui/example (not a dependency of the published activity-ui package)"
+
+[[IgnoredVulns]]
+id = "GHSA-wrjc-x8rr-h8h6"
+ignoreUntil = 2027-02-28
+reason = "react-router 6.30.6 is the last 6.x release; fix is 7.18.0 and needs a Remix 2 to React Router 7 migration of ui/example (not a dependency of the published activity-ui package)"
+
+[[IgnoredVulns]]
+id = "GHSA-rxv8-25v2-qmq8"
+ignoreUntil = 2027-02-28
+reason = "Remix 2.17.5 pins turbo-stream 2.4.1; fix is turbo-stream 3.0.0, which Remix 2 cannot use. Needs the same ui/example migration off Remix 2 (not a dependency of the published activity-ui package)"
+
+# minimatch 9.0.9 and glob 10.5.0: both come only from @remix-run/dev
+# (directly and through cacache and @npmcli/package-json), a devDependency
+# of ui/example. OSV lists no 9.x or 10.x fix (minimatch 11.0.1, glob
+# 14.0.2), and those parents declare ^9 and ^10, so an override would
+# force a major across them. They run at build time on repo-controlled
+# input and are removed from the image by pnpm deploy --prod.
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2027-02-28
+reason = "minimatch 9.0.9 is pulled in by @remix-run/dev (devDependency of ui/example); only fix is 11.0.1, a major bump the parents do not accept; build-time only, not in the production image"
+
+[[IgnoredVulns]]
+id = "GHSA-3g3m-2fjr-6pw4"
+ignoreUntil = 2027-02-28
+reason = "glob 10.5.0 is pulled in by @remix-run/dev via cacache and @npmcli/package-json (devDependency of ui/example); only fix is 14.0.2, a major bump the parents do not accept; build-time only, not in the production image"

@@ -304,3 +304,10 @@ func TestEventFacetColumnMapping(t *testing.T) {
 		})
 	}
 }
+
+func TestActivityFacetColumnMapping_InterfaceType(t *testing.T) {
+	require.True(t, IsValidActivityFacetField("spec.interface.type"))
+	got, err := GetActivityFacetColumn("spec.interface.type")
+	require.NoError(t, err)
+	assert.Equal(t, "interface_type", got)
+}

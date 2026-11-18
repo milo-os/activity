@@ -85,7 +85,7 @@ Output Formats:
 CEL Filters:
   spec.changeSource       - "human" or "system"
   spec.actor.name         - Actor display name
-  spec.actor.type         - "user", "serviceaccount", "controller"
+  spec.actor.type         - "user", "serviceaccount", "system", "controller", "staff"
   spec.resource.kind      - Resource kind (Deployment, Pod, etc.)
   spec.resource.namespace - Resource namespace
   spec.resource.apiGroup  - API group

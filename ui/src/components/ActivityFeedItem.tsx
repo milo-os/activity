@@ -5,6 +5,7 @@ import type {
   TenantLinkResolver,
   TenantRenderer,
 } from "../types/activity";
+import { STAFF_ACTOR_NAME } from "../types/activity";
 import {
   ActivityFeedSummary,
   ResourceLinkClickHandler,
@@ -82,8 +83,10 @@ function getActorAvatarClasses(actorType: string, compact: boolean): string {
     case "user":
       return cn(baseClasses, "bg-primary text-primary-foreground");
     case "controller":
+    case "system":
       return cn(baseClasses, "bg-secondary text-secondary-foreground");
     case "machine account":
+    case "serviceaccount":
       return cn(baseClasses, "bg-muted text-muted-foreground");
     default:
       return cn(baseClasses, "bg-muted text-muted-foreground");
@@ -222,8 +225,10 @@ export function ActivityFeedItem({
   // single colSpan'd cell when expanded so the detail panel spans the full
   // table width. Tooltip primitives inherit the TooltipProvider mounted by
   // the parent ActivityFeed.
-  const actorVisible = actor.displayName || actor.name;
-  const actorInitialsSource = actor.displayName || actor.name;
+  // Staff actors are shown only as "Datum Support", with no email or UID.
+  const isStaff = actor.type === "staff";
+  const actorVisible = isStaff ? STAFF_ACTOR_NAME : actor.displayName || actor.name;
+  const actorInitialsSource = actorVisible;
 
   const avatar = (
     <div
@@ -233,9 +238,9 @@ export function ActivityFeedItem({
       )}
       onClick={onActorClick ? handleActorClick : undefined}
     >
-      {actor.type === "controller" ? (
+      {actor.type === "controller" || actor.type === "system" ? (
         <span className="text-xs">⚙</span>
-      ) : actor.type === "machine account" ? (
+      ) : actor.type === "machine account" || actor.type === "serviceaccount" ? (
         <span className="text-xs">🤖</span>
       ) : (
         <span className="uppercase">
@@ -250,10 +255,10 @@ export function ActivityFeedItem({
   const actorTooltipBody = (
     <div className="flex flex-col gap-0.5 text-xs">
       <span className="font-medium">{actorVisible}</span>
-      {actor.email && actor.email !== actorVisible ? (
+      {!isStaff && actor.email && actor.email !== actorVisible ? (
         <span className="font-mono">{actor.email}</span>
       ) : null}
-      {actor.uid ? (
+      {!isStaff && actor.uid ? (
         <span className="font-mono opacity-70">{actor.uid}</span>
       ) : null}
     </div>

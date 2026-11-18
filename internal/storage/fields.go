@@ -75,11 +75,12 @@ func GetAuditLogFacetColumn(field string) (string, error) {
 // Keys are API field paths (as used in queries), values are human-readable descriptions.
 var ActivityFacetFields = map[string]string{
 	"spec.actor.name":         "The name of the actor who performed the action",
-	"spec.actor.type":         "The type of actor (user, service, system)",
+	"spec.actor.type":         "The type of actor (user, serviceaccount, system, controller, staff)",
 	"spec.resource.apiGroup":  "The API group of the target resource",
 	"spec.resource.kind":      "The kind of the target resource",
 	"spec.resource.namespace": "The namespace of the target resource",
-	"spec.changeSource":       "The source of the change (human, automation, system)",
+	"spec.changeSource":       "The source of the change (human, system)",
+	"spec.interface.type":     "How the change was made, as reported by the client (console, cli, mcp, api, controller, terraform, unknown)",
 	"spec.source.planeType":   "The plane the underlying event originated from (management, edge)",
 	"spec.source.cluster":     "The cluster the underlying event originated from",
 	"spec.source.region":      "The region the underlying event originated from",
@@ -106,6 +107,7 @@ var activityFacetColumnMapping = map[string]string{
 	"spec.resource.kind":      "resource_kind",
 	"spec.resource.namespace": "resource_namespace",
 	"spec.changeSource":       "change_source",
+	"spec.interface.type":     "interface_type",
 	"spec.source.planeType":   "source_plane_type",
 	"spec.source.cluster":     "source_cluster",
 	"spec.source.region":      "source_region",

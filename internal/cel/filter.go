@@ -50,7 +50,11 @@ func (v *AuditLogFieldValidator) ValidateSelectExpr(sel *expr.Expr_Select) error
 }
 
 // AuditLogFieldMapper implements FieldMapper for audit log CEL expressions.
-type AuditLogFieldMapper struct{}
+type AuditLogFieldMapper struct {
+	// ColumnOverrides replaces mapped column names, for example to filter on
+	// redacted expressions instead of raw columns.
+	ColumnOverrides map[string]string
+}
 
 // MapIdentExpr maps bare identifiers to ClickHouse columns for audit logs.
 func (m *AuditLogFieldMapper) MapIdentExpr(ident *expr.Expr_Ident) (string, error) {
@@ -72,6 +76,17 @@ func (m *AuditLogFieldMapper) MapIdentExpr(ident *expr.Expr_Ident) (string, erro
 
 // MapSelectExpr maps field selectors to ClickHouse columns for audit logs.
 func (m *AuditLogFieldMapper) MapSelectExpr(sel *expr.Expr_Select) (string, error) {
+	col, err := m.mapSelectExpr(sel)
+	if err != nil {
+		return "", err
+	}
+	if override, ok := m.ColumnOverrides[col]; ok {
+		return override, nil
+	}
+	return col, nil
+}
+
+func (m *AuditLogFieldMapper) mapSelectExpr(sel *expr.Expr_Select) (string, error) {
 	operand := sel.GetOperand()
 	if operand == nil {
 		return "", fmt.Errorf("select expression missing operand")
@@ -196,6 +211,13 @@ func CompileFilter(filterExpr string) (*cel.Ast, error) {
 
 // ConvertToClickHouseSQL converts a CEL expression to a ClickHouse WHERE clause with tracing.
 func ConvertToClickHouseSQL(ctx context.Context, filterExpr string) (string, []any, error) {
+	return ConvertToClickHouseSQLWithColumns(ctx, filterExpr, nil)
+}
+
+// ConvertToClickHouseSQLWithColumns is ConvertToClickHouseSQL with mapped
+// column names replaced by overrides (for example "user" by a redacted
+// expression alias).
+func ConvertToClickHouseSQLWithColumns(ctx context.Context, filterExpr string, overrides map[string]string) (string, []any, error) {
 	_, span := tracer.Start(ctx, "cel.filter.convert",
 		trace.WithAttributes(attribute.String("cel.expression", filterExpr)),
 	)
@@ -215,7 +237,7 @@ func ConvertToClickHouseSQL(ctx context.Context, filterExpr string) (string, []a
 
 	span.SetAttributes(attribute.Bool("cel.valid", true))
 
-	converter := NewBaseSQLConverter(&AuditLogFieldMapper{})
+	converter := NewBaseSQLConverter(&AuditLogFieldMapper{ColumnOverrides: overrides})
 
 	sql, err := converter.ConvertExpr(ast.Expr())
 	if err != nil {

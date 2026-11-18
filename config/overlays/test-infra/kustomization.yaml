@@ -48,6 +48,7 @@ replacements:
 # Patches specific to test-infra environment
 patches:
   - path: patches/deployment-patch.yaml
+  - path: patches/staff-redaction-mode-patch.yaml   # No Milo here: domain-only staff redaction
   - path: patches/apiservice-patch.yaml
   - path: patches/vector-sidecar-patch.yaml
   - path: patches/clickhouse-affinity-patch.yaml        # Relaxed anti-affinity for single-node test cluster

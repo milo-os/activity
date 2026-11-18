@@ -470,6 +470,20 @@ func EvaluateCompiledAuditRules(
 	audit *auditv1.Event,
 	resolveKind processor.KindResolver,
 ) (*v1alpha1.Activity, int, error) {
+	return EvaluateCompiledAuditRulesWithEnrichment(policy, auditMap, audit, resolveKind, processor.Enrichment{})
+}
+
+// EvaluateCompiledAuditRulesWithEnrichment is like EvaluateCompiledAuditRules
+// but also enriches the actor and iam User links, and discloses staff actors
+// as Datum Support, using the given indexes. The zero Enrichment disables
+// both.
+func EvaluateCompiledAuditRulesWithEnrichment(
+	policy *CompiledPolicy,
+	auditMap map[string]any,
+	audit *auditv1.Event,
+	resolveKind processor.KindResolver,
+	enrichment processor.Enrichment,
+) (*v1alpha1.Activity, int, error) {
 	for i := range policy.AuditRules {
 		rule := &policy.AuditRules[i]
 		if !rule.Valid {
@@ -485,15 +499,15 @@ func EvaluateCompiledAuditRules(
 			// Use the interpreted summary evaluation (not pre-compiled EvaluateSummary) because
 			// link() calls capture links via a side-channel collector that must be freshly
 			// created per evaluation. The pre-compiled programs don't support link collection.
-			summary, links, err := internalcel.EvaluateAuditSummaryMap(rule.Summary, auditMap)
+			//
+			// The actor is classified before rendering, so a staff actor
+			// renders as Datum Support.
+			builder, render := enrichment.AuditBuilder(policy.APIGroup, policy.Kind, audit, auditMap)
+			summary, links, err := render(rule.Summary)
 			if err != nil {
 				return nil, i, fmt.Errorf("rule %d summary: %w", i, err)
 			}
 
-			builder := &processor.ActivityBuilder{
-				APIGroup: policy.APIGroup,
-				Kind:     policy.Kind,
-			}
 			activity, err := builder.BuildFromAudit(audit, summary, links, resolveKind)
 			if err != nil {
 				return nil, i, fmt.Errorf("rule %d build: %w", i, err)

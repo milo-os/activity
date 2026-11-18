@@ -23,6 +23,14 @@ type ProcessorOptions struct {
 	Kubeconfig string
 	MasterURL  string
 
+	// StaffEmailDomains are treated as Datum staff while staff membership
+	// cannot be checked (root --staff-email-domains flag).
+	StaffEmailDomains []string
+
+	// StaffRedactionMode is "required" or "domain-only" (root
+	// --staff-redaction-mode flag).
+	StaffRedactionMode string
+
 	// NATS configuration
 	Input          natsconn.Endpoint
 	NATSStreamName string
@@ -207,6 +215,12 @@ The processor:
 				return fmt.Errorf("failed to apply logging configuration: %w", err)
 			}
 			ctrl.SetLogger(klog.NewKlogr())
+			options.StaffEmailDomains = staffEmailDomains(cmd)
+			mode, err := staffRedactionMode(cmd)
+			if err != nil {
+				return err
+			}
+			options.StaffRedactionMode = mode
 			return RunProcessor(options)
 		},
 	}
@@ -260,6 +274,8 @@ func RunProcessor(options *ProcessorOptions) error {
 		AckWait:                   options.AckWait,
 		MaxDeliver:                5,
 		HealthProbeAddr:           options.HealthProbeAddr,
+		StaffEmailDomains:         options.StaffEmailDomains,
+		StaffRedactionMode:        options.StaffRedactionMode,
 	}
 
 	proc, err := activityprocessor.New(processorConfig, restConfig)

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -110,6 +111,14 @@ type ReindexJobReconciler struct {
 	NATSTLSCertFile string
 	NATSTLSKeyFile  string
 	NATSTLSCAFile   string
+
+	// StaffEmailDomains, when set, are passed to workers as
+	// --staff-email-domains so all components share one staff rule.
+	StaffEmailDomains []string
+
+	// StaffRedactionMode, when set, is passed to workers as
+	// --staff-redaction-mode.
+	StaffRedactionMode string
 }
 
 // +kubebuilder:rbac:groups=activity.miloapis.com,resources=reindexjobs,verbs=get;list;watch;update;patch;delete
@@ -345,6 +354,13 @@ func (r *ReindexJobReconciler) buildJobForReindexJob(reindexJob *v1alpha1.Reinde
 		if r.NATSTLSCAFile != "" {
 			controllerArgs = append(controllerArgs, "--nats-tls-ca-file="+r.NATSTLSCAFile)
 		}
+	}
+
+	if len(r.StaffEmailDomains) > 0 {
+		controllerArgs = append(controllerArgs, "--staff-email-domains="+strings.Join(r.StaffEmailDomains, ","))
+	}
+	if r.StaffRedactionMode != "" {
+		controllerArgs = append(controllerArgs, "--staff-redaction-mode="+r.StaffRedactionMode)
 	}
 
 	// Build resource requirements

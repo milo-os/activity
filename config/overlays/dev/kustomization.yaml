@@ -60,6 +60,7 @@ replacements:
 patches:
   - path: patches/deployment-patch.yaml
   - path: patches/activity-processor-patch.yaml
+  - path: patches/staff-redaction-mode-patch.yaml   # No Milo here: domain-only staff redaction
   - path: patches/controller-manager-patch.yaml
   - path: patches/apiservice-patch.yaml
   - path: patches/migration-job-patch.yaml

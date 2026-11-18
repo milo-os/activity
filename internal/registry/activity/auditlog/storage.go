@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -220,6 +221,9 @@ func (r *QueryStorage) validateQuerySpec(query *v1alpha1.AuditLogQuery) field.Er
 // convertToStructuredError translates internal database errors into actionable
 // Kubernetes status errors with appropriate HTTP codes and retry semantics.
 func (r *QueryStorage) convertToStructuredError(query *v1alpha1.AuditLogQuery, err error) error {
+	if stderrors.Is(err, storage.ErrStaffRedactionNotReady) {
+		return storage.StaffRedactionNotReadyError()
+	}
 	klog.ErrorS(err, "failed to execute query against clickhouse")
 
 	return errors.NewServiceUnavailable("Failed to execute query. Please try again later or contact support for help.")

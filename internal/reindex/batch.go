@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	auditv1 "k8s.io/apiserver/pkg/apis/audit/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	auditv1 "k8s.io/apiserver/pkg/apis/audit/v1"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -123,6 +125,15 @@ func fetchEventBatch(
 func (r *Reindexer) evaluateAuditBatch(ctx context.Context, batch []*auditv1.Event) ([]*v1alpha1.Activity, error) {
 	var activities []*v1alpha1.Activity
 
+	// Activities already recorded as staff access stay "Datum Support", even
+	// if the staff member has since joined the organization.
+	enrichment := r.Enrichment
+	keep, err := r.storedStaffActivities(ctx, batch)
+	if err != nil {
+		return nil, err
+	}
+	enrichment.KeepSupport = keep
+
 	for _, audit := range batch {
 		// Extract apiGroup and resource from the audit event's ObjectRef
 		if audit.ObjectRef == nil {
@@ -149,7 +160,7 @@ func (r *Reindexer) evaluateAuditBatch(ctx context.Context, batch []*auditv1.Eve
 
 		// Try each policy (first match wins)
 		for _, policy := range compiledPolicies {
-			activity, _, err := activityprocessor.EvaluateCompiledAuditRules(policy, auditMap, audit, r.kindResolver)
+			activity, _, err := activityprocessor.EvaluateCompiledAuditRulesWithEnrichment(policy, auditMap, audit, r.kindResolver, enrichment)
 			if err != nil {
 				klog.ErrorS(err, "Failed to evaluate compiled audit rules",
 					"policy", policy.Name,
@@ -175,6 +186,115 @@ func (r *Reindexer) evaluateAuditBatch(ctx context.Context, batch []*auditv1.Eve
 	)
 
 	return activities, nil
+}
+
+const (
+	// staffLookupChunk caps the names per ActivityQuery, keeping the filter
+	// well under CEL's expression size limit.
+	staffLookupChunk = 1000
+	// staffLookupWindow is the widest time range per ActivityQuery (the
+	// ActivityQuery maximum).
+	staffLookupWindow = 30 * 24 * time.Hour
+)
+
+// storedStaffActivities returns the names of the activities this batch could
+// replace that are already stored with a staff actor. The names are grouped
+// into time windows of at most 30 days and chunks of at most 1,000, queried
+// sequentially; any failure fails the batch. Events without a timestamp are
+// skipped: their activities were stamped at processing time, which is not
+// known here.
+func (r *Reindexer) storedStaffActivities(ctx context.Context, batch []*auditv1.Event) (map[string]bool, error) {
+	type candidate struct {
+		name string
+		ts   time.Time
+	}
+	var candidates []candidate
+	for _, audit := range batch {
+		if audit.ObjectRef == nil || audit.RequestReceivedTimestamp.IsZero() {
+			continue
+		}
+		for _, policy := range r.policyCache.Get(audit.ObjectRef.APIGroup, audit.ObjectRef.Resource) {
+			candidates = append(candidates, candidate{
+				name: processor.AuditActivityName(string(audit.AuditID), policy.APIGroup, policy.Kind),
+				ts:   audit.RequestReceivedTimestamp.Time,
+			})
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ts.Before(candidates[j].ts) })
+
+	lookup := r.staffActivities
+	if lookup == nil {
+		lookup = r.queryStaffActivities
+	}
+	keep := map[string]bool{}
+	for i := 0; i < len(candidates); {
+		// One group: names within staffLookupWindow (minus padding) of the
+		// first, at most staffLookupChunk of them.
+		windowStart := candidates[i].ts
+		j := i
+		for j < len(candidates) && j-i < staffLookupChunk &&
+			candidates[j].ts.Sub(windowStart) <= staffLookupWindow-2*time.Minute {
+			j++
+		}
+		names := make([]string, 0, j-i)
+		for _, c := range candidates[i:j] {
+			names = append(names, c.name)
+		}
+		found, err := lookup(ctx, names, windowStart.Add(-time.Minute), candidates[j-1].ts.Add(time.Minute))
+		if err != nil {
+			return nil, fmt.Errorf("failed to look up existing staff activities: %w", err)
+		}
+		for n := range found {
+			keep[n] = true
+		}
+		i = j
+	}
+	return keep, nil
+}
+
+// queryStaffActivities finds which named activities are stored with a staff
+// actor, via ActivityQuery (one ClickHouse query over actor_type and
+// activity_name per page).
+func (r *Reindexer) queryStaffActivities(ctx context.Context, names []string, start, end time.Time) (map[string]bool, error) {
+	filter := staffActivityFilter(names)
+
+	keep := map[string]bool{}
+	cursor := ""
+	for {
+		query := &v1alpha1.ActivityQuery{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "reindex-staff-"},
+			Spec: v1alpha1.ActivityQuerySpec{
+				StartTime: start.UTC().Format(time.RFC3339),
+				EndTime:   end.UTC().Format(time.RFC3339),
+				Filter:    filter,
+				Limit:     500,
+				Continue:  cursor,
+			},
+		}
+		if err := r.client.Create(ctx, query); err != nil {
+			return nil, fmt.Errorf("failed to create ActivityQuery: %w", err)
+		}
+		for _, a := range query.Status.Results {
+			keep[a.Name] = true
+		}
+		if query.Status.Continue == "" {
+			return keep, nil
+		}
+		cursor = query.Status.Continue
+	}
+}
+
+// staffActivityFilter is the ActivityQuery filter selecting the named
+// activities that have a staff actor.
+func staffActivityFilter(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = strconv.Quote(n)
+	}
+	return fmt.Sprintf(`spec.actor.type == %q && metadata.name in [%s]`, processor.ActorTypeStaff, strings.Join(quoted, ", "))
 }
 
 // evaluateEventBatch evaluates a batch of Kubernetes events using pre-compiled policies.
@@ -221,8 +341,10 @@ func (r *Reindexer) evaluateEventBatch(ctx context.Context, batch []map[string]i
 
 		// Build the Activity from the matched result
 		builder := &processor.ActivityBuilder{
-			APIGroup: matched.APIGroup,
-			Kind:     matched.Kind,
+			APIGroup:      matched.APIGroup,
+			Kind:          matched.Kind,
+			UserResolver:  r.Enrichment.Users,
+			StaffResolver: r.Enrichment.Staff,
 		}
 		activity, err := builder.BuildFromEvent(eventMap, matched.Summary, matched.Links, r.kindResolver)
 		if err != nil {

@@ -13,8 +13,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apiserver/pkg/registry/rest"
 	genericapiserver "k8s.io/apiserver/pkg/server"
+	restclient "k8s.io/client-go/rest"
+	"k8s.io/component-base/metrics/legacyregistry"
 	"k8s.io/klog/v2"
 
+	"go.miloapis.com/activity/internal/activityprocessor"
 	_ "go.miloapis.com/activity/internal/metrics"
 	"go.miloapis.com/activity/internal/registry/activity/activityquery"
 	"go.miloapis.com/activity/internal/registry/activity/auditlog"
@@ -92,6 +95,18 @@ type ExtraConfig struct {
 	ClickHouseConfig storage.ClickHouseConfig
 	NATSConfig       watch.NATSConfig
 	EventsNATSConfig watch.NATSConfig
+
+	// StaffEmailDomains are email domains whose users count as Datum staff
+	// when redacting tenant-scoped audit logs. Empty means the default;
+	// "none" disables the domain rule.
+	StaffEmailDomains []string
+
+	// StaffRedactionMode is "required" (default) or "domain-only".
+	StaffRedactionMode string
+
+	// miloClientConfig is the --kubeconfig client config (Milo in
+	// production), captured by Complete for the staff indexes.
+	miloClientConfig *restclient.Config
 }
 
 // Config combines generic and activity-specific configuration.
@@ -121,6 +136,7 @@ type CompletedConfig struct {
 
 // Complete validates and fills default values for the configuration.
 func (cfg *Config) Complete() CompletedConfig {
+	cfg.ExtraConfig.miloClientConfig = cfg.GenericConfig.ClientConfig
 	c := completedConfig{
 		cfg.GenericConfig.Complete(),
 		&cfg.ExtraConfig,
@@ -139,6 +155,29 @@ func (c completedConfig) New() (*ActivityServer, error) {
 	clickhouseStorage, err := storage.NewClickHouseStorage(c.ExtraConfig.ClickHouseConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ClickHouse storage: %w", err)
+	}
+
+	// Redact Datum staff identities in tenant-scoped audit log queries, with
+	// the same staff rule the processor applies to activities. The indexes
+	// watch Milo through the server's --kubeconfig client; until they sync,
+	// tenant-scoped audit log queries return 503. The User index only adds
+	// metadata.uids to the staff and member lists.
+	for _, collector := range activityprocessor.UseIndexMetricsNamespace("activity_apiserver") {
+		legacyregistry.RawMustRegister(collector)
+	}
+	staffIndex, userIndex, err := newStaffIndex(c.ExtraConfig.miloClientConfig, c.ExtraConfig.StaffEmailDomains, c.ExtraConfig.StaffRedactionMode)
+	if err != nil {
+		return nil, err
+	}
+	clickhouseStorage.SetStaffScopes(staffIndex)
+	if err := genericServer.AddPostStartHook("activity-staff-indexes", func(ctx genericapiserver.PostStartHookContext) error {
+		staffIndex.Start(ctx.Context)
+		if userIndex != nil {
+			userIndex.Start(ctx.Context)
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to add staff index start hook: %w", err)
 	}
 
 	// Create NATS watcher for Watch API (optional - returns nil if not configured)
@@ -325,6 +364,36 @@ func (s *ActivityServer) installEventsAPIGroup(eventsBackend *storage.ClickHouse
 
 	klog.Info("Installed events.k8s.io/v1 API group for Events")
 	return nil
+}
+
+// newStaffIndex builds the staff disclosure indexes, and a User index for
+// mapping names to uids and reading emails, from the Milo client config. In
+// the required mode a missing client or a failure to build the indexes is an
+// error; in the domain-only mode no indexes are built.
+func newStaffIndex(restConfig *restclient.Config, domains []string, mode string) (*activityprocessor.StaffIndex, *activityprocessor.UserIndex, error) {
+	mode, err := activityprocessor.ParseStaffRedactionMode(mode)
+	if err != nil {
+		return nil, nil, err
+	}
+	if mode == activityprocessor.StaffRedactionDomainOnly {
+		activityprocessor.WarnDomainOnlyStaffRedaction("activity-apiserver", activityprocessor.ResolveStaffEmailDomains(domains))
+		return activityprocessor.NewDomainOnlyStaffIndex(domains), nil, nil
+	}
+	if restConfig == nil {
+		return nil, nil, fmt.Errorf("staff redaction mode %q needs a Milo client (--kubeconfig); use --staff-redaction-mode=%s only in clusters without Milo",
+			mode, activityprocessor.StaffRedactionDomainOnly)
+	}
+	staff, err := activityprocessor.NewStaffIndex(restConfig, domains)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create staff disclosure indexes: %w", err)
+	}
+	users, err := activityprocessor.NewUserIndex(restConfig)
+	if err != nil {
+		klog.ErrorS(err, "Failed to create iam User index; staff are matched by User name only and organization members with staff-domain emails are over-redacted")
+		return staff, nil, nil
+	}
+	staff.SetUserResolver(users)
+	return staff, users, nil
 }
 
 // Run starts the server and ensures storage cleanup on shutdown.

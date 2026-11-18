@@ -16,5 +16,6 @@ if command -v activitytool >/dev/null 2>&1 || [[ -x ./bin/activitytool ]]; then
 fi
 
 echo "The milo-activity plugin detected ActivityPolicy files in this repository, but activitytool is not on PATH (or ./bin/activitytool)."
-echo "Use the milo-activity:test-policy skill to run policy tests via Taskfile (task test-activity-policies / task test:policies), the ghcr.io/milo-os/activitytool container image, or install activitytool with:"
-echo "  go install go.miloapis.com/activity/cmd/activitytool@latest"
+echo "Follow the milo-activity:test-policy skill to get it: Taskfile (task test-activity-policies / task test:policies), the ghcr.io/milo-os/activitytool image at a resolved release tag, or:"
+echo "  go install go.miloapis.com/activity/cmd/activitytool@<release tag that includes activitytool>"
+echo "Resolve tags with 'gh release list -R milo-os/activity'; never guess one. Inside the activity repo, use 'go run ./cmd/activitytool'."

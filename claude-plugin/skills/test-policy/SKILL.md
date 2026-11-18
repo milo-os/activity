@@ -14,22 +14,41 @@ description: >
 Use `activitytool` to validate `ActivityPolicy` CEL rules and run declarative
 unit tests (`*.test.yaml`) offline without a Kubernetes cluster.
 
-## 1. Run `activitytool` (Docker image or local binary)
+## 1. Get a working `activitytool`
 
-Check if `activitytool` is installed locally (`command -v activitytool` or
-`./bin/activitytool`):
+### Resolve versions first
 
-- **Docker image (recommended in service repos & CI):**
+- Never invent a tag. Use only tags you have listed:
   ```bash
-  docker run --rm -v "$PWD:/work:ro" -w /work \
-    ghcr.io/milo-os/activitytool:<version> <subcommand...>
+  gh release list -R milo-os/activity      # activitytool image / go install tag
+  gh release list -R datum-cloud/actions   # reusable CI workflow tag
+  # without gh:
+  git ls-remote --tags https://github.com/milo-os/activity
+  git ls-remote --tags https://github.com/datum-cloud/actions
   ```
-  Note: when running inside Docker, keep all policy and test paths relative to
-  the mounted repository root (no `..` escaping `/work` and no host absolute
-  paths).
-- **Inside the `activity` repository:** `task build:activitytool` (or `go run ./cmd/activitytool`).
-- **In any repo with `Taskfile.yaml` wired:** `task test-activity-policies`.
-- **Direct Go install:** `go install go.miloapis.com/activity/cmd/activitytool@latest`.
+- The tag must be a release that contains `activitytool` (older releases do
+  not ship it). If none does, say so and use a fallback below.
+- When the Activity version deployed in the target environment is known, use
+  the same `activitytool` tag so CEL behaviour matches production.
+
+### Try in this order; use the first that works
+
+1. Existing binary: `activitytool` on `PATH`, or `./bin/activitytool`.
+2. Taskfile target, if the repo defines it: `task test-activity-policies`
+   (service repos) or `task test:policies` (activity repo).
+3. Docker image at a resolved tag:
+   ```bash
+   docker run --rm -v "$PWD:/work:ro" -w /work \
+     ghcr.io/milo-os/activitytool:<resolved-tag> <subcommand...>
+   ```
+   Only `$PWD` is mounted: keep every path relative to it (no `..`, no host
+   absolute paths).
+4. `go install go.miloapis.com/activity/cmd/activitytool@<resolved-tag>`
+5. Inside the `activity` repo: `go run ./cmd/activitytool <subcommand...>`
+   (or `task build:activitytool`, which writes `./bin/activitytool`).
+
+If every option fails, tell the user what failed and why. Never silently skip
+running the tests or report them as passing.
 
 ## 2. Validate policies before writing tests
 
@@ -141,6 +160,21 @@ Test case assertion keys (or nested under `exp_activity:`):
 - `exp_tenant`: `{ type, name }`.
 - `exp_links`: ordered list of `{ marker, apiGroup, kind, name, namespace, uid }` (or nested `resource:`).
 
+### Test file rules
+- One YAML document per test file. Only the first `---` document is read.
+- Do not combine `exp_no_match: true` with other assertions; it silently
+  overrides them. Write a separate case instead.
+- Policy `metadata.name` must be unique across all loaded policy files.
+- With `policy:` set, the tool does not check that `audit.objectRef` /
+  `event.regarding` matches the policy's `spec.resource`. Make inputs target
+  the right resource yourself.
+
+### Realistic inputs
+When the `activity` MCP server is available, base inputs on real data:
+`query_audit_logs` (audit rules) or `query_events` (event rules), filtered to
+the policy's resource. Trim each sample to the fields the rules read, and
+remove secrets, tokens, real emails, IPs, and other sensitive values.
+
 ### What to always test for each policy
 1. **Exact English summary (`exp_summary`)** for every rule, verifying grammar, spacing, and fallback branches when optional fields (like `requestObject.spec` or `responseObject.metadata.name`) are missing.
 2. **Rule ordering (`exp_rule`)** when specific rules precede generic ones (e.g., `evict` before `create`, `scale` before `update`, `accepted` before `update`).
@@ -160,12 +194,33 @@ Or via Docker:
 
 ```bash
 docker run --rm -v "$PWD:/work:ro" -w /work \
-  ghcr.io/milo-os/activitytool:<version> \
+  ghcr.io/milo-os/activitytool:<resolved-tag> \
   test -o json --policies config/services/activity/policies test/activity-policies
 ```
 
 Use `-o json` to inspect structured `failures`, `actualSummary`, `matchedRule`,
 and `untestedPolicies` when iterating automatically.
+
+### When a test fails
+- Do not copy `actualSummary` (or any actual value) into the expectation.
+  That makes the test pass by definition and proves nothing.
+- Derive the expected output from the policy's intent or the user's
+  requirement, then decide whether the policy or the test is wrong before
+  changing either.
+- If the intended output is unclear, ask the user.
+- Re-run until all tests pass. Report the final result, including any test you
+  could not make pass.
+
+### Known parity limits (a pass does not prove these)
+The tool can differ from the production processor:
+- Event rules: link `apiGroup`/`apiVersion` derived from `apiVersion` may be
+  filled in by the tool but empty in production.
+- Event rules: in production a `match` error is logged and evaluation moves to
+  the next rule; the tool fails the test. Guard optional fields with `has()`.
+- Only one policy is evaluated per test case, so shadowing across different
+  policies for the same resource is not detected.
+- With an explicit `policy:`, the input's resource is not checked against
+  `spec.resource` (see Test file rules).
 
 ## 5. Set up Taskfile and GitHub Actions CI in a repository
 
@@ -180,7 +235,7 @@ Renovate keeps the image tag updated, while letting developers with a local
 ```yaml
 vars:
   # renovate: datasource=docker depName=ghcr.io/milo-os/activitytool
-  ACTIVITYTOOL_IMAGE: ghcr.io/milo-os/activitytool:<version>
+  ACTIVITYTOOL_IMAGE: ghcr.io/milo-os/activitytool:<resolved-tag>
 
 tasks:
   test-activity-policies:
@@ -200,7 +255,7 @@ tasks:
 
 ### 2. Add `.github/workflows/test-activity-policies.yaml`
 
-Call the reusable workflow in `datum-cloud/actions` pinned to a release tag:
+Call the reusable workflow in `datum-cloud/actions`, pinned to a tag resolved in step 1 (never a branch or an invented tag):
 
 ```yaml
 name: Activity Policy Tests
@@ -223,10 +278,24 @@ permissions:
 
 jobs:
   test-activity-policies:
-    uses: datum-cloud/actions/.github/workflows/test-activity-policies.yaml@<release-tag>
+    uses: datum-cloud/actions/.github/workflows/test-activity-policies.yaml@<resolved-tag>
     with:
       policies-path: config/services/activity/policies
       tests-path: test/activity-policies
 ```
 
 If the repository does not have tests yet, omit `tests-path` (or set `fail-on-untested: false`, the default) so CI still validates every `ActivityPolicy` manifest and lists untested ones.
+
+### 3. CI rules
+- The workflow runs `activitytool` in Docker with only the checkout mounted.
+  `path`, `policies-path`, `policy_files`, and kustomize bases must not reach
+  outside it with `..`.
+- Auto-discovery can pick up kustomize patch files (`kind: ActivityPolicy` with
+  a partial spec) as policies. When overlays contain patches, set
+  `policies-path` explicitly to the kustomization directory.
+- Other inputs: `path` (default `.`), `fail-on-untested` (default `false`),
+  `allow-empty` (default `false`), `activitytool-version` (override the
+  pinned tool tag; use a resolved tag).
+- Before pushing, run the same check locally: the Taskfile target, or the
+  exact `activitytool test --policies <policies-path> <tests-path>` command
+  that CI runs. Fix failures before opening the PR.

@@ -1,7 +1,7 @@
 # milo-activity Claude Code plugin
 
-Query audit logs, investigate incidents, and author ActivityPolicies with the
-Activity service from Claude Code.
+Query audit logs, investigate incidents, and author and test ActivityPolicies
+with the Activity service from Claude Code.
 
 Install it from the Datum Cloud marketplace:
 
@@ -11,7 +11,24 @@ claude plugin install milo-activity@datum-claude-code-plugins
 ```
 
 The `activity` binary must be on your PATH and configured as an MCP server
-separately; see [docs/guides/mcp-server.md](../docs/guides/mcp-server.md).
+separately for live cluster tools; see [docs/guides/mcp-server.md](../docs/guides/mcp-server.md).
+Offline policy validation and unit testing use `activitytool` (see
+[docs/guides/testing-policies.md](../docs/guides/testing-policies.md)), available
+as the `ghcr.io/milo-os/activitytool` container image or via
+`go install go.miloapis.com/activity/cmd/activitytool@latest`.
+
+## Skills
+
+| Skill | Purpose |
+|---|---|
+| `author-policy` | Create or edit an `ActivityPolicy` from live audit/event samples |
+| `preview-policy` | Preview an `ActivityPolicy` against live cluster samples |
+| `test-policy` | Validate and unit-test `ActivityPolicy` rules offline with `activitytool`, and wire CI |
+| `investigate` | Start an incident investigation |
+| `investigate-incident` | Investigate cluster incidents via audit logs and events |
+| `audit-user` | Audit a user's recent activity |
+| `activity-summary` | Summarize recent cluster activity |
+| `status` | Quick recent cluster activity summary |
 
 ## Developing the plugin
 

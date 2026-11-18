@@ -1,0 +1,179 @@
+policy_files:
+  - ../../examples/basic-kubernetes
+
+tests:
+  - name: deployment create by human links actor and deployment
+    audit:
+      verb: create
+      user:
+        username: alice@example.com
+        uid: user-alice
+      objectRef:
+        apiGroup: apps
+        resource: deployments
+        namespace: default
+        name: web-frontend
+    exp_rule: create
+    exp_summary: "alice@example.com deployed web-frontend"
+    exp_change_source: human
+    exp_actor:
+      type: user
+      name: alice@example.com
+      email: alice@example.com
+    exp_links:
+      - marker: alice@example.com
+        kind: user
+        name: alice@example.com
+      - marker: web-frontend
+        apiGroup: apps
+        kind: Deployment
+        namespace: default
+        name: web-frontend
+
+  - name: deployment scale subresource matches scale before generic update
+    audit:
+      verb: patch
+      user:
+        username: bob@example.com
+      objectRef:
+        apiGroup: apps
+        resource: deployments
+        namespace: production
+        name: api-server
+        subresource: scale
+    exp_rule: scale
+    exp_summary: "bob@example.com scaled api-server"
+    exp_change_source: human
+
+  - name: deployment read verb produces no activity
+    policy: apps-deployments
+    audit:
+      verb: get
+      user:
+        username: alice@example.com
+      objectRef:
+        apiGroup: apps
+        resource: deployments
+        namespace: default
+        name: web-frontend
+    exp_no_match: true
+
+  - name: pod eviction matches evict rule before create rule
+    audit:
+      verb: create
+      user:
+        username: system:serviceaccount:kube-system:node-controller
+      objectRef:
+        apiGroup: ""
+        resource: pods
+        namespace: default
+        name: worker-0
+        subresource: eviction
+    exp_rule: evict
+    exp_summary: "System evicted worker-0"
+    exp_change_source: system
+    exp_links:
+      - marker: worker-0
+        apiGroup: ""
+        kind: Pod
+        namespace: default
+        name: worker-0
+
+  - name: pod start by human matches create rule
+    audit:
+      verb: create
+      user:
+        username: dev@example.com
+      objectRef:
+        apiGroup: ""
+        resource: pods
+        namespace: default
+        name: debug-pod
+    exp_rule: create
+    exp_summary: "dev@example.com started debug-pod"
+
+  - name: pod scheduled event renders summary and link
+    event:
+      reason: Scheduled
+      note: Successfully assigned default/debug-pod to worker-1
+      reportingController: default-scheduler
+      regarding:
+        apiVersion: v1
+        kind: Pod
+        namespace: default
+        name: debug-pod
+    exp_rule: scheduled
+    exp_summary: "debug-pod scheduled to node Successfully assigned default/debug-pod to worker-1"
+    exp_change_source: system
+    exp_actor:
+      type: controller
+      name: default-scheduler
+    exp_links:
+      - marker: debug-pod
+        apiGroup: ""
+        kind: Pod
+        namespace: default
+        name: debug-pod
+
+  - name: node ready event matches node-events
+    event:
+      reason: NodeReady
+      note: Node worker-1 status is now NodeReady
+      reportingController: kubelet
+      regarding:
+        apiVersion: v1
+        kind: Node
+        name: worker-1
+    exp_rule: node-ready
+    exp_summary: "Node worker-1 is ready"
+
+  - name: deployment scaling event matches deployment-events
+    event:
+      reason: ScalingReplicaSet
+      note: Scaled up replica set web-frontend-7d9c to 3
+      reportingController: deployment-controller
+      regarding:
+        apiVersion: apps/v1
+        kind: Deployment
+        namespace: default
+        name: web-frontend
+    exp_rule: scaling-replicaset
+    exp_summary: "Scaling replica set for web-frontend"
+
+  - name: clusterrole create matches rbac-clusterroles
+    audit:
+      verb: create
+      user:
+        username: secops@example.com
+      objectRef:
+        apiGroup: rbac.authorization.k8s.io
+        resource: clusterroles
+        name: view-logs
+    exp_rule: create
+    exp_summary: "secops@example.com defined cluster-wide permissions view-logs"
+
+  - name: ingress create matches networking-ingresses
+    audit:
+      verb: create
+      user:
+        username: alice@example.com
+      objectRef:
+        apiGroup: networking.k8s.io
+        resource: ingresses
+        namespace: default
+        name: public-api
+    exp_rule: create
+    exp_summary: "alice@example.com exposed route public-api"
+
+  - name: batch job create matches batch-jobs
+    audit:
+      verb: create
+      user:
+        username: alice@example.com
+      objectRef:
+        apiGroup: batch
+        resource: jobs
+        namespace: default
+        name: db-migrate
+    exp_rule: create
+    exp_summary: "alice@example.com started job db-migrate"

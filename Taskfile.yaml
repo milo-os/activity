@@ -5,6 +5,7 @@ vars:
   # Container image configuration
   ACTIVITY_IMAGE_NAME: "ghcr.io/milo-os/activity"
   ACTIVITY_UI_IMAGE_NAME: "ghcr.io/milo-os/activity-ui"
+  ACTIVITYTOOL_IMAGE_NAME: "ghcr.io/milo-os/activitytool"
   ACTIVITY_IMAGE_TAG: "dev"
   TEST_INFRA_CLUSTER_NAME: "test-infra"
   # Test infra repository configuration - can be overridden with environment variable
@@ -87,6 +88,38 @@ tasks:
         echo "✅ Binary built: {{.TOOL_DIR}}/activity"
     silent: true
 
+  build:activitytool:
+    desc: Build the activitytool CLI binary for offline ActivityPolicy validation and testing
+    cmds:
+      - |
+        set -e
+        echo "Building activitytool..."
+        mkdir -p {{.TOOL_DIR}}
+
+        GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+        VERSION="v0.0.0-dev+${GIT_COMMIT:0:7}"
+        GIT_TREE_STATE="clean"
+        if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+          GIT_TREE_STATE="dirty"
+        fi
+        BUILD_DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "unknown")
+
+        go build \
+          -ldflags="-X 'go.miloapis.com/activity/internal/version.Version=${VERSION}' \
+                    -X 'go.miloapis.com/activity/internal/version.GitCommit=${GIT_COMMIT}' \
+                    -X 'go.miloapis.com/activity/internal/version.GitTreeState=${GIT_TREE_STATE}' \
+                    -X 'go.miloapis.com/activity/internal/version.BuildDate=${BUILD_DATE}'" \
+          -o {{.TOOL_DIR}}/activitytool ./cmd/activitytool
+        echo "✅ Binary built: {{.TOOL_DIR}}/activitytool"
+    silent: true
+
+  test:policies:
+    desc: Validate and unit-test example ActivityPolicies with activitytool
+    deps:
+      - build:activitytool
+    cmds:
+      - "{{.TOOL_DIR}}/activitytool test --policies examples/basic-kubernetes test/policies"
+
   # Development tasks
   dev:build:
     desc: Build the Activity server container image for development
@@ -121,6 +154,31 @@ tasks:
           --build-arg BUILD_DATE="${BUILD_DATE}" \
           -t "{{.ACTIVITY_IMAGE_NAME}}:{{.ACTIVITY_IMAGE_TAG}}" .
         echo "Successfully built {{.ACTIVITY_IMAGE_NAME}}:{{.ACTIVITY_IMAGE_TAG}}"
+
+  dev:build-activitytool:
+    desc: Build the activitytool CLI container image for development
+    silent: true
+    cmds:
+      - |
+        set -e
+        echo "Building activitytool container image: {{.ACTIVITYTOOL_IMAGE_NAME}}:{{.ACTIVITY_IMAGE_TAG}}"
+
+        GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+        VERSION="v0.0.0-dev+${GIT_COMMIT:0:7}"
+        GIT_TREE_STATE="clean"
+        if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+          GIT_TREE_STATE="dirty"
+        fi
+        BUILD_DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "unknown")
+
+        docker build \
+          --build-arg VERSION="${VERSION}" \
+          --build-arg GIT_COMMIT="${GIT_COMMIT}" \
+          --build-arg GIT_TREE_STATE="${GIT_TREE_STATE}" \
+          --build-arg BUILD_DATE="${BUILD_DATE}" \
+          -t "{{.ACTIVITYTOOL_IMAGE_NAME}}:{{.ACTIVITY_IMAGE_TAG}}" \
+          -f cmd/activitytool/Dockerfile .
+        echo "Successfully built {{.ACTIVITYTOOL_IMAGE_NAME}}:{{.ACTIVITY_IMAGE_TAG}}"
 
   dev:load:
     desc: Load the Activity server container image into the kind cluster

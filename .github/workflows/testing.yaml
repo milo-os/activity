@@ -21,6 +21,8 @@ jobs:
         run: go mod download
       - name: Execute golang tests
         run: go test -timeout 5m ./...
+      - name: Validate and test example ActivityPolicies
+        run: go run ./cmd/activitytool test --policies examples/basic-kubernetes test/policies
   ui-tests:
     name: UI lint, typecheck, build, e2e
     runs-on: ubuntu-24.04

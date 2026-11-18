@@ -242,12 +242,19 @@ func (p *EventProcessor) processMessage(ctx context.Context, msg *nats.Msg) erro
 // This ensures CEL expressions can consistently use event.regarding regardless
 // of whether the original event used "regarding" or "involvedObject".
 func (p *EventProcessor) normalizeEvent(event map[string]interface{}, involvedObject map[string]interface{}) map[string]interface{} {
-	// If the event already has "regarding", return as-is.
-	if _, ok := event["regarding"]; ok {
+	return normalizeEventMap(event, involvedObject)
+}
+
+// normalizeEventMap returns a copy of event with "regarding" populated from
+// involvedObject when "regarding" is absent or nil.
+func normalizeEventMap(event map[string]interface{}, involvedObject map[string]interface{}) map[string]interface{} {
+	if _, ok := event["regarding"].(map[string]interface{}); ok {
+		return event
+	}
+	if involvedObject == nil {
 		return event
 	}
 
-	// Create a shallow copy with "regarding" added.
 	normalized := make(map[string]interface{}, len(event)+1)
 	for k, v := range event {
 		normalized[k] = v

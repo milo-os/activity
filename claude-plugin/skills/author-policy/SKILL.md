@@ -30,7 +30,11 @@ For detailed CEL variable definitions and function reference, see
 
 6. **Iterate**: Fix errors, improve summaries, add rules for unmatched inputs.
 
-7. **Save**: Write the final YAML file.
+7. **Write offline unit tests & validate**: Follow [test-policy](../test-policy/SKILL.md)
+   to add `*.test.yaml` cases asserting exact English summaries, rule ordering,
+   links, and no-match behavior, then verify with `activitytool test`.
+
+8. **Save**: Write the final YAML policy and test files.
 
 ## Quick Example
 

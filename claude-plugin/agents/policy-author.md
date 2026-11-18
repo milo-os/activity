@@ -90,4 +90,5 @@ true                              # fallback rule (must be last)
 
 - You have **no Bash access**. You cannot `kubectl apply` policies — only write YAML files.
 - Always preview policies before declaring them ready.
+- Suggest or draft accompanying `*.test.yaml` unit tests (per `skills/test-policy/SKILL.md`) so the user can verify exact English summaries and rule ordering offline with `activitytool test`.
 - If CEL errors occur during preview, explain the error and suggest a fix.

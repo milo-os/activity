@@ -3,6 +3,8 @@ package processor
 import (
 	"reflect"
 	"testing"
+
+	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 )
 
 // TestEventBuildersParity asserts EventProcessor.buildActivity (the live path)
@@ -159,5 +161,53 @@ func TestActivityBuilderBuildFromEventTimestampFallbackChain(t *testing.T) {
 	got := activity.CreationTimestamp.UTC().Format("2006-01-02T15:04:05Z")
 	if got != want {
 		t.Errorf("CreationTimestamp = %q, want %q (should fall back to lastTimestamp)", got, want)
+	}
+}
+
+// TestEvaluateEventRulesNormalizesInvolvedObject asserts EvaluateEventRules
+// populates event.regarding from legacy involvedObject, matching EventProcessor.
+func TestEvaluateEventRulesNormalizesInvolvedObject(t *testing.T) {
+	spec := &v1alpha1.ActivityPolicySpec{
+		Resource: v1alpha1.ActivityPolicyResource{
+			APIGroup: "",
+			Kind:     "Pod",
+		},
+		EventRules: []v1alpha1.ActivityPolicyRule{
+			{
+				Name:    "scheduled",
+				Match:   `event.reason == "Scheduled" && event.regarding.name == "my-pod"`,
+				Summary: `Pod {{ link(event.regarding.name, event.regarding) }} scheduled`,
+			},
+		},
+	}
+
+	event := map[string]any{
+		"reason": "Scheduled",
+		"source": map[string]any{
+			"component": "default-scheduler",
+		},
+		"involvedObject": map[string]any{
+			"kind":       "Pod",
+			"name":       "my-pod",
+			"namespace":  "default",
+			"apiVersion": "v1",
+		},
+	}
+
+	res, err := EvaluateEventRules(spec, event, nil)
+	if err != nil {
+		t.Fatalf("EvaluateEventRules() error = %v", err)
+	}
+	if res.MatchedRuleIndex != 0 || res.MatchedRuleName != "scheduled" {
+		t.Fatalf("expected rule 0 (scheduled) to match, got index=%d name=%q", res.MatchedRuleIndex, res.MatchedRuleName)
+	}
+	if res.Activity == nil {
+		t.Fatal("expected Activity to be non-nil")
+	}
+	if res.Activity.Spec.Summary != "Pod my-pod scheduled" {
+		t.Errorf("Summary = %q, want %q", res.Activity.Spec.Summary, "Pod my-pod scheduled")
+	}
+	if len(res.Activity.Spec.Links) != 1 || res.Activity.Spec.Links[0].Resource.Name != "my-pod" {
+		t.Errorf("unexpected Links = %+v", res.Activity.Spec.Links)
 	}
 }

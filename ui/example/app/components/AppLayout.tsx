@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link, useLocation } from "@remix-run/react";
+import { Link, useLocation } from "react-router";
 import { Github, BookOpen } from "lucide-react";
 
 interface AppLayoutProps {

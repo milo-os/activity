@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import https from "https";
 import http from "http";
 import { getKubeConfig } from "~/lib/kubeconfig.server";

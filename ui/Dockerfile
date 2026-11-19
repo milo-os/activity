@@ -24,6 +24,7 @@ COPY example/app/ ./example/app/
 COPY example/public/ ./example/public/
 COPY example/tsconfig.json ./example/
 COPY example/vite.config.ts ./example/
+COPY example/react-router.config.ts ./example/
 COPY example/tailwind.config.js ./example/
 COPY example/postcss.config.js ./example/
 
@@ -34,7 +35,7 @@ RUN pnpm install --frozen-lockfile && \
     pnpm deploy --filter activity-ui-example --prod --legacy /deploy && \
     cp -r example/build /deploy/build
 
-# Runtime stage - Node.js for Remix server
+# Runtime stage - Node.js for React Router server
 FROM node:26.13.1-alpine3.24 AS runtime
 
 RUN apk add --no-cache --upgrade 'ca-certificates>=20261020-r0'
@@ -55,5 +56,5 @@ ENV NODE_ENV=production
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q --spider http://localhost:3000/health || exit 1
 
-# Start the Remix server (use node_modules binary directly to avoid npx issues)
-CMD ["node", "./node_modules/@remix-run/serve/dist/cli.js", "./build/server/index.js"]
+# Start the React Router server (use node_modules binary directly to avoid npx issues)
+CMD ["node", "./node_modules/@react-router/serve/bin.js", "./build/server/index.js"]

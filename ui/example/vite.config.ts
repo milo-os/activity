@@ -1,4 +1,4 @@
-import { vitePlugin as remix } from "@remix-run/dev";
+import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { resolve } from "path";
@@ -9,9 +9,7 @@ export default defineConfig({
   },
   plugins: [
     tailwindcss(),
-    remix({
-      ssr: true,
-    }),
+    reactRouter(),
   ],
   resolve: {
     alias: {
@@ -28,7 +26,7 @@ export default defineConfig({
     esbuildOptions: {
       target: ["chrome107", "edge107", "firefox104", "safari16"],
     },
-    exclude: ["@remix-run/react", "monaco-editor"],
+    exclude: ["monaco-editor"],
   },
   worker: {
     format: 'es',

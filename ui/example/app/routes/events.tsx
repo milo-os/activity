@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "@remix-run/react";
+import { useSearchParams } from "react-router";
 import {
   EventsFeed,
   ActivityApiClient,

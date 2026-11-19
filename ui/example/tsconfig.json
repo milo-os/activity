@@ -16,13 +16,15 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "esModuleInterop": true,
-    "types": ["@remix-run/node", "vite/client"],
+    "types": ["@react-router/node", "vite/client"],
+    "rootDirs": [".", "./.react-router/types"],
     "baseUrl": ".",
     "paths": {
       "~/*": ["./app/*"]
     }
   },
   "include": [
+    ".react-router/types/**/*",
     "**/*.ts",
     "**/*.tsx",
     "**/.server/**/*.ts",

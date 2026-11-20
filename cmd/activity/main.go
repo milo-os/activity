@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	activityapiserver "go.miloapis.com/activity/internal/apiserver"
+	"go.miloapis.com/activity/internal/apiserver/filterparam"
 	"go.miloapis.com/activity/internal/storage"
 	"go.miloapis.com/activity/internal/version"
 	"go.miloapis.com/activity/internal/watch"
@@ -270,6 +272,11 @@ func (o *ActivityServerOptions) Config() (*activityapiserver.Config, error) {
 	}
 
 	genericConfig := genericapiserver.NewRecommendedConfig(activityapiserver.Codecs)
+
+	// Innermost, so it runs after authn/authz, right before the REST handlers.
+	genericConfig.BuildHandlerChainFunc = func(h http.Handler, c *genericapiserver.Config) http.Handler {
+		return genericapiserver.DefaultBuildHandlerChain(filterparam.Handler(h), c)
+	}
 
 	// Set effective version to match the Kubernetes version we're built against.
 	genericConfig.EffectiveVersion = basecompatibility.NewEffectiveVersionFromString("1.34", "", "")

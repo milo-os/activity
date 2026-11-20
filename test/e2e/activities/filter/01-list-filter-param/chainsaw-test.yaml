@@ -1,0 +1,49 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: activities-list-filter-param
+spec:
+  description: |
+    Verify the `filter` query parameter reaches the activities REST handler
+    through the real handler chain. List and Watch share the same filter path,
+    so this also covers the watch stream (#262). The handler's errors must be
+    BadRequest, not ServiceUnavailable, so bad input never looks like an outage.
+  steps:
+  - name: accept-valid-filter
+    try:
+    - script:
+        content: |
+          kubectl get --raw "/apis/activity.miloapis.com/v1alpha1/activities?filter=spec.changeSource%20%3D%3D%20%27human%27"
+        check:
+          ($error == null): true
+
+  - name: reject-invalid-filter
+    try:
+    - script:
+        content: |
+          kubectl get --raw "/apis/activity.miloapis.com/v1alpha1/activities?filter=spec.nope%20%3D%3D%201"
+        check:
+          ($error != null): true
+          (contains($stderr, 'BadRequest')): true
+          (contains($stderr, 'invalid filter')): true
+
+  # Valid CEL that ClickHouse can't run: rejected by the handler, not the query.
+  - name: reject-filter-unsupported-by-clickhouse
+    try:
+    - script:
+        content: |
+          kubectl get --raw "/apis/activity.miloapis.com/v1alpha1/activities?filter=spec.relatedUIDs.all(u%2C%20u%20%21%3D%20%27%27)"
+        check:
+          ($error != null): true
+          (contains($stderr, 'BadRequest')): true
+          (contains($stderr, 'macros such as all()')): true
+
+  # Rejected by the apiserver's field selector conversion, before the handler.
+  - name: reject-unsupported-field-selector
+    try:
+    - script:
+        content: |
+          kubectl get --raw "/apis/activity.miloapis.com/v1alpha1/activities?fieldSelector=spec.actor.email%3Dalice%40example.com"
+        check:
+          ($error != null): true
+          (contains($stderr, 'BadRequest')): true

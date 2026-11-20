@@ -2,7 +2,11 @@ package cel
 
 import (
 	"context"
+	"fmt"
+	"maps"
+	"math"
 	"reflect"
+	"slices"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -558,6 +562,42 @@ func TestEvaluateActivity_NilFilter(t *testing.T) {
 	}
 }
 
+// TestEvaluateActivity_CostLimit runs a nested comprehension (~n² iterations,
+// each costing at least 1) with n chosen to land either side of the limit.
+func TestEvaluateActivity_CostLimit(t *testing.T) {
+	compiled, err := CompileActivityFilterProgram(
+		"spec.relatedUIDs.all(a, spec.relatedUIDs.all(b, true))")
+	if err != nil {
+		t.Fatalf("CompileActivityFilterProgram() error = %v", err)
+	}
+
+	root := int(math.Sqrt(float64(activityFilterCostLimit)))
+	tests := []struct {
+		name    string
+		n       int
+		wantErr bool
+	}{
+		// limit/100 iterations, so this passes unless an iteration costs >= 100.
+		{name: "well under limit", n: root / 10, wantErr: false},
+		{name: "over limit", n: root + 1, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			related := make([]v1alpha1.ActivityResource, tt.n)
+			for i := range related {
+				related[i] = v1alpha1.ActivityResource{UID: fmt.Sprintf("uid-%d", i)}
+			}
+			activity := &v1alpha1.Activity{Spec: v1alpha1.ActivitySpec{Related: related}}
+
+			_, err := compiled.EvaluateActivity(activity)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("EvaluateActivity() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestConvertActivityToClickHouseSQL tests the SQL conversion for activity filters.
 func TestConvertActivityToClickHouseSQL(t *testing.T) {
 	tests := []struct {
@@ -566,6 +606,7 @@ func TestConvertActivityToClickHouseSQL(t *testing.T) {
 		wantSQLContain string
 		wantArg        string
 		wantErr        bool
+		wantErrContain string
 	}{
 		{
 			name:           "changeSource equals human",
@@ -607,6 +648,12 @@ func TestConvertActivityToClickHouseSQL(t *testing.T) {
 			filter:  `spec.relatedUIDs.contains("workload-uid")`,
 			wantErr: true,
 		},
+		{
+			name:           "comprehension rejected with readable error",
+			filter:         `spec.relatedUIDs.all(u, u != "")`,
+			wantErr:        true,
+			wantErrContain: "macros such as all()",
+		},
 	}
 
 	for _, tt := range tests {
@@ -615,6 +662,8 @@ func TestConvertActivityToClickHouseSQL(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("ConvertActivityToClickHouseSQL() = %q, want error", sql)
+				} else if !contains(err.Error(), tt.wantErrContain) {
+					t.Errorf("ConvertActivityToClickHouseSQL() error = %q, want to contain %q", err, tt.wantErrContain)
 				}
 				return
 			}
@@ -641,6 +690,90 @@ func TestConvertActivityToClickHouseSQL(t *testing.T) {
 				t.Errorf("args = %v, want to contain %q", args, tt.wantArg)
 			}
 		})
+	}
+}
+
+// TestActivityFilter_WatchEvaluatesQueryFilters checks that every filter
+// ClickHouse accepts also evaluates correctly in the watch evaluator, so a
+// feed's history and live stream filter the same way.
+func TestActivityFilter_WatchEvaluatesQueryFilters(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    string
+		wantMatch bool
+	}{
+		{name: "not", filter: "!(spec.actor.type == 'bot')", wantMatch: true},
+		{name: "and", filter: "spec.resource.kind == 'Deployment' && spec.resource.namespace == 'prod'", wantMatch: true},
+		{name: "or", filter: "spec.resource.kind == 'Job' || spec.changeSource == 'human'", wantMatch: true},
+		{name: "not equals", filter: "spec.actor.name != 'bob'", wantMatch: true},
+		{name: "ordering", filter: "spec.resource.name > 'a' && spec.resource.name >= 'web' && spec.resource.name < 'z' && spec.resource.name <= 'web'", wantMatch: true},
+		{name: "in list", filter: "spec.resource.kind in ['Deployment', 'StatefulSet']", wantMatch: true},
+		{name: "in relatedUIDs", filter: "'uid-2' in spec.relatedUIDs", wantMatch: true},
+		{name: "startsWith", filter: "spec.resource.name.startsWith('we')", wantMatch: true},
+		{name: "endsWith", filter: "spec.resource.name.endsWith('eb')", wantMatch: true},
+		{name: "contains", filter: "spec.summary.contains('created')", wantMatch: true},
+		{name: "no match", filter: "spec.resource.name == 'other'", wantMatch: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checkQueryAndWatch(t, tt.filter, tt.wantMatch)
+		})
+	}
+
+	// Every filterable leaf field, so one added to the query side but missing
+	// from ActivityToMap is caught.
+	for _, base := range slices.Sorted(maps.Keys(activityValidFields)) {
+		for _, field := range slices.Sorted(maps.Keys(activityValidFields[base])) {
+			path := base + "." + field
+			if _, isParent := activityValidFields[path]; isParent {
+				continue
+			}
+			filter := path + " != 'x'"
+			if path == "spec.relatedUIDs" {
+				filter = "!('x' in spec.relatedUIDs)"
+			}
+			t.Run("field/"+path, func(t *testing.T) {
+				checkQueryAndWatch(t, filter, true)
+			})
+		}
+	}
+}
+
+// checkQueryAndWatch asserts filter converts to SQL and, in the watch
+// evaluator, gives wantMatch for a populated activity and evaluates without
+// error for one with optional fields unset.
+func checkQueryAndWatch(t *testing.T, filter string, wantMatch bool) {
+	t.Helper()
+
+	if _, _, err := ConvertActivityToClickHouseSQL(context.Background(), filter); err != nil {
+		t.Fatalf("ConvertActivityToClickHouseSQL(%q) error = %v", filter, err)
+	}
+	prog, err := CompileActivityFilterProgram(filter)
+	if err != nil {
+		t.Fatalf("CompileActivityFilterProgram(%q) error = %v", filter, err)
+	}
+
+	populated := &v1alpha1.Activity{
+		ObjectMeta: metav1.ObjectMeta{Name: "act-1", Namespace: "default"},
+		Spec: v1alpha1.ActivitySpec{
+			Summary:      "alice created deployment web",
+			ChangeSource: "human",
+			Actor:        v1alpha1.ActivityActor{Name: "alice", Type: "user", UID: "user-1"},
+			Resource:     v1alpha1.ActivityResource{APIGroup: "apps", Kind: "Deployment", Name: "web", Namespace: "prod", UID: "uid-1"},
+			Related:      []v1alpha1.ActivityResource{{UID: "uid-2"}},
+			Origin:       v1alpha1.ActivityOrigin{Type: "audit"},
+			Source:       &v1alpha1.ActivitySource{PlaneType: "control", Cluster: "c1", Region: "us-east-1", City: "nyc"},
+		},
+	}
+	got, err := prog.EvaluateActivity(populated)
+	if err != nil {
+		t.Fatalf("EvaluateActivity(%q) on populated activity error = %v", filter, err)
+	}
+	if got != wantMatch {
+		t.Errorf("EvaluateActivity(%q) on populated activity = %v, want %v", filter, got, wantMatch)
+	}
+	if _, err := prog.EvaluateActivity(&v1alpha1.Activity{}); err != nil {
+		t.Errorf("EvaluateActivity(%q) on empty activity error = %v", filter, err)
 	}
 }
 

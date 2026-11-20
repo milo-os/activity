@@ -12,6 +12,7 @@
 package cel
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -169,8 +170,10 @@ func (c *BaseSQLConverter) ConvertExpr(e *expr.Expr) (string, error) {
 		return c.mapper.MapSelectExpr(e.GetSelectExpr())
 	case *expr.Expr_ListExpr:
 		return c.convertListExpr(e.GetListExpr())
+	case *expr.Expr_ComprehensionExpr:
+		return "", errors.New("macros such as all(), exists(), map() and filter() are not supported in queries")
 	default:
-		return "", fmt.Errorf("unsupported expression type: %T", e.ExprKind)
+		return "", errors.New("unsupported expression in query filter")
 	}
 }
 

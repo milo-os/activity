@@ -47,6 +47,7 @@ spec:
             AND activity:slo_metadata:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
+            team: platform
             severity: critical
             component: activity-apiserver
             slo: metadata
@@ -66,6 +67,7 @@ spec:
             AND activity:slo_metadata:request_total:rate5m > 0
           for: 5m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             slo: metadata
@@ -85,6 +87,7 @@ spec:
             AND activity:slo_metadata:request_total:rate5m > 0
           for: 15m
           labels:
+            team: platform
             severity: info
             component: activity-apiserver
             slo: metadata
@@ -109,6 +112,7 @@ spec:
             AND activity:slo_audit_query:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
+            team: platform
             severity: critical
             component: activity-apiserver
             slo: audit_query
@@ -128,6 +132,7 @@ spec:
             AND activity:slo_audit_query:request_total:rate5m > 0
           for: 5m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             slo: audit_query
@@ -147,6 +152,7 @@ spec:
             AND activity:slo_audit_query:request_total:rate5m > 0
           for: 15m
           labels:
+            team: platform
             severity: info
             component: activity-apiserver
             slo: audit_query
@@ -171,6 +177,7 @@ spec:
             AND activity:slo_activity_query:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
+            team: platform
             severity: critical
             component: activity-apiserver
             slo: activity_query
@@ -191,6 +198,7 @@ spec:
             AND activity:slo_activity_query:request_total:rate5m > 0
           for: 5m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             slo: activity_query
@@ -210,6 +218,7 @@ spec:
             AND activity:slo_activity_query:request_total:rate5m > 0
           for: 15m
           labels:
+            team: platform
             severity: info
             component: activity-apiserver
             slo: activity_query
@@ -233,6 +242,7 @@ spec:
             AND activity:slo_event_query:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
+            team: platform
             severity: critical
             component: activity-apiserver
             slo: event_query
@@ -253,6 +263,7 @@ spec:
             AND activity:slo_event_query:request_total:rate5m > 0
           for: 5m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             slo: event_query
@@ -272,6 +283,7 @@ spec:
             AND activity:slo_event_query:request_total:rate5m > 0
           for: 15m
           labels:
+            team: platform
             severity: info
             component: activity-apiserver
             slo: event_query
@@ -295,6 +307,7 @@ spec:
             AND activity:slo_availability:request_total:rate1h * 3600 >= 60
           for: 2m
           labels:
+            team: platform
             severity: critical
             component: activity-apiserver
             slo: availability
@@ -314,6 +327,7 @@ spec:
             AND activity:slo_availability:request_total:rate5m > 0
           for: 5m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             slo: availability
@@ -332,6 +346,7 @@ spec:
             AND activity:slo_availability:request_total:rate5m > 0
           for: 15m
           labels:
+            team: platform
             severity: info
             component: activity-apiserver
             slo: availability

@@ -30,6 +30,7 @@ tests:
               severity: critical
               component: activity-apiserver
               slo: activity_query
+              team: platform
             exp_annotations:
               summary: "Activity query SLO burning fast — page"
               description: "Error ratio is 25% over the last hour (threshold: 14.4%). ActivityQuery/ActivityFacetQuery POST latency is breaching the 3s target at a rate that will exhaust the error budget within hours."

@@ -20,6 +20,7 @@ spec:
           expr: up{job="activity-apiserver"} == 0
           for: 5m
           labels:
+            team: platform
             severity: critical
             component: activity-apiserver
             sli: availability
@@ -37,6 +38,7 @@ spec:
             > 0.01
           for: 10m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             sli: success_rate
@@ -56,6 +58,7 @@ spec:
             ) > 5
           for: 10m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             sli: latency
@@ -70,6 +73,7 @@ spec:
             rate(activity_clickhouse_query_errors_total{error_type="connection"}[5m]) > 0.1
           for: 5m
           labels:
+            team: platform
             severity: critical
             component: clickhouse
             sli: availability
@@ -84,6 +88,7 @@ spec:
             rate(apiserver_request_total{job="activity-apiserver",code="504",resource="auditlogqueries"}[5m]) > 0.01
           for: 5m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             sli: availability
@@ -98,6 +103,7 @@ spec:
             rate(activity_clickhouse_query_errors_total{error_type="iteration"}[5m]) > 0.5
           for: 5m
           labels:
+            team: platform
             severity: warning
             component: activity-apiserver
             sli: availability
@@ -120,6 +126,7 @@ spec:
             sum(rate(vector_events_out_total{component_type="clickhouse"}[5m])) == 0
           for: 15m
           labels:
+            team: sre
             severity: critical
             component: vector-aggregator
             sli: data_freshness
@@ -134,6 +141,7 @@ spec:
             nats_jetstream_consumer_num_pending{stream="AUDIT_EVENTS",consumer=~"clickhouse-ingest.*"} > 5000
           for: 5m
           labels:
+            team: sre
             severity: warning
             component: nats
             sli: data_freshness
@@ -148,6 +156,7 @@ spec:
             nats_jetstream_consumer_num_pending{stream="AUDIT_EVENTS"} > 500000
           for: 10m
           labels:
+            team: sre
             severity: critical
             component: nats
             sli: data_freshness
@@ -164,6 +173,7 @@ spec:
             sum(rate(vector_component_received_events_total{component_type="nats",namespace="activity-system"}[15m])) > 0
           for: 15m
           labels:
+            team: sre
             severity: warning
             component: vector-aggregator
             sli: data_freshness
@@ -177,6 +187,7 @@ spec:
           expr: up{job="k8s-event-exporter"} == 0
           for: 5m
           labels:
+            team: platform
             severity: warning
             component: k8s-event-exporter
           annotations:
@@ -189,6 +200,7 @@ spec:
           expr: rate(event_exporter_publish_errors_total{job="k8s-event-exporter"}[5m]) > 0.1
           for: 10m
           labels:
+            team: platform
             severity: warning
             component: k8s-event-exporter
           annotations:
@@ -207,6 +219,7 @@ spec:
           expr: up{job="activity-processor"} == 0
           for: 5m
           labels:
+            team: platform
             severity: critical
             component: activity-processor
           annotations:
@@ -219,6 +232,7 @@ spec:
           expr: activity_processor_nats_connection_status == 0
           for: 2m
           labels:
+            team: platform
             severity: critical
             component: activity-processor
           annotations:
@@ -238,6 +252,7 @@ spec:
             rate(activity_processor_events_received_total{source="audit_log"}[1h]) > 0
           for: 30m
           labels:
+            team: platform
             severity: warning
             component: activity-processor
           annotations:
@@ -254,6 +269,7 @@ spec:
             > 0.05
           for: 10m
           labels:
+            team: platform
             severity: warning
             component: activity-processor
           annotations:
@@ -266,6 +282,7 @@ spec:
           expr: activity_processor_active_policies == 0
           for: 15m
           labels:
+            team: platform
             severity: warning
             component: activity-processor
           annotations:
@@ -284,6 +301,7 @@ spec:
           expr: sum(rate(activity_controller_policy_validation_errors_total[10m])) > 0.1
           for: 15m
           labels:
+            team: platform
             severity: warning
             component: activity-controller-manager
           annotations:
@@ -296,6 +314,7 @@ spec:
           expr: count by (policy) (activity_controller_policy_ready == 0) > 0
           for: 30m
           labels:
+            team: platform
             severity: warning
             component: activity-controller-manager
           annotations:
@@ -318,6 +337,7 @@ spec:
             sum(rate(chi_clickhouse_event_ZooKeeperSessionExpired[10m])) > 0.1
           for: 10m
           labels:
+            team: sre
             severity: warning
             component: clickhouse
             sli: availability

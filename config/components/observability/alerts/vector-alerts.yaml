@@ -22,6 +22,7 @@ spec:
             sum(rate(vector_component_received_events_total{component_type="nats"}[5m])) == 0
           for: 5m
           labels:
+            team: sre
             severity: critical
             component: vector-aggregator
             issue: nats-reconnect
@@ -43,6 +44,7 @@ spec:
             )
           for: 5m
           labels:
+            team: sre
             severity: critical
             component: vector-aggregator
             issue: nats-reconnect
@@ -57,6 +59,7 @@ spec:
             rate(vector_component_received_events_total{component_id="nats_audit_consumer"}[10m]) == 0
           for: 10m
           labels:
+            team: sre
             severity: warning
             component: vector-aggregator
             source: nats_audit_consumer
@@ -79,6 +82,7 @@ spec:
             )
           for: 15m
           labels:
+            team: sre
             severity: warning
             component: vector-aggregator
             source: nats_activities_consumer
@@ -101,6 +105,7 @@ spec:
             )
           for: 15m
           labels:
+            team: sre
             severity: warning
             component: vector-aggregator
             source: nats_events_consumer
@@ -115,6 +120,7 @@ spec:
             rate(vector_component_errors_total{component_type="nats"}[5m]) > 0.1
           for: 5m
           labels:
+            team: sre
             severity: warning
             component: vector-aggregator
           annotations:
@@ -128,6 +134,7 @@ spec:
             vector_buffer_size_events{component_type="clickhouse"} > 50000
           for: 10m
           labels:
+            team: sre
             severity: warning
             component: vector-aggregator
           annotations:
@@ -143,6 +150,7 @@ spec:
             kube_statefulset_status_replicas{statefulset="vector-aggregator", namespace="activity-system"}
           for: 5m
           labels:
+            team: sre
             severity: warning
             component: vector-aggregator
           annotations:

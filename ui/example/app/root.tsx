@@ -4,8 +4,9 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
-} from "@remix-run/react";
-import type { LinksFunction, MetaFunction } from "@remix-run/node";
+  type LinksFunction,
+  type MetaFunction,
+} from "react-router";
 
 // Tailwind styles
 import indexStyles from "./styles/index.css?url";

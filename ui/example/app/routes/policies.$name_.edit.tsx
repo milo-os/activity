@@ -1,4 +1,4 @@
-import { useNavigate, useOutletContext, useParams } from "@remix-run/react";
+import { useNavigate, useOutletContext, useParams } from "react-router";
 import { PolicyEditView, type ActivityApiClient, type ResourceRef } from "@datum-cloud/activity-ui";
 
 interface OutletContext {

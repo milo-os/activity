@@ -1,6 +1,5 @@
-import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, useNavigate, type LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
-import { useNavigate } from "@remix-run/react";
 import {
   Card,
   CardHeader,

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useNavigate, useOutletContext, useParams } from "@remix-run/react";
+import { useNavigate, useOutletContext, useParams } from "react-router";
 import { ReindexJobDetailView, type ActivityApiClient } from "@datum-cloud/activity-ui";
 
 interface OutletContext {

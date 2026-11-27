@@ -16,7 +16,9 @@ jobs:
     # activity-ui release can reach this workflow. Gate it here: every other
     # job needs this one, so skipping it skips the whole run.
     if: ${{ !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'activity-ui/')) }}
-    uses: datum-cloud/actions/.github/workflows/validate-kustomize.yaml@v1.28.0
+    uses: datum-cloud/actions/.github/workflows/validate-kustomize.yaml@v1.31.0
+    with:
+      runner: ${{ vars.MILO_LINUX_RUNNER || 'ubuntu-latest' }}
 
   publish-container-image:
     # No point in trying to build the container image if the deployment

@@ -635,7 +635,7 @@ tasks:
         echo "The example app imports directly from ui/src/ for hot-reload."
         echo "Changes to ui/src/ will automatically update in the browser."
         echo ""
-        npm run dev
+        pnpm run dev
 
   ui:build:
     desc: Build the Activity UI component library
@@ -644,20 +644,20 @@ tasks:
       - |
         set -e
         echo "📦 Building Activity UI component library..."
-        npm run build
+        pnpm run build
         echo "✅ Library built to ui/dist/"
 
   ui:type-check:
     desc: Type-check the Activity UI component library
     dir: ui
     cmds:
-      - npm run type-check
+      - pnpm run type-check
 
   ui:lint:
     desc: Lint the Activity UI component library
     dir: ui
     cmds:
-      - npm run lint
+      - pnpm run lint
 
   # OpenAPI code generation
   generate:openapi:

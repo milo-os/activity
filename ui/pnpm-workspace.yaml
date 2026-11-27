@@ -2,10 +2,23 @@ packages:
   - .
   - example
 
-onlyBuiltDependencies:
-  - '@tailwindcss/oxide'
-  - esbuild
-  - lightningcss
+# Wait a day before installing a newly published version. Most compromised
+# releases are pulled within hours. Our own packages are published and
+# consumed across repos on the same day, so the delay must not hold them back.
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - '@datum-cloud/*'
+
+# Reject a version published with weaker provenance than the versions before
+# it, such as a release pushed with a stolen token for a package that normally
+# publishes from CI.
+trustPolicy: no-downgrade
+
+# Only scripts a local install needs: esbuild checks its platform binary.
+# @tailwindcss/oxide and lightningcss, listed under pnpm 10, ship no install
+# script. The image installs with --ignore-scripts.
+allowBuilds:
+  esbuild: true
 
 overrides:
   '@typescript-eslint/typescript-estree>minimatch': ^11.0.0
@@ -21,3 +34,12 @@ overrides:
   vite@<6.4.4: ^6.4.4
   yaml@<2.8.3: ^2.8.3
   esbuild: ^0.28.0
+  # trustPolicy rejects these versions (published without provenance after
+  # releases that had it). Move each to the next release in its major that
+  # has provenance. recharts 3.8.1 pins reselect 5.1.1; later recharts 3.x
+  # pin 5.2.0.
+  reselect@5.1.1: 5.2.0
+  semver@6: ^6.3.2
+  # Through @react-router/dev (^4). 4.0.2 and 4.0.3 dropped the provenance
+  # 4.0.0 and 4.0.1 have, so stay on 4.0.1.
+  chokidar@4: 4.0.1

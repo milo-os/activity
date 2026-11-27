@@ -1,0 +1,23 @@
+# Dependencies: reinstalled inside the build stage. A host node_modules copied
+# over pnpm's tree breaks the install.
+node_modules
+example/node_modules
+
+# VCS history, never needed in the image
+.git
+
+# Build outputs: regenerated inside the image
+dist
+example/build
+example/.react-router
+
+# Tests and their output
+e2e
+test-results
+playwright-report
+blob-report
+.scratch-screenshots
+
+# Local env / secrets
+.env
+.env.*

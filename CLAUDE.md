@@ -32,7 +32,7 @@ Do NOT ask the user which agent to use - pick the appropriate one based on what 
 - Use agents proactively without being asked
 - For multi-step tasks, use the appropriate agent for each step (launch independent agents in parallel when possible)
 - After making code changes, always use `code-reviewer` to validate
-- For UI changes, run `npm run build` and `npm run test:e2e` to verify
+- For UI changes, run `pnpm run build` and `pnpm run test:e2e` to verify
 - **Always test infrastructure changes in a test environment before opening a PR** - Deploy to the test-infra KIND cluster (`task test-infra:cluster-up`) and verify resources work correctly before pushing changes to staging/production repos
 - **Use Telepresence for debugging staging issues** - When investigating bugs that only reproduce in staging, intercept the service and run it locally with `task test-infra:telepresence:intercept SERVICE=<name>`. See "Remote Debugging with Telepresence" section.
 
@@ -107,9 +107,9 @@ task generate:docs            # Generate API reference documentation
 The UI is a React component library in `/ui`:
 
 ```bash
-cd ui && npm install && npm run build    # Build the library
-cd ui && npm run lint                    # Lint TypeScript
-cd ui && npm run type-check              # Type check
+cd ui && pnpm install && pnpm run build  # Build the library
+cd ui && pnpm run lint                   # Lint TypeScript
+cd ui && pnpm run type-check             # Type check
 ```
 
 Or via Task:

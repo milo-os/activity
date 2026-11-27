@@ -44,7 +44,7 @@ export default defineConfig({
 
   // Run the dev server before starting the tests
   webServer: {
-    command: 'cd example && npm run dev',
+    command: 'cd example && pnpm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: false, // Always restart to pick up source changes
     stdout: 'ignore',

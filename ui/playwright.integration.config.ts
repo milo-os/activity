@@ -7,12 +7,12 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * Prerequisites:
  * - Dev environment must be running (`task dev:setup`)
- * - Example app must be running (`cd ui/example && npm run dev`)
+ * - Example app must be running (`cd ui/example && pnpm run dev`)
  * - API server must be accessible
  *
  * Usage:
- *   npm run test:e2e:integration
- *   npm run test:e2e:integration:headed
+ *   pnpm run test:e2e:integration
+ *   pnpm run test:e2e:integration:headed
  */
 export default defineConfig({
   testDir: './e2e/integration',

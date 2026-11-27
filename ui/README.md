@@ -226,8 +226,8 @@ filter: 'verb == "delete" && resource in ["secrets", "configmaps"] && ns == "pro
 
 ### Prerequisites
 
-- Node.js 18+
-- npm or yarn
+- Node.js 26
+- pnpm 12 (the version `packageManager` in `package.json` pins)
 
 ### Building the Library
 

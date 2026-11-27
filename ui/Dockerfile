@@ -1,15 +1,16 @@
 # Build stage
 FROM node:26.13.1-alpine3.24 AS builder
 
-# Install pnpm
-RUN npm install -g pnpm@10.29.3
-
 WORKDIR /app
 
 # Copy workspace and lock files first for better caching
 COPY pnpm-workspace.yaml ./
 COPY pnpm-lock.yaml ./
 COPY package.json ./
+
+# Node 26 ships no corepack, so install the pnpm that package.json's
+# packageManager pins; it stays in this stage only.
+RUN npm install -g "$(node -p 'require("./package.json").packageManager.split("+")[0]')" --no-audit --no-fund
 
 # Copy library config files
 COPY tsconfig.json ./
@@ -28,11 +29,13 @@ COPY example/react-router.config.ts ./example/
 COPY example/tailwind.config.js ./example/
 COPY example/postcss.config.js ./example/
 
-# Install dependencies and build
-RUN pnpm install --frozen-lockfile && \
+# Install dependencies and build. Deploy from the lockfile, not with --legacy:
+# under pnpm 12 the legacy deploy drops @datum-cloud/datum-ui's optional peers
+# (date-fns-tz, recharts and others), and the server fails to start.
+RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts && \
     pnpm --filter @datum-cloud/activity-ui build && \
     pnpm --filter activity-ui-example build && \
-    pnpm deploy --filter activity-ui-example --prod --legacy /deploy && \
+    pnpm deploy --filter activity-ui-example --prod --ignore-scripts /deploy && \
     cp -r example/build /deploy/build
 
 # Runtime stage - Node.js for React Router server

@@ -42,4 +42,4 @@ overrides:
   semver@6: ^6.3.2
   # Through @react-router/dev (^4). 4.0.2 and 4.0.3 dropped the provenance
   # 4.0.0 and 4.0.1 have, so stay on 4.0.1.
-  chokidar@4: 4.0.1
+  chokidar@4: 4.0.3

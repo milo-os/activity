@@ -13,12 +13,6 @@ minimumReleaseAgeExclude:
 # it, such as a release pushed with a stolen token for a package that normally
 # publishes from CI.
 trustPolicy: no-downgrade
-# Published without provenance after earlier releases of the same package had
-# it. Exempt by exact version, so the next release is checked again.
-trustPolicyExclude:
-  # Through @react-router/dev, which takes ^4.0.0. 4.0.3 is the last 4.x and
-  # every release with provenance after it is a new major.
-  - chokidar@4.0.3
 
 # Only scripts a local install needs: esbuild checks its platform binary.
 # @tailwindcss/oxide and lightningcss, listed under pnpm 10, ship no install
@@ -46,3 +40,6 @@ overrides:
   # pin 5.2.0.
   reselect@5.1.1: 5.2.0
   semver@6: ^6.3.2
+  # Through @react-router/dev (^4). 4.0.2 and 4.0.3 dropped the provenance
+  # 4.0.0 and 4.0.1 have, so stay on 4.0.1.
+  chokidar@4: 4.0.1

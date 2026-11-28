@@ -2,33 +2,51 @@ import type { ActivityLink, ResourceRef, ResourceLinkResolver, ResourceLinkConte
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 /**
- * Returns the visible text for a link: prefer the server-provided
- * displayName (e.g. "Smith Nelson") and fall back to the original marker
- * (e.g. an email or UID baked into the summary by the policy template).
+ * Returns true for links that point at a user: an iam User, or the actor
+ * reference (`kind: user`) a policy template produced.
  */
-function linkVisibleText(link: ActivityLink): string {
-  return link.displayName && link.displayName.length > 0 ? link.displayName : link.marker;
+function isUserLink(link: ActivityLink): boolean {
+  const resource = link.resource;
+  if (!resource) return false;
+  return (
+    (resource.apiGroup === 'iam.miloapis.com' && resource.kind === 'User') ||
+    (!resource.apiGroup && resource.kind === 'user')
+  );
 }
 
 /**
- * Returns true when the link carries hover-worthy detail beyond the
- * visible text (e.g. an email or UID that we want to surface but not
- * show inline).
+ * Returns the visible text for a link. User links show the server-provided
+ * displayName (e.g. "Smith Nelson") when present; everything else shows the
+ * marker exactly as it appears in the summary.
  */
-function linkHasHoverDetail(link: ActivityLink): boolean {
-  if (link.email && link.email !== linkVisibleText(link)) return true;
-  const uid = link.resource?.uid;
-  if (uid && uid !== linkVisibleText(link)) return true;
-  return false;
+function linkVisibleText(link: ActivityLink): string {
+  return isUserLink(link) && link.displayName ? link.displayName : link.marker;
 }
 
-/** Renders the tooltip body shown when a link is hovered. */
-function LinkHoverBody({ link }: { link: ActivityLink }) {
+/**
+ * Returns the hover text for a link, if any. For a user link shown by its
+ * display name this is the original marker (the verified username or email);
+ * for other links it is the resource UID when that adds information.
+ */
+function linkHoverText(link: ActivityLink): string | undefined {
+  const visible = linkVisibleText(link);
+  if (isUserLink(link)) {
+    return visible !== link.marker ? link.marker : undefined;
+  }
+  const uid = link.resource?.uid;
+  return uid && uid !== visible ? uid : undefined;
+}
+
+/** Wraps a rendered link in a tooltip showing its hover text, if any. */
+function withHover(key: string, hoverText: string | undefined, node: JSX.Element): JSX.Element {
+  if (!hoverText) return node;
   return (
-    <div className="flex flex-col gap-0.5 text-xs">
-      {link.email ? <span className="font-mono">{link.email}</span> : null}
-      {link.resource?.uid ? <span className="font-mono opacity-70">{link.resource.uid}</span> : null}
-    </div>
+    <Tooltip key={key}>
+      <TooltipTrigger asChild>{node}</TooltipTrigger>
+      <TooltipContent>
+        <span className="font-mono text-xs">{hoverText}</span>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -118,56 +136,44 @@ function parseSummaryWithLinks(
       result.push(summary.substring(lastEnd, range.start));
     }
 
+    const key = `link-${i}`;
     const visibleText = linkVisibleText(range.link);
-    const showHover = linkHasHoverDetail(range.link);
+    const hoverText = linkHoverText(range.link);
+    const userLink = isUserLink(range.link);
+    const url = resourceLinkResolver ? resourceLinkResolver(range.link.resource, resourceLinkContext) : undefined;
 
-    // If resourceLinkResolver is provided, render as <a> tag
-    if (resourceLinkResolver) {
-      const url = resourceLinkResolver(range.link.resource, resourceLinkContext);
-      if (url) {
-        const anchor = (
+    if (url) {
+      result.push(
+        withHover(
+          key,
+          hoverText,
           <a
-            key={`link-${i}`}
+            key={key}
             href={url}
             className="underline underline-offset-2 text-primary hover:text-primary/80"
-            title={showHover ? undefined : `${range.link.resource.kind}: ${range.link.resource.name}`}
+            title={hoverText ? undefined : `${range.link.resource.kind}: ${range.link.resource.name}`}
             onClick={(e) => e.stopPropagation()}
           >
             {visibleText}
           </a>
-        );
-
-        if (showHover) {
-          result.push(
-            <Tooltip key={`link-${i}`}>
-              <TooltipTrigger asChild>{anchor}</TooltipTrigger>
-              <TooltipContent>
-                <LinkHoverBody link={range.link} />
-              </TooltipContent>
-            </Tooltip>
-          );
-        } else {
-          result.push(anchor);
-        }
-      } else if (showHover) {
-        // Resolver opted out of linking but we still want to surface the
-        // hover detail (email/UID) for user-typed references.
-        result.push(
-          <Tooltip key={`link-${i}`}>
-            <TooltipTrigger asChild>
-              <span className="underline decoration-dotted decoration-muted-foreground/60 underline-offset-2 cursor-help">
-                {visibleText}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              <LinkHoverBody link={range.link} />
-            </TooltipContent>
-          </Tooltip>
-        );
-      } else {
-        // Resolver returned undefined and there's no hover detail, render plain text
-        result.push(visibleText);
-      }
+        )
+      );
+    } else if (resourceLinkResolver || userLink) {
+      // No href: plain text. User links are never rendered as buttons; they
+      // only become links when a resolver returns an href for them.
+      result.push(
+        hoverText ? (
+          withHover(
+            key,
+            hoverText,
+            <span key={key} className="cursor-help">
+              {visibleText}
+            </span>
+          )
+        ) : (
+          visibleText
+        )
+      );
     } else {
       // Fallback to button with onResourceClick handler for backward compatibility
       const handleClick = onResourceClick
@@ -178,30 +184,21 @@ function parseSummaryWithLinks(
           }
         : undefined;
 
-      const button = (
-        <button
-          key={`link-${i}`}
-          type="button"
-          className="bg-transparent border-none p-0 cursor-pointer underline underline-offset-2 text-primary hover:text-primary/80"
-          onClick={handleClick}
-          title={showHover ? undefined : `${range.link.resource.kind}: ${range.link.resource.name}`}
-        >
-          {visibleText}
-        </button>
+      result.push(
+        withHover(
+          key,
+          hoverText,
+          <button
+            key={key}
+            type="button"
+            className="bg-transparent border-none p-0 cursor-pointer underline underline-offset-2 text-primary hover:text-primary/80"
+            onClick={handleClick}
+            title={hoverText ? undefined : `${range.link.resource.kind}: ${range.link.resource.name}`}
+          >
+            {visibleText}
+          </button>
+        )
       );
-
-      if (showHover) {
-        result.push(
-          <Tooltip key={`link-${i}`}>
-            <TooltipTrigger asChild>{button}</TooltipTrigger>
-            <TooltipContent>
-              <LinkHoverBody link={range.link} />
-            </TooltipContent>
-          </Tooltip>
-        );
-      } else {
-        result.push(button);
-      }
     }
 
     lastEnd = range.end;

@@ -22,11 +22,12 @@ type FacetSpec struct {
 	//
 	// Supported fields:
 	//   - spec.actor.name: Actor display names
-	//   - spec.actor.type: Actor types (user, serviceaccount, controller)
+	//   - spec.actor.type: Actor types (user, serviceaccount, system, controller, staff)
 	//   - spec.resource.apiGroup: API groups
 	//   - spec.resource.kind: Resource kinds
 	//   - spec.resource.namespace: Namespaces
 	//   - spec.changeSource: Change sources (human, system)
+	//   - spec.interface.type: How changes were made, as reported by the client
 	//
 	// +required
 	Field string `json:"field"`

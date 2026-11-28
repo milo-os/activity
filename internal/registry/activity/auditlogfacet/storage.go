@@ -2,6 +2,7 @@ package auditlogfacet
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -95,6 +96,9 @@ func (s *AuditLogFacetsQueryStorage) Create(ctx context.Context, obj runtime.Obj
 
 	// Execute facet query
 	result, err := s.storage.QueryAuditLogFacets(ctx, spec, scope)
+	if stderrors.Is(err, storage.ErrStaffRedactionNotReady) {
+		return nil, storage.StaffRedactionNotReadyError()
+	}
 	if err != nil {
 		// Log the actual error for debugging but return a generic message to avoid leaking internal details
 		klog.ErrorS(err, "Failed to query audit log facets",

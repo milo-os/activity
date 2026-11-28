@@ -29,6 +29,10 @@ import (
 //	    - field: verb
 //	      limit: 10
 //	    - field: objectRef.resource
+//
+// In organization and project scopes, Datum staff who are not members of the
+// organization are counted under a single user.username value, "Datum
+// Support" (and an empty user.uid), with the same redaction as AuditLogQuery.
 type AuditLogFacetsQuery struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

@@ -193,6 +193,11 @@ func registerMetrics(reg prometheus.Registerer) error {
 			return err
 		}
 	}
+	for _, c := range currentIndexMetrics().collectors() {
+		if err := reg.Register(c); err != nil {
+			return err
+		}
+	}
 	return processor.RegisterDLQMetrics(reg)
 }
 
@@ -241,6 +246,16 @@ type Config struct {
 	// Health probe configuration
 	HealthProbeAddr string // Address for health probe server (e.g., ":8081")
 
+	// StaffEmailDomains are email domains whose users count as Datum staff
+	// (shown as "Datum Support" outside their own organization), alongside
+	// staff-users members, and on their own while the staff indexes have not
+	// synced. Empty means DefaultStaffEmailDomains; NoStaffEmailDomains
+	// ("none") disables the domain rule.
+	StaffEmailDomains []string
+
+	// StaffRedactionMode is StaffRedactionRequired (default) or
+	// StaffRedactionDomainOnly.
+	StaffRedactionMode string
 }
 
 // DefaultConfig returns configuration with default values.
@@ -268,6 +283,41 @@ func DefaultConfig() Config {
 		AckWait:                   30 * time.Second,
 		MaxDeliver:                5,
 		HealthProbeAddr:           ":8081",
+	}
+}
+
+// userIndexSyncTimeout bounds how long startup waits for the iam User index
+// before processing begins without display names.
+const userIndexSyncTimeout = 5 * time.Second
+
+// staffIndexBackoff bounds the retry interval while waiting for the staff
+// indexes at startup.
+var staffIndexBackoff = struct{ initial, max time.Duration }{5 * time.Second, time.Minute}
+
+// waitForStaffIndexes blocks until the staff disclosure indexes have synced,
+// retrying indefinitely with backoff, and returns only when they have or ctx
+// is done.
+func waitForStaffIndexes(ctx context.Context, staff *StaffIndex) error {
+	step := staffIndexBackoff.initial
+	for attempt := 1; ; attempt++ {
+		err := staff.WaitForSync(ctx, step)
+		if err == nil {
+			klog.InfoS("Staff disclosure indexes synced; starting event processing")
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		klog.InfoS("Waiting for staff disclosure indexes before processing events; activities are not processed until "+
+			"Datum staff can be recognised (grant get, list, watch on groupmemberships.iam.miloapis.com, "+
+			"organizationmemberships and projects in resourcemanager.miloapis.com)",
+			"attempt", attempt, "reason", err.Error(), "retryIn", step)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(step):
+		}
+		step = min(2*step, staffIndexBackoff.max)
 	}
 }
 
@@ -305,6 +355,11 @@ type Processor struct {
 
 	// dlqRetryController handles automatic retry of DLQ events.
 	dlqRetryController *DLQRetryController
+
+	// enrichment enriches actors with iam User display names and avatars,
+	// and discloses staff actors as Datum Support. Its zero value disables
+	// both.
+	enrichment processor.Enrichment
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -387,6 +442,39 @@ func (p *Processor) Start(ctx context.Context) error {
 	}
 
 	klog.InfoS("ActivityPolicy cache synced")
+
+	// Start the iam User index in the background. It never blocks startup:
+	// until it syncs (or if it cannot list Users), activities are emitted
+	// without actor display names.
+	var userIndex *UserIndex
+	indexesStart := time.Now()
+	if idx, err := NewUserIndex(p.restConfig); err != nil {
+		klog.ErrorS(err, "Failed to create iam User index; activities will be emitted without actor display names")
+	} else {
+		userIndex = idx
+		userIndex.Start(ctx)
+		p.enrichment.Users = userIndex
+	}
+
+	// Start the staff disclosure indexes. Event processing waits for them
+	// (see waitForStaffIndexes).
+	domains := ResolveStaffEmailDomains(p.config.StaffEmailDomains)
+	mode, err := ParseStaffRedactionMode(p.config.StaffRedactionMode)
+	if err != nil {
+		return err
+	}
+	var staffIndex *StaffIndex
+	if mode == StaffRedactionDomainOnly {
+		WarnDomainOnlyStaffRedaction("activity-processor", domains)
+		staffIndex = NewDomainOnlyStaffIndex(domains)
+	} else {
+		staffIndex, err = NewStaffIndex(p.restConfig, domains)
+		if err != nil {
+			return fmt.Errorf("failed to create staff disclosure indexes (staff redaction mode %q): %w", mode, err)
+		}
+		staffIndex.Start(ctx)
+	}
+	p.enrichment.Staff = staffIndex
 
 	// Create controller-runtime client for event emission
 	k8sClient, err := client.New(p.restConfig, client.Options{
@@ -539,6 +627,29 @@ func (p *Processor) Start(ctx context.Context) error {
 		)
 	}
 
+	// The User index gets a short, bounded head start so activities produced
+	// right after a restart are enriched; display names are optional, so
+	// startup proceeds without it. The staff indexes are required: processing
+	// is blocked (readiness stays false) until they sync, because storing an
+	// activity before staff can be recognised could disclose a staff identity.
+	var waitGroup sync.WaitGroup
+	if userIndex != nil {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			if err := userIndex.WaitForSync(ctx, userIndexSyncTimeout-time.Since(indexesStart)); err != nil {
+				klog.InfoS("Starting without actor display names; the iam User index keeps retrying and enrichment starts once it syncs",
+					"reason", err.Error())
+			}
+		}()
+	}
+	staffErr := waitForStaffIndexes(ctx, staffIndex)
+	waitGroup.Wait()
+	if staffErr != nil {
+		p.closeNATS()
+		return staffErr
+	}
+
 	klog.InfoS("Activity processor starting",
 		"stream", p.config.NATSStreamName,
 		"consumer", p.config.ConsumerName,
@@ -578,6 +689,12 @@ func (p *Processor) Start(ctx context.Context) error {
 			p.config.BatchSize,
 			p.dlqPublisher,
 		)
+		if p.enrichment.Users != nil {
+			p.eventProcessor.SetUserResolver(p.enrichment.Users)
+		}
+		if p.enrichment.Staff != nil {
+			p.eventProcessor.SetStaffResolver(p.enrichment.Staff)
+		}
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
@@ -1158,7 +1275,7 @@ func (p *Processor) processMessage(msg *nats.Msg) error {
 
 // evaluateCompiledAuditRules evaluates audit rules using pre-compiled CEL programs.
 func (p *Processor) evaluateCompiledAuditRules(policy *CompiledPolicy, auditMap map[string]any, audit *auditv1.Event) (*v1alpha1.Activity, int, error) {
-	return EvaluateCompiledAuditRules(policy, auditMap, audit, p.resourceToKind)
+	return EvaluateCompiledAuditRulesWithEnrichment(policy, auditMap, audit, p.resourceToKind, p.enrichment)
 }
 
 // reEvaluateDeadLetter re-runs audit policy evaluation against a dead-letter

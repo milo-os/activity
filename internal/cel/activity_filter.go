@@ -126,6 +126,10 @@ func (m *ActivityFieldMapper) mapNestedField(baseName, parentField, field string
 	case baseName == "spec" && parentField == "origin" && field == "type":
 		return "origin_type", nil
 
+	// spec.interface.*
+	case baseName == "spec" && parentField == "interface" && field == "type":
+		return "interface_type", nil
+
 	// spec.source.*
 	case baseName == "spec" && parentField == "source" && field == "planeType":
 		return "source_plane_type", nil
@@ -183,6 +187,7 @@ func (m *ActivityFieldMapper) MapArraySelectExpr(sel *expr.Expr_Select) (string,
 //   - spec.resource.uid - resource UID
 //   - spec.summary - activity summary text
 //   - spec.origin.type - origin type (audit/event)
+//   - spec.interface.type - how the change was made (client-reported)
 //   - spec.source.planeType, spec.source.cluster, spec.source.region,
 //     spec.source.city - where the underlying record originated
 //   - spec.relatedUIDs - resource, related, and linked UIDs; only valid as
@@ -208,10 +213,11 @@ var activityValidFields = map[string]map[string]bool{
 		"summary":      true,
 		"relatedUIDs":  true,
 		// Parent fields - these are intermediate paths to nested fields
-		"actor":    true,
-		"resource": true,
-		"origin":   true,
-		"source":   true,
+		"actor":     true,
+		"resource":  true,
+		"origin":    true,
+		"source":    true,
+		"interface": true,
 	},
 	"spec.actor": {
 		"name": true,
@@ -226,6 +232,9 @@ var activityValidFields = map[string]map[string]bool{
 		"uid":       true,
 	},
 	"spec.origin": {
+		"type": true,
+	},
+	"spec.interface": {
 		"type": true,
 	},
 	"spec.source": {
@@ -355,12 +364,19 @@ func ActivityToMap(activity *v1alpha1.Activity) map[string]interface{} {
 	if activity.Spec.Source != nil {
 		source = *activity.Spec.Source
 	}
+	var iface v1alpha1.ActivityInterface
+	if activity.Spec.Interface != nil {
+		iface = *activity.Spec.Interface
+	}
 
 	return map[string]interface{}{
 		"spec": map[string]interface{}{
 			"changeSource": activity.Spec.ChangeSource,
 			"summary":      activity.Spec.Summary,
 			"relatedUIDs":  RelatedUIDs(activity),
+			"interface": map[string]interface{}{
+				"type": iface.Type,
+			},
 			"source": map[string]interface{}{
 				"planeType": source.PlaneType,
 				"cluster":   source.Cluster,
@@ -425,7 +441,7 @@ Available fields for activity filtering:
   - spec.actor.name, spec.actor.type, spec.actor.uid
   - spec.resource.apiGroup, spec.resource.kind, spec.resource.name
   - spec.resource.namespace, spec.resource.uid
-  - spec.summary, spec.origin.type
+  - spec.summary, spec.origin.type, spec.interface.type
   - spec.source.planeType, spec.source.cluster, spec.source.region, spec.source.city
   - spec.relatedUIDs (list; use "<uid>" in spec.relatedUIDs)
   - metadata.namespace, metadata.name

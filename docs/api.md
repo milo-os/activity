@@ -91,10 +91,12 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `type` _string_ | Type indicates the actor category.<br />Values: "user", "serviceaccount", "controller" |  |  |
-| `name` _string_ | Name is the display name for the actor.<br />For users, this is typically the email address.<br />For service accounts, this is the full name (e.g., "system:serviceaccount:default:my-sa").<br />For controllers, this is the controller name. |  |  |
-| `uid` _string_ | UID is the unique identifier for the actor.<br />Stable across username changes. |  |  |
+| `type` _string_ | Type indicates the actor category.<br />Values:<br />  - "user": a person<br />  - "serviceaccount": a Milo ServiceAccount<br />    ("<name>@<project>.identity.miloapis.com")<br />  - "system": a "system:" identity, such as a platform controller or a<br />    Kubernetes service account<br />  - "controller": the controller that reported a Kubernetes event<br />  - "staff": a Datum staff member acting in an organization they do not<br />    belong to; shown only as "Datum Support" |  |  |
+| `name` _string_ | Name is the display name for the actor.<br />For users, this is typically the email address.<br />For Milo ServiceAccounts, this is the account's username<br />("<name>@<project>.identity.miloapis.com").<br />For system identities, this is the username without its "system:" prefix<br />(e.g., "serviceaccount:default:my-sa").<br />For controllers, this is the controller name.<br />For staff, this is always "Datum Support"; the staff member's identity,<br />including their UID, is not recorded on the activity. |  |  |
+| `uid` _string_ | UID is the unique identifier for the actor.<br />Stable across username changes. Empty for staff actors, so individual<br />staff members cannot be told apart or tracked. |  |  |
 | `email` _string_ | Email is the actor's email address.<br />Only populated for user actors when available. |  |  |
+| `displayName` _string_ | DisplayName is the actor's human-readable name (e.g., "Smith Nelson").<br />For user actors, populated at processing time from the iam User's<br />spec.givenName and spec.familyName, sanitized and capped at 64<br />characters. Empty if no User record is found, the User has no name set,<br />or the actor is not a human user. These names are self-asserted; Name<br />and Email remain the verified identity.<br /><br />UIs SHOULD prefer DisplayName for visible text and fall back to Name<br />when DisplayName is empty. |  |  |
+| `avatarUrl` _string_ | AvatarURL is the URL of the actor's avatar image.<br />For user actors, populated at processing time from the iam User's<br />status.avatarUrl when it is an https URL. Empty if no User record is<br />found, the User has no usable avatar, or the actor is not a human user. |  |  |
 
 
 #### ActivityChange
@@ -151,6 +153,25 @@ _Appears in:_
 | `facets` _[FacetResult](#facetresult) array_ | Facets contains the results for each requested facet. |  |  |
 
 
+#### ActivityInterface
+
+
+
+ActivityInterface describes how a change was made, as reported by the
+client. It is not verified and must never be used for authorization or
+alerting.
+
+
+
+_Appears in:_
+- [ActivitySpec](#activityspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `type` _string_ | Type is the kind of interface the change came through.<br />Values:<br />  - "console": a web browser, i.e. the Datum console<br />  - "cli": datumctl (including its plugins) or kubectl<br />  - "mcp": one of Datum's MCP servers (datum-mcp, datum-<x>-mcp, compute-mcp)<br />  - "terraform": Terraform or a Terraform provider<br />  - "controller": a platform controller or Kubernetes component<br />  - "api": any other client, including Milo ServiceAccounts<br />  - "unknown": the client sent no user agent |  |  |
+| `client` _string_ | Client is a short name for the client, when known: for example<br />"datumctl", "kubectl", "datum-mcp", "terraform", "service-account",<br />or a controller's service such as "compute". Lowercase, limited to<br />[a-z0-9._/-] and at most 64 characters. |  |  |
+
+
 #### ActivityLink
 
 
@@ -166,6 +187,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `marker` _string_ | Marker is the text substring in the summary that should be linked.<br />The portal scans the summary for this marker and makes it clickable.<br /><br />Example: "HTTP proxy api-gateway" |  |  |
 | `resource` _[ActivityResource](#activityresource)_ | Resource identifies what the marker links to. |  |  |
+| `displayName` _string_ | DisplayName is the human-readable name of the linked entity, when one<br />is available. Populated at processing time only for links whose<br />resource is an iam User (apiGroup iam.miloapis.com, kind User), from the<br />User's spec.givenName and spec.familyName, sanitized and capped at 64<br />characters. The summary text itself is never rewritten: UIs SHOULD<br />render DisplayName in place of this link's Marker and fall back to the<br />Marker when DisplayName is empty. |  |  |
 
 
 
@@ -323,7 +345,7 @@ Available CEL Fields:
 
 	spec.changeSource      - "human" or "system"
 	spec.actor.name        - who performed the action
-	spec.actor.type        - "user", "serviceaccount", "controller"
+	spec.actor.type        - "user", "serviceaccount", "system", "controller", "staff"
 	spec.actor.uid         - actor's unique identifier
 	spec.resource.apiGroup - resource API group (empty for core)
 	spec.resource.kind     - resource kind (Deployment, Pod, etc.)
@@ -332,6 +354,8 @@ Available CEL Fields:
 	spec.resource.uid      - resource UID
 	spec.summary           - activity summary text
 	spec.origin.type       - "audit" or "event"
+	spec.interface.type    - how the change was made, as reported by the client
+	                         (console, cli, mcp, api, controller, terraform, unknown)
 	spec.source.planeType  - plane the record originated from (management, edge)
 	spec.source.cluster    - cluster the record originated from
 	spec.source.region     - region the record originated from
@@ -441,8 +465,9 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `summary` _string_ | Summary is the human-readable description of what happened.<br />Generated from ActivityPolicy templates.<br /><br />Example: "alice created HTTP proxy api-gateway" |  |  |
-| `changeSource` _string_ | ChangeSource indicates who initiated the change.<br />Used to filter human actions from system reconciliation noise.<br /><br />Values:<br />  - "human": User action via kubectl, API, or UI<br />  - "system": Controller reconciliation, operator actions, scheduled jobs |  |  |
+| `changeSource` _string_ | ChangeSource indicates who initiated the change.<br />Used to filter human actions from system reconciliation noise.<br /><br />Values:<br />  - "human": A person's action via kubectl, datumctl, the API, or the<br />    console, including Datum staff shown as "Datum Support"<br />  - "system": Controller reconciliation, operator actions, scheduled jobs,<br />    and Milo ServiceAccounts (automation such as CI or Terraform) |  |  |
 | `actor` _[ActivityActor](#activityactor)_ | Actor identifies who performed the action. |  |  |
+| `interface` _[ActivityInterface](#activityinterface)_ | Interface describes how the change was made: the console, a CLI, an MCP<br />server, Terraform, a controller, or the API directly.<br /><br />It is derived from the request's user agent, which the client reports<br />and nothing verifies. Treat it as a display hint only: never use it for<br />authorization, auditing decisions or alerting. |  |  |
 | `resource` _[ActivityResource](#activityresource)_ | Resource identifies the Kubernetes resource that was affected. |  |  |
 | `links` _[ActivityLink](#activitylink) array_ | Links contains clickable references found in the summary.<br />The portal uses these to make resource names in the summary clickable. |  |  |
 | `related` _[ActivityResource](#activityresource) array_ | Related lists other resources the source record references, such as an<br />event's related object (e.g., the Workload an Instance belongs to). |  |  |
@@ -559,7 +584,10 @@ _Appears in:_
 
 
 
-AutoFetchSpec configures automatic sample data retrieval.
+AutoFetchSpec configures automatic sample data retrieval. Samples are
+fetched in the caller's scope, as AuditLogQuery and EventQuery would return
+them (including Datum staff redaction); only platform-scoped callers get
+platform-wide samples.
 
 
 
@@ -752,7 +780,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `field` _string_ | Field is the activity field path to get distinct values for.<br /><br />Supported fields:<br />  - spec.actor.name: Actor display names<br />  - spec.actor.type: Actor types (user, serviceaccount, controller)<br />  - spec.resource.apiGroup: API groups<br />  - spec.resource.kind: Resource kinds<br />  - spec.resource.namespace: Namespaces<br />  - spec.changeSource: Change sources (human, system) |  |  |
+| `field` _string_ | Field is the activity field path to get distinct values for.<br /><br />Supported fields:<br />  - spec.actor.name: Actor display names<br />  - spec.actor.type: Actor types (user, serviceaccount, system, controller, staff)<br />  - spec.resource.apiGroup: API groups<br />  - spec.resource.kind: Resource kinds<br />  - spec.resource.namespace: Namespaces<br />  - spec.changeSource: Change sources (human, system)<br />  - spec.interface.type: How changes were made, as reported by the client |  |  |
 | `limit` _integer_ | Limit is the maximum number of distinct values to return.<br />Default: 20, Maximum: 100. |  |  |
 
 

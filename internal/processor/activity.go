@@ -15,6 +15,10 @@ import (
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
 )
 
+// iamGroup is the API group of Milo IAM resources. Links to iam Users get
+// display names.
+const iamGroup = "iam.miloapis.com"
+
 // activityName generates a deterministic activity name from the origin event
 // identifier and the policy's resource target. The same input always produces
 // the same name, enabling NATS message deduplication on retries.
@@ -35,6 +39,24 @@ type ActivityBuilder struct {
 	// Resource information from the policy
 	APIGroup string
 	Kind     string
+
+	// UserResolver, when non-nil, is consulted to enrich the actor and any
+	// User-typed link targets with display names and avatars.
+	UserResolver UserResolver
+
+	// SupportActor records the actor as Datum Support (see
+	// Enrichment.AuditBuilder): actor type "staff", name "Datum Support", no
+	// email, display name, avatar or actor link. The summary must have been
+	// rendered against the redacted audit map AuditBuilder returned.
+	SupportActor bool
+
+	// StaffResolver, when non-nil, keeps iam User links from showing the
+	// display name of a staff member who does not belong to the tenant.
+	StaffResolver StaffResolver
+
+	// supportCandidate identifies the staff actor's own iam User, so it is
+	// neither linked nor used for enrichment. Set by AuditBuilder.
+	supportCandidate StaffCandidate
 }
 
 // BuildFromAudit constructs an Activity from an audit event.
@@ -69,7 +91,19 @@ func (b *ActivityBuilder) BuildFromAudit(
 
 	// Classify change source and resolve actor
 	changeSource := ClassifyChangeSource(audit.User)
-	actor := ResolveActor(audit.User)
+	users := b.UserResolver
+	var actor v1alpha1.ActivityActor
+	var actorUser *UserInfo
+	if b.SupportActor {
+		// Staff acting for Datum: a person, shown only as Datum Support.
+		changeSource = ChangeSourceHuman
+		actor = supportActor()
+		if users != nil {
+			users = excludingUser{UserResolver: users, candidate: b.supportCandidate}
+		}
+	} else {
+		actor, actorUser = resolveActor(audit.User, users)
+	}
 	tenant := ExtractTenant(audit.User)
 
 	// Generate activity name
@@ -79,6 +113,12 @@ func (b *ActivityBuilder) BuildFromAudit(
 	activityLinks, err := ConvertLinks(links, resolveKind)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrActivityBuild, err)
+	}
+
+	activityLinks = enrichLinks(audit.User.Username, actorUser, activityLinks, users,
+		staffLinkFilter(b.StaffResolver, tenant))
+	if b.SupportActor {
+		activityLinks = dropSupportActorLinks(activityLinks, b.supportCandidate)
 	}
 
 	return &v1alpha1.Activity{
@@ -101,6 +141,7 @@ func (b *ActivityBuilder) BuildFromAudit(
 			Summary:      summary,
 			ChangeSource: changeSource,
 			Actor:        actor,
+			Interface:    b.auditInterface(audit),
 			Resource: v1alpha1.ActivityResource{
 				APIGroup:   b.APIGroup,
 				APIVersion: apiVersion,
@@ -117,6 +158,75 @@ func (b *ActivityBuilder) BuildFromAudit(
 			},
 		},
 	}, nil
+}
+
+// enrichLinks adds display names to links that point at iam Users. It never
+// changes the summary or any link's marker: the summary keeps exactly the
+// text the policy template rendered (the verified username or email), and
+// UIs render a link's DisplayName in place of its marker span.
+//
+//   - Actor links are the links whose resource is the human actor's actorRef
+//     ({type: user, name: <username>}, produced by link(actor, actorRef) or a
+//     bare {{ actor }}). When actorUser is non-nil (the actor matched an iam
+//     User), each actor link's resource becomes that exact User (apiGroup
+//     iam.miloapis.com, kind User, name = the User's metadata.name) and its
+//     DisplayName is set. Unmatched actor links are left as they are.
+//   - Links whose resource is already an iam User are resolved by name and
+//     get the User's DisplayName.
+//
+// Links whose resource is anything else are never touched, whatever their
+// marker says.
+func enrichLinks(
+	username string,
+	actorUser *UserInfo,
+	links []v1alpha1.ActivityLink,
+	resolver UserResolver,
+	hidden func(name string, info UserInfo) bool,
+) []v1alpha1.ActivityLink {
+	for i := range links {
+		link := &links[i]
+		switch {
+		case actorUser != nil && isActorLink(link.Resource, username):
+			link.Resource = v1alpha1.ActivityResource{
+				APIGroup: iamGroup,
+				Kind:     "User",
+				Name:     actorUser.Name,
+				UID:      actorUser.UID,
+			}
+			link.DisplayName = actorUser.DisplayName()
+		case resolver != nil && isUserLink(link.Resource) && link.Resource.Name != "" && link.DisplayName == "":
+			if info, ok := resolver.LookupByName(link.Resource.Name); ok {
+				if hidden != nil && hidden(link.Resource.Name, info) {
+					// A staff member outside this tenant: no name.
+					continue
+				}
+				link.DisplayName = info.DisplayName()
+			}
+		}
+	}
+	return links
+}
+
+// auditInterface is the activity's interface. For a staff actor only the type
+// is kept: a personal tool's client name could identify them.
+func (b *ActivityBuilder) auditInterface(audit *auditv1.Event) *v1alpha1.ActivityInterface {
+	iface := ResolveInterface(audit.User.Username, audit.UserAgent)
+	if b.SupportActor {
+		iface.Client = ""
+	}
+	return iface
+}
+
+// isActorLink reports whether r is the human actor's actorRef as converted by
+// ConvertLinks: no API group, kind "user" (from actorRef.type) and the actor's
+// username as name.
+func isActorLink(r v1alpha1.ActivityResource, username string) bool {
+	return username != "" && r.APIGroup == "" && r.Kind == ActorTypeUser && r.Name == username
+}
+
+// isUserLink reports whether the resource targets an iam User.
+func isUserLink(r v1alpha1.ActivityResource) bool {
+	return r.APIGroup == iamGroup && r.Kind == "User"
 }
 
 // extractResponseIdentity extracts the name and UID from an audit response
@@ -195,6 +305,10 @@ func (b *ActivityBuilder) BuildFromEvent(
 		return nil, fmt.Errorf("%w: %v", ErrActivityBuild, err)
 	}
 
+	// Event actors are controllers, so only iam User links are enriched here.
+	activityLinks = enrichLinks("", nil, activityLinks, b.UserResolver,
+		staffLinkFilter(b.StaffResolver, tenant))
+
 	activity := &v1alpha1.Activity{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: v1alpha1.SchemeGroupVersion.String(),
@@ -210,6 +324,7 @@ func (b *ActivityBuilder) BuildFromEvent(
 			Summary:      summary,
 			ChangeSource: changeSource,
 			Actor:        actor,
+			Interface:    eventInterface(actor),
 			Resource: v1alpha1.ActivityResource{
 				APIGroup:   resourceAPIGroup,
 				APIVersion: apiVersion,

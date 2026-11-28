@@ -7,9 +7,12 @@ import (
 
 	authnv1 "k8s.io/api/authentication/v1"
 	eventsv1 "k8s.io/api/events/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	auditv1 "k8s.io/apiserver/pkg/apis/audit/v1"
+	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/apiserver/pkg/endpoints/request"
 
 	"go.miloapis.com/activity/internal/storage"
 	"go.miloapis.com/activity/pkg/apis/activity/v1alpha1"
@@ -19,9 +22,11 @@ import (
 type mockAuditLogBackend struct {
 	result *storage.QueryResult
 	err    error
+	scopes []storage.ScopeContext
 }
 
 func (m *mockAuditLogBackend) QueryAuditLogs(ctx context.Context, spec v1alpha1.AuditLogQuerySpec, scope storage.ScopeContext) (*storage.QueryResult, error) {
+	m.scopes = append(m.scopes, scope)
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -31,9 +36,11 @@ func (m *mockAuditLogBackend) QueryAuditLogs(ctx context.Context, spec v1alpha1.
 type mockEventBackend struct {
 	result *storage.EventQueryResult
 	err    error
+	scopes []storage.ScopeContext
 }
 
 func (m *mockEventBackend) QueryEvents(ctx context.Context, spec v1alpha1.EventQuerySpec, scope storage.ScopeContext) (*storage.EventQueryResult, error) {
+	m.scopes = append(m.scopes, scope)
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -684,7 +691,7 @@ func TestPolicyPreviewStorage_Create_InvalidPolicy(t *testing.T) {
 						},
 						AuditRules: []v1alpha1.ActivityPolicyRule{
 							{
-								Name:    "rule-d78931",
+								Name:  "rule-d78931",
 								Match: "true",
 							},
 						},
@@ -867,7 +874,7 @@ func TestPolicyPreviewStorage_Create_AutoFetch_AuditOnly(t *testing.T) {
 		},
 	}
 
-	result, err := storage.Create(context.Background(), preview, nil, &metav1.CreateOptions{})
+	result, err := storage.Create(platformCtx(), preview, nil, &metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -934,7 +941,7 @@ func TestPolicyPreviewStorage_Create_AutoFetch_EventsOnly(t *testing.T) {
 		},
 	}
 
-	result, err := storage.Create(context.Background(), preview, nil, &metav1.CreateOptions{})
+	result, err := storage.Create(platformCtx(), preview, nil, &metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -1021,7 +1028,7 @@ func TestPolicyPreviewStorage_Create_AutoFetch_Both(t *testing.T) {
 		},
 	}
 
-	result, err := storage.Create(context.Background(), preview, nil, &metav1.CreateOptions{})
+	result, err := storage.Create(platformCtx(), preview, nil, &metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -1072,7 +1079,7 @@ func TestPolicyPreviewStorage_Create_AutoFetch_EmptyResults(t *testing.T) {
 		},
 	}
 
-	result, err := storage.Create(context.Background(), preview, nil, &metav1.CreateOptions{})
+	result, err := storage.Create(platformCtx(), preview, nil, &metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("Create should succeed with empty results, got error: %v", err)
 	}
@@ -1122,7 +1129,7 @@ func TestPolicyPreviewStorage_Create_Validation_BothInputsAndAutoFetch(t *testin
 		},
 	}
 
-	_, err := storage.Create(context.Background(), preview, nil, &metav1.CreateOptions{})
+	_, err := storage.Create(platformCtx(), preview, nil, &metav1.CreateOptions{})
 	if err == nil {
 		t.Fatal("Expected validation error for both inputs and autoFetch, got nil")
 	}
@@ -1154,7 +1161,7 @@ func TestPolicyPreviewStorage_Create_Validation_NeitherInputsNorAutoFetch(t *tes
 		},
 	}
 
-	_, err := storage.Create(context.Background(), preview, nil, &metav1.CreateOptions{})
+	_, err := storage.Create(platformCtx(), preview, nil, &metav1.CreateOptions{})
 	if err == nil {
 		t.Fatal("Expected validation error for missing inputs/autoFetch, got nil")
 	}
@@ -1188,7 +1195,7 @@ func TestPolicyPreviewStorage_Create_Validation_AutoFetchInvalidLimit(t *testing
 		},
 	}
 
-	_, err := storage.Create(context.Background(), preview, nil, &metav1.CreateOptions{})
+	_, err := storage.Create(platformCtx(), preview, nil, &metav1.CreateOptions{})
 	if err == nil {
 		t.Fatal("Expected validation error for limit > 50, got nil")
 	}
@@ -1223,7 +1230,7 @@ func TestPolicyPreviewStorage_Create_Validation_AutoFetchInvalidSources(t *testi
 		},
 	}
 
-	_, err := storage.Create(context.Background(), preview, nil, &metav1.CreateOptions{})
+	_, err := storage.Create(platformCtx(), preview, nil, &metav1.CreateOptions{})
 	if err == nil {
 		t.Fatal("Expected validation error for invalid sources, got nil")
 	}
@@ -1364,5 +1371,92 @@ func TestExtractEventFiltersFromCEL(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// platformCtx is a request context for a platform-scoped caller.
+func platformCtx() context.Context {
+	return request.WithUser(context.Background(), &user.DefaultInfo{Name: "admin"})
+}
+
+// orgCtx is a request context for a caller acting in organization org.
+func orgCtx(org string) context.Context {
+	return request.WithUser(context.Background(), &user.DefaultInfo{
+		Name: "alice@acme.com",
+		Extra: map[string][]string{
+			"iam.miloapis.com/parent-type": {"Organization"},
+			"iam.miloapis.com/parent-name": {org},
+		},
+	})
+}
+
+func autoFetchPreview(sources string) *v1alpha1.PolicyPreview {
+	return &v1alpha1.PolicyPreview{
+		Spec: v1alpha1.PolicyPreviewSpec{
+			Policy: v1alpha1.ActivityPolicySpec{
+				Resource: v1alpha1.ActivityPolicyResource{APIGroup: "networking.datumapis.com", Kind: "HTTPProxy"},
+				AuditRules: []v1alpha1.ActivityPolicyRule{
+					{Name: "rule-create", Match: `audit.verb == "create"`, Summary: `{{ actor }} created HTTPProxy`},
+				},
+				EventRules: []v1alpha1.ActivityPolicyRule{
+					{Name: "rule-event", Match: `event.reason == "Programmed"`, Summary: `programmed`},
+				},
+			},
+			AutoFetch: &v1alpha1.AutoFetchSpec{Limit: 10, TimeRange: "24h", Sources: sources},
+		},
+	}
+}
+
+// AutoFetch samples come from the caller's scope, through the same query
+// path as AuditLogQuery, so staff redaction applies (the storage layer
+// returns staff events already reduced to "Datum Support").
+func TestPolicyPreviewStorage_Create_AutoFetch_UsesCallerScope(t *testing.T) {
+	mockAudit := &mockAuditLogBackend{result: &storage.QueryResult{Events: []auditv1.Event{{
+		Verb:      "create",
+		User:      authnv1.UserInfo{Username: storage.SupportActorName},
+		ObjectRef: &auditv1.ObjectReference{APIGroup: "networking.datumapis.com", Resource: "httpproxies", Name: "p"},
+	}}}}
+	mockEvents := &mockEventBackend{result: &storage.EventQueryResult{}}
+	st := NewPolicyPreviewStorage(mockAudit, mockEvents)
+
+	result, err := st.Create(orgCtx("acme"), autoFetchPreview("both"), nil, &metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	want := storage.ScopeContext{Type: "Organization", Name: "acme"}
+	if len(mockAudit.scopes) != 1 || mockAudit.scopes[0] != want {
+		t.Errorf("audit samples fetched with scopes %+v, want %+v", mockAudit.scopes, want)
+	}
+	if len(mockEvents.scopes) != 1 || mockEvents.scopes[0] != want {
+		t.Errorf("event samples fetched with scopes %+v, want %+v", mockEvents.scopes, want)
+	}
+	acts := result.(*v1alpha1.PolicyPreview).Status.Activities
+	if len(acts) != 1 || acts[0].Spec.Summary != "Datum Support created HTTPProxy" {
+		t.Errorf("activities = %+v, want the redacted staff event", acts)
+	}
+
+	// A platform caller keeps platform-wide samples.
+	mockAudit.scopes = nil
+	if _, err := st.Create(platformCtx(), autoFetchPreview("audit"), nil, &metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if len(mockAudit.scopes) != 1 || mockAudit.scopes[0].Type != "platform" {
+		t.Errorf("platform caller scopes = %+v", mockAudit.scopes)
+	}
+}
+
+func TestPolicyPreviewStorage_Create_AutoFetch_StaffNotReadyIs503(t *testing.T) {
+	st := NewPolicyPreviewStorage(&mockAuditLogBackend{err: storage.ErrStaffRedactionNotReady}, nil)
+	_, err := st.Create(orgCtx("acme"), autoFetchPreview("audit"), nil, &metav1.CreateOptions{})
+	status, ok := err.(*apierrors.StatusError)
+	if !ok || status.ErrStatus.Code != 503 || status.ErrStatus.Details == nil || status.ErrStatus.Details.RetryAfterSeconds == 0 {
+		t.Fatalf("error = %v, want 503 with Retry-After", err)
+	}
+}
+
+func TestPolicyPreviewStorage_Create_AutoFetch_RequiresUser(t *testing.T) {
+	st := NewPolicyPreviewStorage(&mockAuditLogBackend{result: &storage.QueryResult{}}, nil)
+	if _, err := st.Create(context.Background(), autoFetchPreview("audit"), nil, &metav1.CreateOptions{}); err == nil {
+		t.Fatal("autoFetch without a request user succeeded")
 	}
 }

@@ -180,9 +180,10 @@ back here when you need a specific field.
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `actor` | string | Convenience shorthand for `audit.user.username` |
-| `actorRef` | map | Actor reference with `type` and `name` keys, for use with `link()` |
+| `actor` | string | Convenience shorthand for `audit.user.username` (`Datum Support` for staff acting in a customer organization; see below) |
+| `actorRef` | map | Actor reference with `type` (`user`, `serviceaccount`, `system`) and `name` keys, for use with `link()` |
 | `audit.user.username` | string | Username (e.g., `alice@example.com`, `system:serviceaccount:default:my-sa`) |
+| `interface` | map | How the change was made: `type` (`console`, `cli`, `mcp`, `api`, `controller`, `terraform`, `unknown`) and `client` (e.g. `datumctl`). Reported by the client's user agent and not verified: fine for display, never for decisions |
 
 **What was affected**
 
@@ -214,6 +215,7 @@ back here when you need a specific field.
 |----------|------|-------------|
 | `actor` | string | Resolved from `event.reportingController`, falling back to `event.source.component` |
 | `actorRef` | map | Actor reference with `type: "controller"` and the controller name |
+| `interface` | map | Always `type: "controller"`, with the reporting controller as `client` |
 
 **What was affected**
 
@@ -265,7 +267,105 @@ accounts:
 ```
 
 This pattern appears throughout the built-in example policies and is the
-recommended default.
+recommended default. A bare `{{ actor }}` for a human user is linked the same
+way automatically.
+
+Milo ServiceAccounts (`<name>@<project>.identity.miloapis.com`) have
+`actorRef.type` `serviceaccount`; their activities are recorded with actor
+type `serviceaccount` and change source `system`.
+
+#### Datum staff are shown as "Datum Support"
+
+A Datum staff member is anyone in the `staff-users` group (namespace
+`milo-system`) or with an email in a staff domain (`--staff-email-domains`,
+default `datum.net`; `none` disables the domain rule). When staff act in an
+organization they do not belong to (or in one of its projects, or in another
+user's scope), the activity hides who they are:
+
+- In summary templates, `actor`, `actorRef.name` and `audit.user.username`
+  render as `Datum Support`. The whole `audit.user` object is replaced (no
+  `uid`, `groups` or `extra`), `audit.impersonatedUser`, `audit.userAgent` and
+  `audit.sourceIPs` are removed, and `interface.client` is empty. Match
+  expressions still see the real event.
+- The activity's actor is type `staff`, name `Datum Support`, with no UID,
+  email, display name or avatar, so tenants cannot tell staff members apart
+  or follow one across incidents. `spec.interface` keeps only its type.
+- No link points at the staff member's iam User.
+
+`audit.requestObject` and `audit.responseObject` are left as they are, so a
+template that renders object content, such as a created-by annotation, can
+still include an identity. Avoid rendering identity fields from objects.
+
+Because staff actions carry no UID, a staff member's own user-scope activity
+feed does not include their support actions. Datum's record of who acted is
+the raw audit event.
+
+If someone who is not staff impersonates a staff member, the impersonated
+identity is removed from the render copy too. (Milo does not currently record
+impersonation in audit events.) Links to a staff member's iam User in a tenant
+they do not belong to never show their display name, in audit- and
+event-derived activities alike.
+
+Membership is evaluated when the activity is processed or re-indexed, not
+when the change happened, except that a re-index never un-redacts an
+activity already recorded as "Datum Support". That also preserves any
+over-redaction made while memberships were unknown, which is acceptable.
+The processor does not process any events until staff and organization
+memberships have loaded: it stays not-ready and retries, because storing an
+activity before staff can be recognised could disclose them. Platform-scoped
+activities are not shown to customers and are never redacted.
+
+The raw audit event, including the staff member's username, is still stored
+for Datum's internal use. Organization- and project-scoped AuditLogQuery,
+AuditLogFacetsQuery and PolicyPreview `autoFetch` results apply the same
+rule:
+
+- An audit event counts as staff when its actor is staff relative to the
+  scope now, or when it produced an activity already recorded as staff
+  access in that tenant (so redaction is sticky, like activities). Audit
+  events that produced no activity rely on current membership only.
+- A staff event is returned as a minimal event built from an allowlist:
+  `apiVersion`, `kind`, `level`, `auditID`, `stage`, `verb`, `objectRef`
+  (`apiGroup`, `apiVersion`, `resource`, `subresource`, `namespace`, `name`,
+  `uid`), `responseStatus.code`, `requestReceivedTimestamp`,
+  `stageTimestamp`, and `user.username` "Datum Support". Everything else
+  (`requestURI`, `annotations`, the response status message, request and
+  response objects, `sourceIPs`, `userAgent`, `impersonatedUser`, and the
+  user's `uid`, `groups` and `extra`) is omitted. The object's name,
+  namespace and uid are kept because the event is useless without them;
+  an object named after a person (for example a staff member's own User)
+  can still hint at who acted.
+- Other events lose `impersonatedUser` when it is a staff identity.
+- `user.username` and `user.uid` filters see the redacted values, so a staff
+  identity matches nothing and `user.username == "Datum Support"` matches
+  the redacted events. The `user.username` facet counts all staff under one
+  "Datum Support" value.
+- Until the API server has loaded staff and organization memberships, these
+  tenant-scoped queries return `503 Service Unavailable` with `Retry-After`.
+- The sticky lookup is bounded by the query's time range. An
+  AuditLogFacetsQuery without `timeRange.start` looks back over the
+  activities retention window (60 days), since older staff activities no
+  longer exist.
+
+Platform-scoped queries are not redacted.
+
+#### Staff redaction modes
+
+`--staff-redaction-mode` (or `ACTIVITY_STAFF_REDACTION_MODE`) on the
+processor, API server, controller-manager (passed on to reindex Jobs) and
+reindex worker selects how staff are recognised:
+
+- `required` (default): from Milo's `staff-users` group and organization
+  memberships, plus the staff email domains. The processor does not process
+  events, and tenant-scoped audit log queries return 503, until the
+  memberships have loaded; a component that cannot build the membership
+  indexes exits with an error.
+- `domain-only`: only the staff email domains, with no membership indexes;
+  nothing waits or returns 503, and each component logs a warning at
+  startup. This is for clusters without Milo (the dev and test-infra
+  overlays) and must not be used where customers have access: staff outside
+  the email domains are not recognised, and staff acting in their own
+  organization are still shown as "Datum Support".
 
 ### Referencing resource names and fields
 
@@ -483,6 +583,11 @@ so you can see exactly what would appear in the activity feed.
 Instead of constructing sample inputs by hand, you can ask the API server to
 fetch real samples from the last N hours of activity data. This is useful when
 you want to verify a policy against actual traffic for your resource type.
+
+`autoFetch` samples come from your own scope: an organization or project
+caller gets that tenant's events only, with Datum staff redacted as in
+AuditLogQuery; only platform callers get platform-wide samples. (Earlier
+versions always sampled platform-wide.)
 
 `autoFetch` is mutually exclusive with manual `inputs` — provide one or the
 other, not both.

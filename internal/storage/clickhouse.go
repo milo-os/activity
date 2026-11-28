@@ -133,6 +133,10 @@ type ClickHouseConfig struct {
 type ClickHouseStorage struct {
 	conn   driver.Conn
 	config ClickHouseConfig
+
+	// staffScopes, when set, redacts Datum staff identities in tenant-scoped
+	// audit log queries and facets (see SetStaffScopes).
+	staffScopes StaffScopeProvider
 }
 
 // NewClickHouseStorage establishes a connection to ClickHouse and validates connectivity.
@@ -267,7 +271,7 @@ func (s *ClickHouseStorage) QueryAuditLogs(ctx context.Context, spec v1alpha1.Au
 	// Start timing the overall query operation
 	overallStartTime := time.Now()
 
-	query, args, err := s.buildQuery(ctx, spec, scope)
+	query, args, redaction, err := s.buildQuery(ctx, spec, scope)
 	if err != nil {
 		metrics.ClickHouseQueryErrors.WithLabelValues("build_query").Inc()
 		span.RecordError(err)
@@ -373,7 +377,12 @@ func (s *ClickHouseStorage) QueryAuditLogs(ctx context.Context, spec v1alpha1.Au
 	var unmarshalErrors int
 	for rows.Next() {
 		var eventJSON string
-		if err := rows.Scan(&eventJSON); err != nil {
+		var isStaff uint8
+		dest := []any{&eventJSON}
+		if redaction != nil {
+			dest = append(dest, &isStaff)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			klog.ErrorS(err, "Failed to scan row",
 				"traceID", traceID,
 				"spanID", spanID,
@@ -389,6 +398,9 @@ func (s *ClickHouseStorage) QueryAuditLogs(ctx context.Context, spec v1alpha1.Au
 				"spanID", spanID,
 			)
 			continue
+		}
+		if redaction != nil {
+			event = redactAuditEventForScope(event, isStaff != 0, redaction.scope)
 		}
 
 		events = append(events, event)
@@ -461,6 +473,27 @@ func (s *ClickHouseStorage) QueryAuditLogs(ctx context.Context, spec v1alpha1.Au
 	}, nil
 }
 
+// parseQueryWindow parses a query's optional start and end times.
+func parseQueryWindow(startTime, endTime string) (*time.Time, *time.Time, error) {
+	now := time.Now()
+	var start, end *time.Time
+	if startTime != "" {
+		t, err := timeutil.ParseFlexibleTime(startTime, now)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid startTime: %w", err)
+		}
+		start = &t
+	}
+	if endTime != "" {
+		t, err := timeutil.ParseFlexibleTime(endTime, now)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid endTime: %w", err)
+		}
+		end = &t
+	}
+	return start, end, nil
+}
+
 // hasUserFilter checks if the CEL filter contains user-based filtering
 func hasUserFilter(filter string) bool {
 	if filter == "" {
@@ -486,10 +519,28 @@ func hasAPIGroupFilter(filter string) bool {
 }
 
 // buildQuery constructs a ClickHouse SQL query from the query spec
-func (s *ClickHouseStorage) buildQuery(ctx context.Context, spec v1alpha1.AuditLogQuerySpec, scope ScopeContext) (string, []interface{}, error) {
+//
+// In tenant scopes with staff redaction (the returned redaction is non-nil),
+// the query also selects is_staff_actor, and user.username / user.uid
+// filters see the redacted values.
+func (s *ClickHouseStorage) buildQuery(ctx context.Context, spec v1alpha1.AuditLogQuerySpec, scope ScopeContext) (string, []interface{}, *auditRedaction, error) {
 	var args []interface{}
 
 	query := fmt.Sprintf("SELECT event_json FROM %s.audit_logs", s.config.Database)
+	var columnOverrides map[string]string
+	start, end, err := parseQueryWindow(spec.StartTime, spec.EndTime)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	redaction, err := s.auditRedactionFor(scope, start, end)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if redaction != nil {
+		query = redaction.with + fmt.Sprintf("SELECT event_json, is_staff_actor FROM %s.audit_logs", s.config.Database)
+		args = append(args, redaction.args...)
+		columnOverrides = auditColumnOverrides
+	}
 
 	var conditions []string
 
@@ -518,7 +569,7 @@ func (s *ClickHouseStorage) buildQuery(ctx context.Context, spec v1alpha1.AuditL
 	if spec.StartTime != "" {
 		startTime, err := timeutil.ParseFlexibleTime(spec.StartTime, now)
 		if err != nil {
-			return "", nil, fmt.Errorf("invalid startTime: %w", err)
+			return "", nil, nil, fmt.Errorf("invalid startTime: %w", err)
 		}
 		conditions = append(conditions, "timestamp >= ?")
 		args = append(args, startTime)
@@ -527,17 +578,17 @@ func (s *ClickHouseStorage) buildQuery(ctx context.Context, spec v1alpha1.AuditL
 	if spec.EndTime != "" {
 		endTime, err := timeutil.ParseFlexibleTime(spec.EndTime, now)
 		if err != nil {
-			return "", nil, fmt.Errorf("invalid endTime: %w", err)
+			return "", nil, nil, fmt.Errorf("invalid endTime: %w", err)
 		}
 		conditions = append(conditions, "timestamp < ?")
 		args = append(args, endTime)
 	}
 
 	if spec.Filter != "" {
-		celWhere, celArgs, err := cel.ConvertToClickHouseSQL(ctx, spec.Filter)
+		celWhere, celArgs, err := cel.ConvertToClickHouseSQLWithColumns(ctx, spec.Filter, columnOverrides)
 		if err != nil {
 			// Return the error directly - it already has user-friendly messaging
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		if celWhere != "" {
 			processedWhere := celWhere
@@ -556,7 +607,7 @@ func (s *ClickHouseStorage) buildQuery(ctx context.Context, spec v1alpha1.AuditL
 	if spec.Continue != "" {
 		cursorTime, cursorAuditID, err := decodeCursor(spec.Continue, spec)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 
 		// Pagination logic: continue from where we left off
@@ -600,7 +651,7 @@ func (s *ClickHouseStorage) buildQuery(ctx context.Context, spec v1alpha1.AuditL
 
 	query += fmt.Sprintf(" LIMIT %d", limit+1)
 
-	return query, args, nil
+	return query, args, redaction, nil
 }
 
 // ActivityQuerySpec defines the query parameters for listing activities.
@@ -998,84 +1049,10 @@ func (s *ClickHouseStorage) QueryAuditLogFacets(ctx context.Context, spec AuditL
 
 // queryAuditLogFacet executes a single facet query against the audit logs table.
 func (s *ClickHouseStorage) queryAuditLogFacet(ctx context.Context, facet FacetFieldSpec, spec AuditLogFacetQuerySpec, scope ScopeContext) (*FacetFieldResult, error) {
-	column, err := GetAuditLogFacetColumn(facet.Field)
+	query, args, column, err := s.buildAuditLogFacetQuery(ctx, facet, spec, scope)
 	if err != nil {
 		return nil, err
 	}
-
-	limit := facet.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
-
-	var args []interface{}
-	var conditions []string
-
-	// Scope filtering - same pattern as audit log queries
-	if scope.Type != types.TenantTypePlatform {
-		if scope.Type == types.TenantTypeUser {
-			// For user scope, filter by user_uid
-			conditions = append(conditions, "user_uid = ?")
-			args = append(args, scope.Name)
-		} else {
-			// For organization/project scope, use the scope annotations
-			conditions = append(conditions, "scope_type = ?")
-			args = append(args, scope.Type)
-			conditions = append(conditions, "scope_name = ?")
-			args = append(args, scope.Name)
-		}
-	}
-
-	// Time range
-	now := time.Now()
-	if spec.StartTime != "" {
-		startTime, err := timeutil.ParseFlexibleTime(spec.StartTime, now)
-		if err != nil {
-			return nil, fmt.Errorf("invalid startTime: %w", err)
-		}
-		conditions = append(conditions, "timestamp >= ?")
-		args = append(args, startTime)
-	}
-
-	if spec.EndTime != "" {
-		endTime, err := timeutil.ParseFlexibleTime(spec.EndTime, now)
-		if err != nil {
-			return nil, fmt.Errorf("invalid endTime: %w", err)
-		}
-		conditions = append(conditions, "timestamp < ?")
-		args = append(args, endTime)
-	}
-
-	// CEL filter (optional)
-	if spec.Filter != "" {
-		celWhere, celArgs, err := cel.ConvertToClickHouseSQL(ctx, spec.Filter)
-		if err != nil {
-			return nil, err
-		}
-		if celWhere != "" {
-			processedWhere := celWhere
-			for i := range celArgs {
-				oldParam := fmt.Sprintf("{arg%d}", i+1)
-				processedWhere = strings.ReplaceAll(processedWhere, oldParam, "?")
-			}
-			args = append(args, celArgs...)
-			conditions = append(conditions, processedWhere)
-		}
-	}
-
-	// Build query against the audit logs table
-	// Use toString() to ensure consistent string output for all column types (including UInt16 status_code)
-	query := fmt.Sprintf("SELECT toString(%s) as value, COUNT(*) as count FROM %s.audit_logs", column, s.config.Database)
-
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
-
-	// Group by the facet column and order by count descending, then value ascending for stability
-	query += fmt.Sprintf(" GROUP BY %s ORDER BY count DESC, value ASC LIMIT %d", column, limit)
 
 	klog.V(4).InfoS("Executing audit log facet query",
 		"field", facet.Field,
@@ -1114,6 +1091,113 @@ func (s *ClickHouseStorage) queryAuditLogFacet(ctx context.Context, facet FacetF
 	}
 
 	return result, nil
+}
+
+// buildAuditLogFacetQuery builds the SQL for one audit log facet, returning
+// the query, its arguments and the column (or redacted alias) grouped on.
+func (s *ClickHouseStorage) buildAuditLogFacetQuery(ctx context.Context, facet FacetFieldSpec, spec AuditLogFacetQuerySpec, scope ScopeContext) (string, []interface{}, string, error) {
+	column, err := GetAuditLogFacetColumn(facet.Field)
+	if err != nil {
+		return "", nil, "", err
+	}
+
+	limit := facet.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	var args []interface{}
+	var conditions []string
+
+	// In tenant scopes, staff identities are redacted: the user facets
+	// group on the redacted values (all staff in one "Datum Support" bucket)
+	// and user filters see the redacted values.
+	var with string
+	var columnOverrides map[string]string
+	start, end, err := parseQueryWindow(spec.StartTime, spec.EndTime)
+	if err != nil {
+		return "", nil, "", err
+	}
+	redaction, err := s.auditRedactionFor(scope, start, end)
+	if err != nil {
+		return "", nil, "", err
+	}
+	if redaction != nil {
+		with = redaction.with
+		args = append(args, redaction.args...)
+		columnOverrides = auditColumnOverrides
+		if override, ok := auditColumnOverrides[column]; ok {
+			column = override
+		}
+	}
+
+	// Scope filtering - same pattern as audit log queries
+	if scope.Type != types.TenantTypePlatform {
+		if scope.Type == types.TenantTypeUser {
+			// For user scope, filter by user_uid
+			conditions = append(conditions, "user_uid = ?")
+			args = append(args, scope.Name)
+		} else {
+			// For organization/project scope, use the scope annotations
+			conditions = append(conditions, "scope_type = ?")
+			args = append(args, scope.Type)
+			conditions = append(conditions, "scope_name = ?")
+			args = append(args, scope.Name)
+		}
+	}
+
+	// Time range
+	now := time.Now()
+	if spec.StartTime != "" {
+		startTime, err := timeutil.ParseFlexibleTime(spec.StartTime, now)
+		if err != nil {
+			return "", nil, "", fmt.Errorf("invalid startTime: %w", err)
+		}
+		conditions = append(conditions, "timestamp >= ?")
+		args = append(args, startTime)
+	}
+
+	if spec.EndTime != "" {
+		endTime, err := timeutil.ParseFlexibleTime(spec.EndTime, now)
+		if err != nil {
+			return "", nil, "", fmt.Errorf("invalid endTime: %w", err)
+		}
+		conditions = append(conditions, "timestamp < ?")
+		args = append(args, endTime)
+	}
+
+	// CEL filter (optional)
+	if spec.Filter != "" {
+		celWhere, celArgs, err := cel.ConvertToClickHouseSQLWithColumns(ctx, spec.Filter, columnOverrides)
+		if err != nil {
+			return "", nil, "", err
+		}
+		if celWhere != "" {
+			processedWhere := celWhere
+			for i := range celArgs {
+				oldParam := fmt.Sprintf("{arg%d}", i+1)
+				processedWhere = strings.ReplaceAll(processedWhere, oldParam, "?")
+			}
+			args = append(args, celArgs...)
+			conditions = append(conditions, processedWhere)
+		}
+	}
+
+	// Build query against the audit logs table
+	// Use toString() to ensure consistent string output for all column types (including UInt16 status_code)
+	query := with + fmt.Sprintf("SELECT toString(%s) as value, COUNT(*) as count FROM %s.audit_logs", column, s.config.Database)
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Group by the facet column and order by count descending, then value ascending for stability
+	query += fmt.Sprintf(" GROUP BY %s ORDER BY count DESC, value ASC LIMIT %d", column, limit)
+
+	return query, args, column, nil
 }
 
 // FacetQuerySpec defines the parameters for an activity facet query.

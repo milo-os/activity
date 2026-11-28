@@ -12,7 +12,9 @@ import (
 )
 
 // NewAuditEnvironment creates a CEL environment for audit rule expressions.
-// Available variables: audit (map containing all audit fields), actor, actorRef, kind.
+// Available variables: audit (map containing all audit fields), actor, actorRef,
+// kind, and interface ({type, client}: how the change was made, as reported by
+// the client's user agent; unverified, see activitytypes.ClassifyInterface).
 // Access audit fields via the audit map: audit.verb, audit.objectRef, audit.user, etc.
 // If collector is non-nil, link() calls will capture link information.
 func NewAuditEnvironment(collector *linkCollector) (*cel.Env, error) {
@@ -30,6 +32,9 @@ func NewAuditEnvironment(collector *linkCollector) (*cel.Env, error) {
 
 		// Also expose "kind" for convenience (extracted from audit.objectRef)
 		cel.Variable("kind", cel.StringType),
+
+		// How the change was made: {type, client}. Client-reported, unverified.
+		cel.Variable("interface", cel.MapType(cel.StringType, cel.StringType)),
 
 		// link function declaration with implementation: link(displayText string, resourceRef map) -> string
 		// Returns the display text and optionally captures link info in the collector.
@@ -76,6 +81,8 @@ func NewEventEnvironment(collector *linkCollector) (*cel.Env, error) {
 		cel.Variable("actor", cel.StringType),
 		cel.Variable("actorRef", actorRefType),
 		cel.Variable("source", sourceType),
+		// How the change was made: always {type: "controller", client: <reporting controller>}.
+		cel.Variable("interface", cel.MapType(cel.StringType, cel.StringType)),
 
 		// link function declaration with implementation: link(displayText string, resourceRef map) -> string
 		// Returns the display text and optionally captures link info in the collector.
@@ -121,9 +128,10 @@ func BuildAuditVars(auditMap map[string]interface{}) map[string]interface{} {
 	}
 
 	vars := map[string]interface{}{
-		"audit":    auditWithDefaults,
-		"actor":    ExtractString(auditMap, "user", "username"),
-		"actorRef": BuildActorRef(auditMap),
+		"audit":     auditWithDefaults,
+		"actor":     ExtractString(auditMap, "user", "username"),
+		"actorRef":  BuildActorRef(auditMap),
+		"interface": buildInterfaceVar(ExtractString(auditMap, "user", "username"), ExtractString(auditMap, "userAgent")),
 	}
 
 	// Extract kind for top-level convenience (from audit.objectRef.resource)
@@ -143,10 +151,11 @@ func BuildAuditVars(auditMap map[string]interface{}) map[string]interface{} {
 // BuildEventVars creates the CEL variable map for event evaluation.
 func BuildEventVars(eventMap map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{
-		"event":    eventMap,
-		"actor":    ExtractEventActor(eventMap),
-		"actorRef": BuildEventActorRef(eventMap),
-		"source":   BuildEventSourceVars(eventMap),
+		"event":     eventMap,
+		"actor":     ExtractEventActor(eventMap),
+		"actorRef":  BuildEventActorRef(eventMap),
+		"source":    BuildEventSourceVars(eventMap),
+		"interface": buildInterfaceVar("system:"+ExtractEventActor(eventMap), ""),
 	}
 }
 
@@ -217,7 +226,7 @@ func BuildActorRef(auditMap map[string]interface{}) map[string]interface{} {
 
 	// Determine actor type based on username pattern
 	actorType := "user"
-	if strings.HasPrefix(username, "system:serviceaccount:") {
+	if strings.HasPrefix(username, "system:serviceaccount:") || activitytypes.IsMiloServiceAccount(username) {
 		actorType = "serviceaccount"
 	} else if strings.HasPrefix(username, "system:") {
 		actorType = "system"
@@ -227,6 +236,13 @@ func BuildActorRef(auditMap map[string]interface{}) map[string]interface{} {
 		"type": actorType,
 		"name": username,
 	}
+}
+
+// buildInterfaceVar builds the "interface" CEL variable, matching
+// ActivitySpec.Interface.
+func buildInterfaceVar(username, userAgent string) map[string]string {
+	typ, client := activitytypes.ClassifyInterface(username, userAgent)
+	return map[string]string{"type": typ, "client": client}
 }
 
 // ExtractEventActor extracts the actor name from a Kubernetes event.

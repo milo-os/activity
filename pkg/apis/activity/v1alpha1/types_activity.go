@@ -57,8 +57,10 @@ type ActivitySpec struct {
 	// Used to filter human actions from system reconciliation noise.
 	//
 	// Values:
-	//   - "human": User action via kubectl, API, or UI
-	//   - "system": Controller reconciliation, operator actions, scheduled jobs
+	//   - "human": A person's action via kubectl, datumctl, the API, or the
+	//     console, including Datum staff shown as "Datum Support"
+	//   - "system": Controller reconciliation, operator actions, scheduled jobs,
+	//     and Milo ServiceAccounts (automation such as CI or Terraform)
 	//
 	// +required
 	ChangeSource string `json:"changeSource"`
@@ -67,6 +69,16 @@ type ActivitySpec struct {
 	//
 	// +required
 	Actor ActivityActor `json:"actor"`
+
+	// Interface describes how the change was made: the console, a CLI, an MCP
+	// server, Terraform, a controller, or the API directly.
+	//
+	// It is derived from the request's user agent, which the client reports
+	// and nothing verifies. Treat it as a display hint only: never use it for
+	// authorization, auditing decisions or alerting.
+	//
+	// +optional
+	Interface *ActivityInterface `json:"interface,omitempty"`
 
 	// Resource identifies the Kubernetes resource that was affected.
 	//
@@ -116,24 +128,64 @@ type ActivitySpec struct {
 	Source *ActivitySource `json:"source,omitempty"`
 }
 
+// ActivityInterface describes how a change was made, as reported by the
+// client. It is not verified and must never be used for authorization or
+// alerting.
+type ActivityInterface struct {
+	// Type is the kind of interface the change came through.
+	// Values:
+	//   - "console": a web browser, i.e. the Datum console
+	//   - "cli": datumctl (including its plugins) or kubectl
+	//   - "mcp": one of Datum's MCP servers (datum-mcp, datum-<x>-mcp, compute-mcp)
+	//   - "terraform": Terraform or a Terraform provider
+	//   - "controller": a platform controller or Kubernetes component
+	//   - "api": any other client, including Milo ServiceAccounts
+	//   - "unknown": the client sent no user agent
+	//
+	// +required
+	Type string `json:"type"`
+
+	// Client is a short name for the client, when known: for example
+	// "datumctl", "kubectl", "datum-mcp", "terraform", "service-account",
+	// or a controller's service such as "compute". Lowercase, limited to
+	// [a-z0-9._/-] and at most 64 characters.
+	//
+	// +optional
+	Client string `json:"client,omitempty"`
+}
+
 // ActivityActor identifies who performed an action.
 type ActivityActor struct {
 	// Type indicates the actor category.
-	// Values: "user", "serviceaccount", "controller"
+	// Values:
+	//   - "user": a person
+	//   - "serviceaccount": a Milo ServiceAccount
+	//     ("<name>@<project>.identity.miloapis.com")
+	//   - "system": a "system:" identity, such as a platform controller or a
+	//     Kubernetes service account
+	//   - "controller": the controller that reported a Kubernetes event
+	//   - "staff": a Datum staff member acting in an organization they do not
+	//     belong to; shown only as "Datum Support"
 	//
 	// +required
 	Type string `json:"type"`
 
 	// Name is the display name for the actor.
 	// For users, this is typically the email address.
-	// For service accounts, this is the full name (e.g., "system:serviceaccount:default:my-sa").
+	// For Milo ServiceAccounts, this is the account's username
+	// ("<name>@<project>.identity.miloapis.com").
+	// For system identities, this is the username without its "system:" prefix
+	// (e.g., "serviceaccount:default:my-sa").
 	// For controllers, this is the controller name.
+	// For staff, this is always "Datum Support"; the staff member's identity,
+	// including their UID, is not recorded on the activity.
 	//
 	// +required
 	Name string `json:"name"`
 
 	// UID is the unique identifier for the actor.
-	// Stable across username changes.
+	// Stable across username changes. Empty for staff actors, so individual
+	// staff members cannot be told apart or tracked.
 	//
 	// +optional
 	UID string `json:"uid,omitempty"`
@@ -143,6 +195,27 @@ type ActivityActor struct {
 	//
 	// +optional
 	Email string `json:"email,omitempty"`
+
+	// DisplayName is the actor's human-readable name (e.g., "Smith Nelson").
+	// For user actors, populated at processing time from the iam User's
+	// spec.givenName and spec.familyName, sanitized and capped at 64
+	// characters. Empty if no User record is found, the User has no name set,
+	// or the actor is not a human user. These names are self-asserted; Name
+	// and Email remain the verified identity.
+	//
+	// UIs SHOULD prefer DisplayName for visible text and fall back to Name
+	// when DisplayName is empty.
+	//
+	// +optional
+	DisplayName string `json:"displayName,omitempty"`
+
+	// AvatarURL is the URL of the actor's avatar image.
+	// For user actors, populated at processing time from the iam User's
+	// status.avatarUrl when it is an https URL. Empty if no User record is
+	// found, the User has no usable avatar, or the actor is not a human user.
+	//
+	// +optional
+	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 
 // ActivitySource describes where the underlying event or activity originated.
@@ -218,6 +291,17 @@ type ActivityLink struct {
 	//
 	// +required
 	Resource ActivityResource `json:"resource"`
+
+	// DisplayName is the human-readable name of the linked entity, when one
+	// is available. Populated at processing time only for links whose
+	// resource is an iam User (apiGroup iam.miloapis.com, kind User), from the
+	// User's spec.givenName and spec.familyName, sanitized and capped at 64
+	// characters. The summary text itself is never rewritten: UIs SHOULD
+	// render DisplayName in place of this link's Marker and fall back to the
+	// Marker when DisplayName is empty.
+	//
+	// +optional
+	DisplayName string `json:"displayName,omitempty"`
 }
 
 // ActivityTenant identifies the scope for multi-tenant isolation.
